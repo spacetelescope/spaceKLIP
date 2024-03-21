@@ -317,7 +317,7 @@ def display_coron_image(filename,
         fig, ax = plt.subplots(figsize=(16, 9))
     else:
         fig = ax.figure  # Get the figure from the provided axes.
-    
+
     if not dq_only:
         im = ax.imshow(image, norm=norm)
         divider = make_axes_locatable(ax)
