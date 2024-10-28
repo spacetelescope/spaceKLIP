@@ -638,7 +638,8 @@ class AnalysisTools():
                 klip_args['subsections'] = self.database.red[key]['SUBSECTS'][j]
                 klip_args['numbasis'] = [int(nb) for nb in self.database.red[key]['KLMODES'][j].split(',')]
                 klip_args['algo'] = 'klip' #Currently not logged, may need changing in future. 
-                klip_args['maxnumbasis'] = np.max(klip_args['numbasis'])
+                _, _, maxnumbasis = get_pyklip_filepaths(self.database, key, return_maxbasis=True) # ensure maxnumbasis is same as for rawcon / klipsub reduction 
+                klip_args['maxnumbasis'] = maxnumbasis
                 inj_subdir = klip_args['mode'] + '_NANNU' + str(klip_args['annuli']) \
                             + '_NSUBS' + str(klip_args['subsections']) + '_' + key +'/'
                 klip_args['movement'] = 1 #Currently not logged, fix later. 
