@@ -676,6 +676,9 @@ class ImageTools():
                     data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
 
                     # Subtract the background per frame
+                    head, tail = os.path.split(fitsfile)
+                    log.info('  --> Background subtraction: ' + tail)
+
                     data -= bg_data
 
                     # Loop over integrations
