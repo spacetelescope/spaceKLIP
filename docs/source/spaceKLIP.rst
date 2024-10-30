@@ -49,14 +49,21 @@ spaceKLIP.database module
    :undoc-members:
    :show-inheritance:
 
-spaceKLIP.fnoise_clean module
------------------------------
+spaceKLIP.expjumpramp module
+----------------------------
+
+.. automodule:: spaceKLIP.expjumpramp
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+spaceKLIP.fnoise\_clean module
+------------------------------
 
 .. automodule:: spaceKLIP.fnoise_clean
    :members:
    :undoc-members:
    :show-inheritance:
-
 
 spaceKLIP.imagetools module
 ---------------------------
@@ -65,6 +72,23 @@ spaceKLIP.imagetools module
    :members:
    :undoc-members:
    :show-inheritance:
+
+spaceKLIP.logging\_tools module
+-------------------------------
+
+.. automodule:: spaceKLIP.logging_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+spaceKLIP.make\_psfmasks module
+-------------------------------
+
+.. automodule:: spaceKLIP.make_psfmasks
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 
 spaceKLIP.mast module
 ---------------------
@@ -114,10 +138,10 @@ spaceKLIP.utils module
    :undoc-members:
    :show-inheritance:
 
-Module contents
----------------
+spaceKLIP.wcs\_utils module
+---------------------------
 
-.. automodule:: spaceKLIP
+.. automodule:: spaceKLIP.wcs_utils
    :members:
    :undoc-members:
    :show-inheritance:

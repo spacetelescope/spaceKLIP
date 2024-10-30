@@ -85,6 +85,7 @@ source_suffix = '.rst'
 
 # The master toctree document.
 master_doc = 'index'
+automodapi_inherit_docstrings = True
 
 # General information about the project.
 project = u'spaceKLIP'
