@@ -65,6 +65,7 @@ templates_path = []#['./_templates']
 # mock imports for autodoc
 autodoc_mock_imports = ["webbpsf"]
 
+
 # nbsphinx settings
 nbsphinx_allow_errors = True
 nbsphinx_execute = 'never'
@@ -283,7 +284,7 @@ html_static_path = ['./_static']
 
 # If true, links to the reST sources are added to the pages.
 #
-# html_show_sourcelink = True
+html_show_sourcelink = True
 
 # If true, "Created using Sphinx" is shown in the HTML footer. Default is True.
 #

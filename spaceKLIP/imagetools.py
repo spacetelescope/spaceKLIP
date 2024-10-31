@@ -500,13 +500,16 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'medsub'.
+
         method : str, optional
-            'robust' for a robust median after masking out bright stars,
-            'sigma_clipped' for another version of robust median using astropy
-                sigma_clipped_stats on the whole image,
-            'border' for robust median on the outer border region only, to
-                ignore the bright stellar PSF in the center,
-            or 'simple'  for a simple np.nanmedian.
+
+            - 'robust' for a robust median after masking out bright stars,
+            - 'sigma_clipped' for another version of robust median using astropy
+               sigma_clipped_stats on the whole image,
+            - 'border' for robust median on the outer border region only, to
+              ignore the bright stellar PSF in the center,
+            - 'simple'  for a simple np.nanmedian.
+
         sigma : float, optional
             number of standard deviations to use for the clipping limit in
             sigma_clipped_stats, if the robust option is selected.
@@ -937,9 +940,9 @@ class ImageTools():
             Sequence of bad pixel cleaning methods to be run on the data. 
             Different methods must be joined by a '+' sign without
             whitespace. Available methods are:
-        
+
             - dqarr: uses DQ array to identify bad pixels
-            
+
             - sigclip: use sigma clipping to identify additional bad pixels.
 
             - custom: use a custom bad pixel map
@@ -951,7 +954,9 @@ class ImageTools():
             The default is True
         dqarr_kwargs : dict, optional
             Keyword arguments for the 'dqarr' identification method. Available keywords are:
-            
+
+            - No current options
+
             The default is {}.
         sigclip_kwargs : dict, optional
             Keyword arguments for the 'sigclip' identification methods. Available keywords are:
@@ -1056,17 +1061,17 @@ class ImageTools():
       
 
     def fix_bad_pixels(self,
-                   method='timemed+localmed+medfilt',
-                   sigclip_kwargs={},
-                   custom_kwargs={},
-                   timemed_kwargs={},
-                   localmed_kwargs={},
-                   medfilt_kwargs={},
-                   types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
-                   subdir='bpcleaned',
-                   restrict_to=None):
+                       method='timemed+localmed+medfilt',
+                       sigclip_kwargs={},
+                       custom_kwargs={},
+                       timemed_kwargs={},
+                       localmed_kwargs={},
+                       medfilt_kwargs={},
+                       types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
+                       subdir='bpcleaned',
+                       restrict_to=None):
         """
-        **** TO BE DEPRECATED BY FIND_BAD_PIXELS() AND CLEAN_BAD_PIXELS() ****
+        TO BE DEPRECATED BY FIND_BAD_PIXELS() AND CLEAN_BAD_PIXELS()
         Identify and fix bad pixels.
 
         Parameters
@@ -1578,6 +1583,7 @@ class ImageTools():
             
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
+
             The default is {}.
         
         Returns
@@ -2310,7 +2316,7 @@ class ImageTools():
         Function to inject synthetic PSFs into a set of frames loaded from a dataset, and save the new frames with the
         injected companion.
 
-        Parameters (some may need to be adjusted!)
+        Parameters
         ----------
         companions : list of list of three float, optional
             List of companions to be injected.

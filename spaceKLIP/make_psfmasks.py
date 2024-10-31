@@ -1,5 +1,4 @@
 from __future__ import division
-
 import matplotlib
 
 # =============================================================================
@@ -23,6 +22,11 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
+#### DEPRECATION WARNING ####
+log.warning('************* DEPRECATION WARNING *************')
+log.warning('****** "make_psfmasks.py" is deprecated! ******')
+log.warning('***** You likely do not need to run this! *****')
+log.warning('***********************************************')
 
 # =============================================================================
 # MAIN
