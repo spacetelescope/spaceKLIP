@@ -2545,7 +2545,9 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key,ww, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
 
-	def update_nircam_centers(self, force_siaf_center=False, force_db_center=False):
+    def update_nircam_centers(self,
+                              force_siaf_center=False, 
+                              force_db_center=False):
         """
         Checks SIAF PRD version against FITS header PRD version and updates
         CRPIX if SIAF version is newer. Also accounts for filter-dependent distortion.
