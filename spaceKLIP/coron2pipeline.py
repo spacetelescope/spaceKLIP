@@ -102,8 +102,13 @@ class Coron2Pipeline_spaceKLIP(Image2Pipeline):
             res = self.process_exposure_product(product, asn['asn_pool'], filebase)
             
             # Run outlier detection on CubeModel
-            if isinstance(res, datamodels.CubeModel):
-                res = self.outlier_detection.run(res)
+            try:
+                if isinstance(res, datamodels.CubeModel):
+                    res = self.outlier_detection.run(res)
+            except Exception as e:
+                log.warning('Error in outlier_detection step. Skipping outlier detection.')
+                log.error(e)
+                pass
             
             # Save results.
             suffix = 'calints' if isinstance(res, datamodels.CubeModel) else 'cal'
