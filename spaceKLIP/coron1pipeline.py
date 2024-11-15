@@ -67,7 +67,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         
         Parameters
         ----------
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 detector pipeline keyword arguments.
         
         Returns
@@ -248,7 +248,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         save_results : bool, optional
             Save the JWST pipeline step product? None will default to the JWST
             pipeline step default. The default is None.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST pipeline step keyword arguments.
         
         Returns
@@ -310,7 +310,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 saturation step keyword arguments.
         
         Returns
@@ -430,7 +430,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 refpix step keyword arguments.
         
         Returns
@@ -470,7 +470,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 refpix step keyword arguments.
         
         Returns
