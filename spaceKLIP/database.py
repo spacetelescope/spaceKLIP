@@ -113,8 +113,8 @@ class Database():
                             cr_from_siaf=False,
                             assoc_using_targname=True):
         """
-        Read JWST stage 0 (*uncal), 1 (*rate or *rateints), or 2 (*cal or
-        *calints) data into the Database.obs dictionary. It contains a table of
+        Read JWST stage 0 (\*uncal), 1 (\*rate or \*rateints), or 2 (\*cal or
+        \*calints) data into the Database.obs dictionary. It contains a table of
         metadata for each concatenation, which are identified automatically
         based on instrument, filter, pupil mask, and image mask. The tables can
         be edited by the user at any stage of the data reduction process and
@@ -593,7 +593,7 @@ class Database():
                           datapaths,
                           cr_from_siaf=False):
         """
-        Read JWST stage 3 data (this can be *i2d data from the official JWST
+        Read JWST stage 3 data (this can be \*i2d data from the official JWST
         pipeline, or data products from the pyKLIP and classical PSF
         subtraction pipelines implemented in spaceKLIP) into the Database.red
         dictionary. It contains a table of metadata for each concatenation,

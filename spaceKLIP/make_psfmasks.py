@@ -1,5 +1,4 @@
 from __future__ import division
-
 import matplotlib
 
 # =============================================================================
@@ -23,6 +22,11 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
+#### DEPRECATION WARNING ####
+log.warning('************* DEPRECATION WARNING *************')
+log.warning('****** "make_psfmasks.py" is deprecated! ******')
+log.warning('***** You likely do not need to run this! *****')
+log.warning('***********************************************')
 
 # =============================================================================
 # MAIN
@@ -67,22 +71,23 @@ for apername in crpix_jarron.keys():
             fitsfile = 'jwst_nircam_psfmask_0027.fits'
             xcen, ycen = 160.5, 160.5
             cval = 0.99088
-        
+
         # Get true mask center from Jarron.
         crpix1_jarron, crpix2_jarron = crpix_jarron[apername]
         print(apername, crpix1_jarron, crpix2_jarron)
-        
+
         # Get filter shift from Jarron.
         xshift_jarron, yshift_jarron = filter_shifts_jarron[filt]
-        
+
         # Compute required shift.
         crpix1, crpix2 = crpix1_jarron + xshift_jarron, crpix2_jarron + yshift_jarron
         xoff, yoff = crpix1 - xcen, crpix2 - ycen
-        
+
         # Read PSF mask.
-        hdul = pyfits.open('resources/transmissions/' + fitsfile)
+        maskpath = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'resources/transmissions/' + fitsfile)
+        hdul = pyfits.open(maskpath)
         psfmask = hdul['SCI'].data
-        
+
         # Shift the coronagraphic mask separately with a higher interpolation
         # order.
         xr = np.arange(psfmask.shape[1]) - (xcen - 1.)
@@ -92,10 +97,10 @@ for apername in crpix_jarron.keys():
         mask = psfmask.copy()
         mask[rr > 100.] = 0.99088
         mask = shift(mask, (yoff, xoff), order=3, mode='constant', cval=0.99088)
-        
+
         # Shift PSF mask.
         psfmask = shift(psfmask, (yoff, xoff), order=0, mode='constant', cval=cval)
-        
+
         # Insert the separately shifted coronagraphic mask into the full PSF
         # mask.
         xr = np.arange(psfmask.shape[1]) - (crpix1 - 1.)
@@ -103,10 +108,11 @@ for apername in crpix_jarron.keys():
         xx, yy = np.meshgrid(xr, yr)
         rr = np.sqrt(xx**2 + yy**2)
         psfmask[rr < 100.] = mask[rr < 100.]
-        
+
         # Write PSF mask.
         hdul['SCI'].data = psfmask
         outfile = 'resources/transmissions/' + apername + '_' + filt + '.fits'
+        outfile = os.path.join(os.path.split(os.path.abspath(__file__))[0], outfile)
         print(f"Wrote to {outfile}")
         hdul.writeto(outfile, output_verify='fix', overwrite=True)
 
@@ -114,13 +120,14 @@ fitsfiles = ['JWST_MIRI_F1065C_transmission_webbpsf-ext_v2.fits',
              'JWST_MIRI_F1140C_transmission_webbpsf-ext_v2.fits',
              'JWST_MIRI_F1550C_transmission_webbpsf-ext_v2.fits']
 for fitsfile in fitsfiles:
-    hdul = pyfits.open('resources/transmissions/' + fitsfile)
+    thisfile = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'resources/transmissions/' + fitsfile)
+    hdul = pyfits.open(thisfile)
     psfmask = hdul[0].data
     psfmask[psfmask < 0.05] = np.nan
     hdu = pyfits.ImageHDU(psfmask)
     hdu.header['EXTNAME'] = 'SCI'
     hdul.append(hdu)
-    hdul.writeto('resources/transmissions/' + fitsfile, output_verify='fix', overwrite=True)
+    hdul.writeto(thisfile, output_verify='fix', overwrite=True)
     print(f"Wrote to resources/transmissions/{fitsfile}")
 
 
@@ -185,7 +192,8 @@ for filt in offset_swb:
     xoff, yoff = crpix1 - xcen - offset_swb[filt] / pxsc, crpix2 - ycen
     
     # Read PSF mask.
-    hdul = pyfits.open('resources/transmissions/' + fitsfile)
+    thisfile = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'resources/transmissions/' + fitsfile)
+    hdul = pyfits.open(thisfile)
     psfmask = hdul['SCI'].data
     
     # Shift the coronagraphic mask separately with a higher interpolation
@@ -199,6 +207,7 @@ for filt in offset_swb:
     # Write PSF mask.
     hdul['SCI'].data = psfmask
     outfile = 'resources/transmissions/' + apername + '_' + filt.upper() + '.fits'
+    outfile = os.path.join(os.path.split(os.path.abspath(__file__))[0], outfile)
     hdul.writeto(outfile, output_verify='fix', overwrite=True)
     print(f"Wrote to {outfile}")
 
@@ -217,7 +226,8 @@ for filt in offset_lwb:
     xoff, yoff = crpix1 - xcen - offset_lwb[filt] / pxsc, crpix2 - ycen
     
     # Read PSF mask.
-    hdul = pyfits.open('resources/transmissions/' + fitsfile)
+    thisfile = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'resources/transmissions/' + fitsfile)
+    hdul = pyfits.open(thisfile)
     psfmask = hdul['SCI'].data
     psfmask[:, -1] = 1
     
@@ -231,4 +241,6 @@ for filt in offset_lwb:
     
     # Write PSF mask.
     hdul['SCI'].data = psfmask
-    hdul.writeto('resources/transmissions/' + apername + '_' + filt.upper() + '.fits', output_verify='fix', overwrite=True)
+    outfile = 'resources/transmissions/' + apername + '_' + filt.upper() + '.fits'
+    outfile = os.path.join(os.path.split(os.path.abspath(__file__))[0], outfile)
+    hdul.writeto(outfile, output_verify='fix', overwrite=True)
