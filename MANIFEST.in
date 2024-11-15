@@ -1,1 +1,2 @@
-recursive-include spaceKLIP/resources *
+include README.rst
+include logo.png

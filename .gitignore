@@ -6,6 +6,9 @@ __pycache__/
 # Transmission mask files
 spaceKLIP/resources/transmissions/NRC*
 
+# Background files
+spaceKLIP/resources/nircam_bg_models/*
+
 # C extensions
 *.so
 
