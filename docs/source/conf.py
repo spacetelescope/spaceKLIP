@@ -63,7 +63,7 @@ extensions = [
 templates_path = []#['./_templates']
 
 # mock imports for autodoc
-autodoc_mock_imports = ["webbpsf", "webbpsf-ext"]
+autodoc_mock_imports = ["webbpsf", "webbpsf_ext"]
 
 
 # nbsphinx settings
