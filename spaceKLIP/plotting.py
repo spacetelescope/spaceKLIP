@@ -27,6 +27,14 @@ import astropy.visualization as v
 from . import wcs_utils
 import jwst.datamodels
 
+import shutil
+import tempfile
+import ipywidgets as widgets
+import matplotlib.patches as patches
+from matplotlib.backends.backend_pdf import PdfPages
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
+
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -45,9 +53,18 @@ def load_plt_style(style='spaceKLIP.sk_style'):
     """
     plt.style.use(style)
 
-def annotate_compass(ax, image, wcs, xf=0.9, yf=0.1, length_fraction=0.07, color='white', fontsize=12, ):
+def annotate_compass(ax,
+                     image,
+                     wcs,
+                     xf=0.9,
+                     yf=0.1,
+                     length_fraction=0.07,
+                     color='white',
+                     bbox_color='#4B0082',
+                     fontsize=12):
     """
-    Plot a compass annotation onto an image, to indicate North and East
+    Plot a compass annotation onto an image, indicating the directions of North and East.
+
     Makes use of the methods from jdaviz, but positions the compass differently:
     jdaviz defaults to putting it in the center, and filling most of the image.
     Here we want to make a small compass in the corner.
@@ -55,109 +72,130 @@ def annotate_compass(ax, image, wcs, xf=0.9, yf=0.1, length_fraction=0.07, color
     Parameters
     ----------
     ax : matplotlib.Axes
-        axis to draw into
+        The axis on which to draw the compass annotation.
     image : ndarray
-        2D image to be annotated (used just to get the image dimensions)
+        A 2D image to be annotated (used just to get the image dimensions).
     wcs : astropy.wcs.WCS
-        World Coordinate System information
-    xf, yf : floats
-        X and Y fractions of the image, to specify the location where the compass should be displayed.
-        Values should be between 0 and 1.
-    length_fraction : float
+        World Coordinate System (WCS) information.
+    xf, yf : float, optional
+        The horizontal (xf) and vertical (yf) positions of the compass as fractions of the image width and height, respectively.
+        Values should be between 0 and 1, where 0 places the compass at the left or bottom edge,
+        and 1 places it at the right or top edge. Default is (0.9, 0.1), placing the compass near the bottom-right corner.
+    length_fraction : float, optional
         Length of the compass, as a fraction of the size of the entire image
-    color : str
-        Color
-    fontsize : float
-        Font size
-    
+    color : str, optional
+        The color of the compass arrows and labels. Default is 'white'.
+    bbox_color : str, optional
+        The background color for the text labels ('N' and 'E'). Default is '#4B0082'.
+        If set to None, no background box will be drawn.
+    fontsize : int, optional
+        The font size for the compass labels. Default is 12.
+
     Returns
     -------
     None.
-    
     """
     
-    # Use wcs_utils from jdaviz to compute arrow positions
+    # Use wcs_utils from jdaviz to compute arrow positions.
     x, y, xn, yn, xe, ye, degn, dege, xflip = wcs_utils.get_compass_info(wcs, image.shape, r_fac=length_fraction)
-    
-    # but then apply offsets to recenter the
+
+    # Calculate the offsets needed to reposition the compass to the desired location.
+    # `xo` and `yo` are the offsets in the x and y directions, respectively.
     xo = image.shape[1] * xf - x
     yo = image.shape[0] * yf - y
-    x += xo
-    xn += xo
-    xe += xo
-    y += yo
-    yn += yo
-    ye += yo
-    
-    # plot like in jdaviz:
-    ax.plot(x, y, marker='o', color=color, markersize=4)
-    ax.annotate('N', xy=(x, y), xytext=(xn, yn),
-                arrowprops={'arrowstyle': '<-', 'color': color, 'lw': 1.5},
-                color=color, fontsize=fontsize, va='center', ha='center')
-    ax.annotate('E', xy=(x, y), xytext=(xe, ye),
-                arrowprops={'arrowstyle': '<-', 'color': color, 'lw': 1.5},
-                color=color, fontsize=fontsize, va='center', ha='center')
+    x, xn, xe = [coord + xo for coord in (x, xn, xe)]  # Adjust x-coordinates.
+    y, yn, ye = [coord + yo for coord in (y, yn, ye)]  # Adjust y-coordinates.
 
-def annotate_scale_bar(ax, image, wcs, length=1 * u.arcsec, xf=0.1, yf=0.1, color='white', lw=3, fontsize=10):
+    # Plot the compass base point on the axis as a small circle.
+    ax.plot(x, y, marker='o', color=color, markersize=4)
+
+    # Annotate the North ('N') and East ('E') directions on the image.
+    # Use arrows to point from the base of the compass to the respective endpoints.
+    for label, (x_end, y_end) in zip(['N', 'E'], [(xn, yn), (xe, ye)]):
+        bbox = dict(facecolor=bbox_color, alpha=0.5, edgecolor='none') if bbox_color else None
+        ax.annotate(label, xy=(x, y), xytext=(x_end, y_end),
+                    arrowprops={'arrowstyle': '<-', 'color': color, 'lw': 1.5},
+                    bbox=bbox,  # Semi-transparent background for text.
+                    color=color, fontsize=fontsize, va='center', ha='center')
+    
+def annotate_scale_bar(ax,
+                       image,
+                       wcs,
+                       length=1 * u.arcsec,
+                       xf=0.1,
+                       yf=0.1,
+                       color='white',
+                       bbox_color='#4B0082',
+                       lw=3,
+                       fontsize=10):
     """
     Plot a scale bar on an image.
-    
+
     Parameters
     ----------
     ax : matplotlib.Axes
-        axis to draw into
+        The axis on which to draw the scale bar.
     image : ndarray
-        2D image to be annotated (used just to get the image dimensions)
+        The 2D image to be annotated (used just to get the image dimensions).
     wcs : astropy.wcs.WCS
-        World Coordinate System information
-    length : astropy.Quantity
+        World Coordinate System (WCS) information.
+    length : astropy.Quantity, optional
         Length of the scale bar, in arcsec or equivalent unit
-    xf, yf : floats
-        X and Y fractions of the image, to specify the location where the compass should be displayed.
-        Values should be between 0 and 1.
-    color : str
-        Color
-    fontsize : float
-        Font size
-    lw : float
-        line width
-    
+    xf, yf : float, optional
+        The horizontal (xf) and vertical (yf) positions of the compass as fractions of the image width and height, respectively.
+        Values should be between 0 and 1, where 0 places the compass at the left or bottom edge,
+        and 1 places it at the right or top edge. Default is (0.9, 0.1), placing the compass near the bottom-right corner.
+    color : str, optional
+        The color of the scale bar and the text label. Default is 'white'.
+    bbox_color : str, optional
+        The background color for the text label. Default is '#4B0082'.
+        If set to None, no background box will be drawn.
+    lw : float, optional
+        The line width of the scale bar. Default is 3.
+    fontsize : int, optional
+        The font size of the text label displaying the scale bar length. Default is 10.
+
     Returns
     -------
     None.
-    
     """
-    
+
+    # Calculate the pixel scale in arcseconds per pixel.
     pixelscale = astropy.wcs.utils.proj_plane_pixel_scales(wcs).mean() * u.deg
     sb_length = (length / pixelscale).decompose()
     
+    # Calculate the position of the scale bar based on image dimensions.
     xo = image.shape[1] * xf
     yo = image.shape[0] * yf
-    
-    ax.plot([xo, xo + sb_length], [yo, yo], color=color, lw=lw)
-    ax.text(xo + sb_length / 2, yo + 0.02 * image.shape[0], length, color=color,
-            horizontalalignment='center', fontsize=fontsize)
 
-def annotate_secondary_axes_arcsec(ax, image, wcs):
+    # Draw the scale bar on the image.
+    ax.plot([xo, xo + sb_length], [yo, yo], color=color, lw=lw)
+    bbox = dict(facecolor=bbox_color, alpha=0.3, edgecolor='none') if bbox_color else None
+    ax.text(xo + sb_length / 2, yo + 0.02 * image.shape[0], length, color=color,
+            bbox=bbox, horizontalalignment='center', fontsize=fontsize)
+    
+    
+def annotate_secondary_axes_arcsec(ax,
+                                   image,
+                                   wcs):
     """
     Update an image display to add secondary axes labels in an arcsec.
     
     Parameters
     ----------
     ax : matplotlib.Axes
-        axis to draw into
+        The axis on which to add secondary axes labels.
     image : ndarray
-        2D image to be annotated (used just to get the image dimensions)
+        The 2D image to be annotated (used just to get the image dimensions).
     wcs : astropy.wcs.WCS
-        World Coordinate System information
+        World Coordinate System (WCS) information.
     
     Returns
     -------
     None.
-    
     """
     
-    # define the forward and inverse transforms needed for secondary_axes.
+    # Define the forward and inverse transforms needed for secondary_axes.
     # see https://matplotlib.org/3.1.0/gallery/subplots_axes_and_figures/secondary_axis.html
     
     pixelscale = astropy.wcs.utils.proj_plane_pixel_scales(wcs)
@@ -170,68 +208,88 @@ def annotate_secondary_axes_arcsec(ax, image, wcs):
     secax.set_xlabel('Offset [arcsec]', fontsize='small')
     secay = ax.secondary_yaxis('right', functions=(pix2as_y, as2pix_y))
     secay.set_ylabel('Offset [arcsec]', fontsize='small')
-    secax.tick_params(labelsize='small')
-    secay.tick_params(labelsize='small')
+    secax.tick_params(labelsize='small', color='white', which='both')
+    secay.tick_params(labelsize='small', color='white', which='both')
+
 
 @plt.style.context('spaceKLIP.sk_style')
-def display_coron_image(filename):
+def display_coron_image(filename,
+                        vmin=None,
+                        vmax=None,
+                        stretch=0.0001,
+                        bbox_color='#4B0082',
+                        dq_only=False,
+                        zoom_center=3,
+                        ax=None):
     """
     Display and annotate a coronagraphic image.
     
     Shows image on asinh scale along with some basic metadata, scale bar, and compass.
+    Optionally, a zoomed inset around the image center can be displayed.
 
     This display function is designed to flexibly adapt to several different kinds of input data,
     including rate, rateints, cal, calints files. And pyKLIP's KLmode cubes.
-    
+
     Parameters
     ----------
     filename : str
-        Filename
-    
+        The path to the file containing the image data.
+    vmin, vmax : float, optional
+        The minimum/maximum data value to use for scaling the image. If None, determined automatically.
+    stretch : float, optional
+        The stretch factor for the asinh normalization. If None, defaults to 0.0001.
+    bbox_color : str, optional
+        The background color for the text label. Default is '#4B0082'.
+        If set to None, no background box will be drawn.
+    dq_only : bool, optional
+        If True, only the DO_NOT_USE DQ flags are displayed, not the image data itself.
+    zoom_center : int, optional
+        The zoom factor for the inset axis centered on the image's center. Set to None to disable.
+
     Returns
     -------
     None.
-    
     """
-    
-    is_pyklip = False
-    if ('uncal' in filename):
-        raise RuntimeError("Display code does not support showing stage 0 uncal files. Reduce the data further before trying to display it.")
-    elif 'KLmodes' in filename:
-        # PyKLIP output, we have to open this differently, can't use JWST datamodels
-        is_pyklip = True
-        cube_ints = False
-        cube_klmodes = True
-
-    elif ('rateints' in filename) or ('calints' in filename):
-        modeltype = jwst.datamodels.CubeModel
-        cube_ints = True
-        cube_klmodes = False
-    else:
-        modeltype = jwst.datamodels.ImageModel
-        cube_ints = False
-        cube_klmodes = False
-
-
-    if not is_pyklip:
-        # Load in JWST pipeline outputs using jwst.datamodel
-
-        model = modeltype(filename)  # cubemodel needed for rateints
         
-        if cube_ints:
-            image = np.nanmean(model.data, axis=0)
-            dq = model.dq[0]
-            nints = model.meta.exposure.nints
-        else:
-            image = model.data
-            dq = model.dq
+    # Early exit for unsupported file types.
+    if 'uncal' in filename:
+        raise RuntimeError("Display code does not support stage 0 uncal files. Reduce the data further before trying to display it.")
+
+    # Determine the input file type and set corresponding flags.
+    is_pyklip = 'KLmodes' in filename
+    cube_ints = 'rateints' in filename or 'calints' in filename
+
+    if is_pyklip:
+        # Handle pyKLIP output.
+        # PyKLIP output, we have to open this differently, can't use JWST datamodels.
+        image = fits.getdata(filename)
+        header = fits.getheader(filename)
+        center_x, center_y = header['CRPIX1'], header['CRPIX2']
+        bunit = header['BUNIT']
+        wcs = astropy.wcs.WCS(header)
+        if image.ndim == 3:
+            image = image[-1]  # Select the last KL mode.
+            wcs = wcs.dropaxis(2)  # Drop the nints axis.
+        annotation_text = f"pyKLIP results for {header['TARGPROP']}\n{header['FILTER']}"
+        is_psf = False
+    else:
+        # Handle JWST pipeline outputs.
+        # Load in JWST pipeline outputs using jwst.datamodel.
+        modeltype = jwst.datamodels.CubeModel if cube_ints else jwst.datamodels.ImageModel
+        model = modeltype(filename)
+        image = np.nanmean(model.data, axis=0) if cube_ints else model.data
+        dq = model.dq[0] if cube_ints else model.dq
+        nints = model.meta.exposure.nints if cube_ints else None
+        center_x, center_y = model.meta.wcsinfo.crpix1, model.meta.wcsinfo.crpix2
         bunit = model.meta.bunit_data
         is_psf = model.meta.exposure.psf_reference
-
-        annotation_text = f"{model.meta.target.proposer_name}\n{model.meta.instrument.filter}, {model.meta.exposure.readpatt}:{model.meta.exposure.ngroups}:{model.meta.exposure.nints}\n{model.meta.exposure.effective_exposure_time:.2f} s"
-
+        annotation_text = (
+            f"{model.meta.target.proposer_name}\n"
+            f"{model.meta.instrument.filter}, {model.meta.exposure.readpatt}:"
+            f"{model.meta.exposure.ngroups}:{model.meta.exposure.nints}\n"
+            f"{model.meta.exposure.effective_exposure_time:.2f} s"
+        )
         try:
-            wcs = model.meta.wcs
             # I don't know how to deal with the slightly different API of the GWCS class
             # so, this is crude, just cast it to a regular WCS and drop the high order distortion stuff
             # This suffices for our purposes in plotting compass annotations etc.
@@ -240,153 +298,336 @@ def display_coron_image(filename):
         except:
             wcs = model.get_fits_wcs()
             if cube_ints:
-                wcs = wcs.dropaxis(2)  # drop the nints axis
+                wcs = wcs.dropaxis(2)
 
-    else:
-        # pyklip outputs aren't compatible with jwst.datamodel
-        # so just load these via astropy.io.fits
-
-        image = fits.getdata(filename)
-        header= fits.getheader(filename)
-        bunit = header['BUNIT']
-        is_psf = False
-        wcs = astropy.wcs.WCS(header)
-        if len(image.shape)==3:
-            image = image[-1] # select the last KL mode
-            wcs = wcs.dropaxis(2)  # drop the nints axis
-        annotation_text = f"pyKLIP results for {header['TARGPROP']}\n{header['FILTER']}\n"
-
-    
+    # Create a bad pixel mask.
+    # Does this file have DQ extension or not? PyKLIP outputs do not.
     bpmask = np.zeros_like(image) + np.nan
-    # does this file have DQ extension or not? PyKLIP outputs do not
-    if is_pyklip:
-        bpmask[np.isnan(image)] = 1
-    else:
-        bpmask[(model.dq[0] & 1) == True] = 1
-        
-    
-    # Set up image stretch
-    #  including reasonable min/max for asinh stretch
+    bpmask[np.isnan(image) | ((dq & 1) == 1) if not is_pyklip else np.isnan(image)] = 1
+
+    # Set up the asinh normalization for image display.
     stats = astropy.stats.sigma_clipped_stats(image)
-    low = stats[0] - stats[2]  # 1 sigma below image mean.
-    high = np.nanmax(image)
+    vmin = vmin if vmin is not None else stats[0] - stats[2]  # 1 sigma below mean.
+    vmax = vmax if vmax is not None else np.nanmax(image)  # Max value in image.
+    stretch = v.AsinhStretch(a=stretch)
+    norm = v.ImageNormalize(image, interval=v.ManualInterval(vmin, vmax), stretch=stretch)
+
+    # Create the figure and axis or use provided.
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(16, 9))
+    else:
+        fig = ax.figure  # Get the figure from the provided axes.
     
-    interval = v.ManualInterval(low, high)
-    stretch = v.AsinhStretch(a=.0001)
-    
-    norm = v.ImageNormalize(image,
-                            interval=interval,
-                            stretch=stretch)
-    
-    # Display image. Overplot DQ
-    fig, ax = plt.subplots(figsize=(16, 9))
-    im = ax.imshow(image, norm=norm)
-    
+    if not dq_only:
+        im = ax.imshow(image, norm=norm)
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.95)
+        cb = fig.colorbar(im, ax=ax, cax=cax, label=bunit)
+        cb.ax.set_yscale('asinh')
+        cb.ax.tick_params(labelsize='small')
+
+
+    # Display the bad pixel mask (DO_NOT_USE flags).
+    ax.set_facecolor('#4B0082')
     imdq = ax.imshow(bpmask, vmin=0, vmax=1.5, cmap=matplotlib.cm.inferno)
-    
-    # Colorbar
-    cb = fig.colorbar(im, pad=0.1, aspect=30, label=bunit)
-    cb.ax.set_yscale('asinh')
-    
-    # Annotations
-    ax.text(0.01, 0.99, annotation_text,
+
+    # Add image annotations.
+    bbox=dict(facecolor=bbox_color, alpha=0.5, edgecolor='none') if bbox_color else None
+    ax.text(0.01, 0.99, annotation_text, bbox=bbox,
             transform=ax.transAxes, color='white', verticalalignment='top', fontsize=10)
-    ax.set_title(os.path.basename(filename) + "\n", fontsize=14)
-    
+    ax.set_title(f"{os.path.basename(filename)}\n", fontsize=14)
     ax.set_xlabel("Pixels", fontsize='small')
     ax.set_ylabel("Pixels", fontsize='small')
-    ax.tick_params(labelsize='small')
+    ax.tick_params(labelsize='small', color='white', which='both')
 
-    if is_psf:
-        labelstr = 'PSF Reference'
-    elif is_pyklip:
-        labelstr = "Science target after pyKLIP PSF sub."
-    else:
-        labelstr = 'Science target'
-
-    ax.text(0.5, 0.99, labelstr,
+    labelstr = 'PSF Reference' if is_psf else 'Science target after pyKLIP PSF sub.' if is_pyklip else 'Science target'
+    ax.text(0.5, 0.99, labelstr, bbox=bbox,
             style='italic', fontsize=10, color='white',
             horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
     if cube_ints:
         ax.text(0.99, 0.99, f"Showing average of {nints} ints",
-                style='italic', fontsize=10, color='white',
+                style='italic', fontsize=10, color='white', bbox=bbox,
                 horizontalalignment='right', verticalalignment='top', transform=ax.transAxes)
-    
-    annotate_compass(ax, image, wcs, yf=0.07)
-    annotate_scale_bar(ax, image, wcs, yf=0.07)
-    
-    # Clear the existing tick marks on the secondary axes before adding new ones
+
+    # Annotate compass, scale bar, and secondary axes.
+    annotate_compass(ax, image, wcs, yf=0.07, bbox_color=bbox_color)
+    annotate_scale_bar(ax, image, wcs, yf=0.07, bbox_color=bbox_color)
+
+    # Annotate secondary axes in arcseconds relative to coronagraph mask center.
     ax.xaxis.set_tick_params(which='both', bottom=True, top=False)
     ax.yaxis.set_tick_params(which='both', left=True, right=False)
-    
-    # Annotate secondary axes in arcsec relative to coron mask center (really, relative to V2/V3Ref)
     annotate_secondary_axes_arcsec(ax, image, wcs)
-    
-    # TODO:
-    #   add second panel with zoom in on center
+
+    if zoom_center:
+        # Add a zoomed-in inset of the center.
+        zoom_ax = zoomed_inset_axes(ax, zoom=zoom_center/2, loc=2, bbox_to_anchor=[-0.65, 0.91, 0.1, 0.1], bbox_transform=ax.transAxes)
+        zoom_ax.imshow(image, norm=norm)
+        zoom_ax.imshow(bpmask, vmin=0, vmax=1.5, cmap=matplotlib.cm.inferno)
+        zoom_size = min(center_x, center_y) // zoom_center
+        zoom_ax.set_xlim(center_x - zoom_size, center_x + zoom_size)
+        zoom_ax.set_ylim(center_y - zoom_size, center_y + zoom_size)
+        zoom_ax.tick_params(labelsize='small', color='white', which='both')
+        zoom_ax.set_xlabel("Pixels", fontsize='small')
+        zoom_ax.set_ylabel("Pixels", fontsize='small')
+
+        # Annotate secondary axes in the zoomed image.
+        zoom_ax.xaxis.set_tick_params(which='both', bottom=True, top=False)
+        zoom_ax.yaxis.set_tick_params(which='both', left=True, right=False)
+        annotate_secondary_axes_arcsec(zoom_ax, image, wcs)
+        mark_inset(ax, zoom_ax, loc1=3, loc2=1, fc="none", ec="0.6", alpha=0.5)
+
+        fig.tight_layout(rect=[0.3, 0, 1, 1])
+    fig.show()
+    return ax
 
 @plt.style.context('spaceKLIP.sk_style')
-def display_coron_dataset(database, restrict_to=None, save_filename=None, stage3=None):
+def display_coron_dataset(database,
+                          restrict_to=None,
+                          save_filename=None,
+                          stage3=None,
+                          vmin=None,
+                          vmax=None,
+                          stretch=0.0001,
+                          zoom_center=3,
+                          dq_only=False,
+                          interactive=False,
+                          bbox_color='#4B0082'):
     """
     Display multiple files in a coronagraphic dataset.
-
-    # TODO potentially provide other ways of filtering the data, e.g. to show
-    only the PSF stars or only references, etc.
 
     Parameters
     ----------
     database : spaceklip.Database
-        database of files to plot
-    restrict_to : str, optional
-        Optional query string to only display some data. Only datasets whose
-        database concatenation (file group) name includes this string will be shown.
-        Most simply, set this to a filter name to only plot images with that filter.
+        Database of files to plot.
+    restrict_to : str or dict, optional
+        Optional query to filter and display specific data.
+        - `None`: No filtering; all tables are processed.
+        - `str`: Only datasets whose database concatenation (file group) name includes this string will be shown. Most simply, set this to a filter name to only plot images with that filter.
+        - `dict`: Filters tables based on database column values, where keys are column names and values are filter criteria.
+    stage3 : str, optional
+        Specify if data is stage 3.
     save_filename : str
         If provided, the plots will be saved to a PDF file with this name.
+    vmin, vmax : float, optional
+        The minimum/maximum data value to use for scaling the image. If None, determined automatically.
+    stretch : float, optional
+        The stretch factor for the asinh normalization. If None, defaults to 0.0001.
+    zoom_center : int, optional
+        The zoom factor for the inset axis centered on the image's center. Set to None to disable.
+    dq_only : bool, optional
+        If True, only the DO_NOT_USE DQ flags are displayed, not the image data itself.
+    interactive : bool, optional
+        If `True`, the plots will be displayed interactively.
+    bbox_color : str, optional
+        The background color for the text label. Default is '#4B0082'.
+        If set to None, no background box will be drawn.
+    Returns
+    -------
+    None.
+    """
+    # Initialize PDF saving if a filename is provided.
+    pdf = PdfPages(save_filename) if save_filename else None
+
+    # Infer stage3 based on db contents.
+    if stage3 is None:
+        stage3 = hasattr(database, 'red') and len(database.red) > 0
+
+    # Select the appropriate dataset and file types.
+    dataset = database.red if stage3 else database.obs
+    types = ['PYKLIP', 'STAGE3'] if stage3 else ['SCI', 'REF']
+
+    # Filter files based on the 'restrict_to' criteria provided.
+    filtered_files = []
+    for key, table in dataset.items():
+        if isinstance(restrict_to, dict):
+            for col, val in restrict_to.items():
+                if col not in table.colnames:
+                    print(f"Warning: Column '{col}' not found in the observation table for key '{key}'. Skipping over this filtering criteria.")
+                    continue  # Skip the current filter if the column doesn't exist.
+
+                vals = val if isinstance(val, list) else [val]
+                table = table[[str(cell) in map(str, vals) for cell in table[col]]]
+        elif isinstance(restrict_to, str) and restrict_to not in key:
+            continue  # Skip this key if it doesn't match the 'restrict_to' string.
+
+        filtered_files += [row['FITSFILE'] for row in table if row['TYPE'] in types]
+
+        # Loop through each file that matches the specified types.
+        for fn in filtered_files:
+            display_coron_image(fn, vmin=vmin, vmax=vmax, stretch=stretch, zoom_center=zoom_center)
+            if pdf:
+                pdf.savefig(plt.gcf())
+            if interactive:
+                plt.close()  # Close the figure to avoid displaying it.
+
+    # Optional: interactively slide through the files in the database.
+    if interactive:
+        slider = widgets.IntSlider(value=0, min=0, max=len(filtered_files) - 1, step=1, description='Image  Index:')
+        def update_image(index):
+            #plt.clf()
+            display_coron_image(filtered_files[index], vmin=vmin, vmax=vmax, stretch=stretch,
+                                zoom_center=zoom_center, dq_only=dq_only, bbox_color=bbox_color)
+            plt.show()
+        out = widgets.interactive_output(update_image, {'index': slider})
+        display(slider, out)
+    
+    if pdf:
+        pdf.close()
+
+        
+@plt.style.context('spaceKLIP.sk_style')
+def display_image_comparisons(database,
+                              base_dirs,
+                              restrict_to=None,
+                              save_filename=None,
+                              vmin=None,
+                              vmax=None,
+                              stretch=0.0001,
+                              zoom_center=None,
+                              interactive=False,
+                              dq_only=False,
+                              subtract_first=False):
+    """
+    Compare images before and after processing.
+    
+    Parameters
+    ----------
+    database : spaceklip.Database
+        Database of files to plot.
+    base_dirs : list of str
+        List of base directory names.
+    restrict_to : str or dict, optional
+        Optional query to filter and display specific data.
+        - `None`: No filtering; all tables are processed.
+        - `str`: Only datasets whose database concatenation (file group) name includes this string will be shown.
+                 Most simply, set this to a filter name to only plot images with that filter.
+        - `dict`: Filters tables based on database column values, where keys are column names and values are filter criteria.
+    save_filename : str
+        If provided, the plots will be saved to a PDF file with this name.
+    vmin, vmax : float, optional
+        The minimum/maximum data value to use for scaling the image. If None, determined automatically.
+    stretch : float, optional
+        The stretch factor for the asinh normalization. If None, defaults to 0.0001.
+    zoom_center : int, optional
+        The zoom factor for the inset axis centered on the image's center. Set to None to disable.
+    dq_only : bool, optional
+        If True, only the DO_NOT_USE DQ flags are displayed, not the image data itself.
+    subtract_first : bool
+        Whether to subtract the first SCI frame from subsequent frames.
+    interactive : bool, optional
+        If `True`, the plots will be displayed interactively.
     
     Returns
     -------
     None.
-
     """
     
-    if save_filename:
-        from matplotlib.backends.backend_pdf import PdfPages
-        pdf = PdfPages(save_filename)
+    # Initialize PDF saving if a filename is provided.
+    pdf = PdfPages(save_filename) if save_filename else None
 
-    if stage3 is None:
-        # infer based on db contents whether we have stage3 data or not
-        if hasattr(database, 'red') and len(database.red)>0:
-            stage3 = True
-        else:
-            stage3 = False
-    if not stage3:
-        # Display stage 0,1,2 data
-        for key in database.obs:
-            if (restrict_to is None) or (restrict_to in key):
-                obstable = database.obs[key]
-                for typestr in ['SCI', 'REF']:
-                    filenames = obstable[obstable['TYPE'] == typestr]['FITSFILE']
-                    
-                    for fn in filenames:
-                        display_coron_image(fn)
-                        if save_filename:
-                            pdf.savefig(plt.gcf())
+    # Initialize a dictionary to store image details for each base directory.
+    image_files = {base_dir: {'bp_counts': [], 'first_sci_file': None} for base_dir in base_dirs}
+
+    # Iterate over each key and corresponding table in the database.
+    # Filter files based on the 'restrict_to' criteria provided.
+    filtered_files = []
+    for key, table in database.obs.items():
+        if isinstance(restrict_to, dict):
+            for col, val in restrict_to.items():
+                if col not in table.colnames:
+                    print(f"Warning: Column '{col}' not found in the observation table for key '{key}'. Skipping over this filtering criteria.")
+                    continue  # Skip the current filter if the column doesn't exist.
+
+                vals = val if isinstance(val, list) else [val]
+                table = table[[str(cell) in map(str, vals) for cell in table[col]]]
+        elif isinstance(restrict_to, str) and restrict_to not in key:
+            continue  # Skip this key if it doesn't match the 'restrict_to' string.
+        
+        # Filter for SCI and REF types.
+        filtered_table = [row for row in table if row['TYPE'] in ['SCI', 'REF']]
+        filtered_files.extend(row['FITSFILE'] for row in filtered_table)
+
+        # Check if any SCI data remains after filtering.
+        if not any(row['TYPE'] == 'SCI' for row in filtered_table):
+            print(f"No SCI type files found in key: {key}."
+            f" Exiting. Check 'restrict_to' criteria.")
+            return
+       
+        # Identify the first SCI frame for subtraction, store it for later use.
+        first_sci_file = next((row['FITSFILE'] for row in filtered_table if row['TYPE'] == 'SCI'), None)
+        root_dir = first_sci_file.split(os.sep)[0]
+        for base_dir in base_dirs:
+            image_files[base_dir]['first_sci_file'] = os.path.join(root_dir, base_dir, os.path.basename(first_sci_file))
+
+    # Create figure of appropriate size.
+    num_dirs = len(base_dirs)
+    num_rows, num_cols = (1, num_dirs) if num_dirs <= 3 else (2, (num_dirs + 1) // 2)
+    
+    # Iterate over the filtered files to process and display images.
+    def update_image(index):
+        fn = filtered_files[index]
+        root_dir = fn.split(os.sep)[0]  # Extract the root directory from the file path.
+        base_fn = os.path.basename(fn)  # Extract the base filename from the file path.
+        fig, axes = plt.subplots(num_rows, num_cols, figsize=(num_cols * 10, num_rows * 10))
+        axes = axes.flatten() if isinstance(axes, np.ndarray) else [axes]
+
+   
+        # Iterate over each base directory and its image information.
+        for ax, (base_dir, image_info) in zip(axes, image_files.items()):
+            fn_path = os.path.join(root_dir, base_dir, base_fn)  # Full file path.
+            
+            # Count the number of bad (DO_NOT_USE) pixels in the DQ data.
+            dq = fits.getdata(fn_path, extname='DQ')
+            num_bad_pixels = np.sum((dq & 1) == 1)
+            image_info['bp_counts'].append(num_bad_pixels)
+
+            # Handle subtraction only if enabled.
+            if subtract_first:
+                # Load and subtract the first SCI frame from the current frame.
+                with tempfile.NamedTemporaryFile(suffix='_' + fn.split('_')[-1], delete=False) as tmp:
+                    shutil.copy2(fn_path, tmp.name)
+                    with fits.open(tmp.name, mode='update') as hdul:
+                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI')
+                        hdul['SCI'].data -= first_sci_frame.astype(np.float32)
+                        
+                        # Determine the center of the image.
+                        ny, nx = hdul['SCI'].data.shape[-2:]  # Handle both 2D and 3D arrays.
+                        ax.axhline(y=ny // 2, color='white', linestyle='--', linewidth=1)
+                        ax.axvline(x=nx // 2, color='white', linestyle='--', linewidth=1)
+
+                        hdul.flush()
+                    fn_path = tmp.name
+            ax = display_coron_image(fn_path, ax=ax, vmin=vmin, vmax=vmax, stretch=stretch, zoom_center=zoom_center, dq_only=dq_only)
+            ax.images[0].set_cmap('RdBu_r' if subtract_first else 'viridis')
+            plt.draw()
+
+            ax.set_title(base_dir)
+            ax.legend(handles=[patches.Patch(color='orange', label=f"DO_NOT_USE = {image_info['bp_counts'][0]} px")],
+                      loc='lower center', bbox_to_anchor=(0.5, -0.18))
+        fig.suptitle(
+            f"{os.path.basename(fn)} - {os.path.basename(image_info['first_sci_file'])}" if subtract_first else os.path.basename(fn),
+            fontsize=16)
+        if interactive:
+            plt.show()
+    
+    # Optional: interactively slide through the files in the database.
+    if interactive:
+        slider = widgets.IntSlider(value=0, min=1 if subtract_first else 0, max=len(filtered_files) - 1, step=1, description='Image Index:')
+        out = widgets.interactive_output(update_image, {'index': slider})
+        display(slider, out)
+   
+    # Static mode.
     else:
-        for key in database.red:
-            if (restrict_to is None) or (restrict_to in key):
-                redtable = database.red[key]
-                for typestr in ['PYKLIP','STAGE3']:
-                    filenames = redtable[redtable['TYPE'] == typestr]['FITSFILE']
-                    
-                    for fn in filenames:
-                        display_coron_image(fn)
-                        if save_filename:
-                            pdf.savefig(plt.gcf())
- 
-    if save_filename:
-        pdf.close()
+        for i in range(len(filtered_files)):
+            update_image(i+1 if subtract_first else i)
+            if pdf:
+                pdf.savefig(plt.gcf())
+            plt.show()
+            plt.close()
 
+        if pdf:
+            pdf.close()
+            
 @plt.style.context('spaceKLIP.sk_style')
 def plot_contrast_images(meta, data, data_masked, pxsc=None, savefile='./maskimage.pdf'):
     """

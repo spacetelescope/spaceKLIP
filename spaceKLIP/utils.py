@@ -9,6 +9,8 @@ import matplotlib
 import os
 import pdb
 import sys
+import io
+import stpipe
 
 import astropy.io.fits as pyfits
 import numpy as np
@@ -387,7 +389,8 @@ def write_fitpsf_images(fitpsf,
     # Write FITS file.
     pri = pyfits.PrimaryHDU()
     for key in row.keys():
-        if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST'] and np.isnan(row[key]):
+        if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
+                   'THETA_ERROR'] and np.isnan(row[key]):
             pri.header[key] = 'NONE'
         else:
             pri.header[key] = row[key]
@@ -1175,3 +1178,44 @@ def pop_pxar_kw(filepaths):
             hdul.close()
     
     pass
+
+def config_stpipe_log(level='WARNING', suppress=False):
+    """
+    Configure the logging level for the stpipe pipeline.
+
+    Parameters
+    ----------
+    level : str
+        The logging level as a string (e.g., 'ERROR', 'DEBUG').
+
+    suppress : bool
+        If True, suppresses the log output to ERROR level.
+        If False, restores the default logging configuration.
+        
+    Returns
+    -------
+    None.
+    """
+
+    # Convert the string level to a logging level constant.
+    log_level = getattr(logging, level.upper(), None)
+    if log_level is None:
+        raise ValueError(f"Invalid log level: {level}")
+
+    # Prevent 'stpipe' logs from propagating to the root logger.
+    # This suppresses duplicate log messages.
+    log_stpipe = logging.getLogger('stpipe')
+    log_stpipe.setLevel(log_level)
+    log_stpipe.propagate = False
+
+    if suppress:
+        # Suppress the log output from the 'stpipe'.
+        suppress_log_configuration = f"""
+        [*]
+        handler = append:pipeline.log
+        level = {level.upper()}
+        """
+        stpipe.log.load_configuration(io.BytesIO(suppress_log_configuration.encode()))
+    else:
+        # Restore the default logging configuration.
+        stpipe.log.load_configuration(stpipe.log._find_logging_config_file())

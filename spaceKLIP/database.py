@@ -23,11 +23,12 @@ from astropy.table import Table
 from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
 from stdatamodels.jwst import datamodels
 
-from .utils import nircam_apname, get_nrcmask_from_apname, get_filter_info
+from .utils import nircam_apname, get_nrcmask_from_apname, get_filter_info, config_stpipe_log
 
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+
 
 
 # =============================================================================
@@ -207,10 +208,13 @@ class Database():
         else:
             allpaths = np.array(datapaths)
         Nallpaths = len(allpaths)
+
         for i in range(Nallpaths):
             hdul = pyfits.open(allpaths[i])
             head = hdul[0].header
-            data = hdul['SCI'].data
+            # Only read in the data if needed.
+            data = hdul['SCI'].data if not head.get('NINTS') else None
+
             if 'uncal' in allpaths[i]:
                 DATAMODL += ['STAGE0']
             elif 'rate' in allpaths[i] or 'rateints' in allpaths[i]:
@@ -247,7 +251,7 @@ class Database():
                 raise UserWarning('Data originates from unknown telescope')
             EXP_TYPE += [head.get('EXP_TYPE', 'UNKNOWN')]
             EXPSTART += [head.get('EXPSTART', np.nan)]
-            NINTS += [head.get('NINTS', data.shape[0] if data.ndim == 3 else 1)]
+            NINTS += [head.get('NINTS', data.shape[0] if data is not None and data.ndim == 3 else 1)]
             EFFINTTM += [head.get('EFFINTTM', np.nan)]
             IS_PSF += [head.get('IS_PSF', 'NONE')]
             SELFREF += [head.get('SELFREF', 'NONE')]
@@ -486,9 +490,14 @@ class Database():
                 maskfile = allpaths[ww][j].replace('.fits', '_psfmask.fits')
                 if not os.path.exists(maskfile):    
                     if EXP_TYPE[ww][j] == 'NRC_CORON':
+                    
+                        config_stpipe_log(suppress=True)  # Suppress logging.
+
                         pipeline = Detector1Pipeline()
                         input = datamodels.open(allpaths[ww][j])
                         maskfile = pipeline.get_reference_file(input, 'psfmask')
+                        config_stpipe_log(suppress=True)  # Revert to default logging.
+
                     elif EXP_TYPE[ww][j] == 'MIR_4QPM' or EXP_TYPE[ww][j] == 'MIR_LYOT':
                         if APERNAME[ww][j] == 'MIRIM_MASK1065':
                             maskpath = 'JWST_MIRI_F1065C_transmission_webbpsf-ext_v2.fits'
@@ -1344,7 +1353,6 @@ def create_database(output_dir,
         Level of data products to read in, either '012' (or an integer 0,1,2) to read in
         individual exposures, or '3' to read in level-3 PSF-subtracted products,
         or '4' to read in extracted PSF fitting products.
-
     verbose : bool, optional
         Print information to the screen. The default is True.
     
