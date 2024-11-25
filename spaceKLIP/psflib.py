@@ -131,9 +131,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     #       - no calints files in input directory
     #       - header kw missing
     #       - duplicate science target with different program names
-    #       - calints vs uncal toggle 
-    #           - (warning if no calints present but uncals are
-    #             'did you mean to set uncal = True?')
+    # - logic for if 'HAS_DISK','HAS_CANDS' have a mix of 'unknown' and bool values
     
     # Check that you won't accidentally overwrite an existing csv.
     outpath = os.path.join(odir,'ref_lib.csv')
@@ -150,6 +148,8 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     print('Reading input files...')
     suffix = suffix.strip('_')
     fpaths = sorted(glob.glob(os.path.join(idir,f"*_{suffix}.fits")))
+    if len(fpaths) == 0:
+        raise Exception(f'No "{suffix}" files found in input directory {idir} .')
 
     # Start a dataframe with the header info we want from each file
     csv_list = []
@@ -258,7 +258,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
 
     # Fill in values missing from SIMBAD with MOCA
 
-    df_unique['COMMENTS'] = ''
+    df_unique['COMMENTS'] = 'unknown'
 
     # Sort all the dfs by index so they match up
     df_unique.sort_index(inplace=True)   
@@ -291,12 +291,13 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     df_unique = update_db_sptypes(df_unique)
 
     # Add empty columns
-    empty_cols = [
+    manual_cols = [
         'FLAGS',
         'HAS_DISK',
         'HAS_CANDS']
-    for col in empty_cols:
-        df_unique[col] = ''
+    
+    for col in manual_cols:
+        df_unique[col] = 'unknown'
 
     # Apply dataframe of unique targets to the original file list
     df.set_index('TARGNAME',inplace=True)
@@ -311,7 +312,6 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     print(f'Done.')
 
     return df_out
-
 
 def get_sciref_files(sci_target, refdb, idir=None, 
                      spt_choice=None, 
