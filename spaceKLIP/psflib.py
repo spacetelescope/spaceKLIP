@@ -106,7 +106,7 @@ def update_db_sptypes(refdb):
     return refdb_copy
 
 
-def build_refdb(idir,odir='.',uncal=False,overwrite=False):
+def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     """
     Constructs a database of target-specific reference info for each
     calints file in the input directory.
@@ -115,8 +115,7 @@ def build_refdb(idir,odir='.',uncal=False,overwrite=False):
         idir (path): Path to pre-processed (stage 2) JWST images to be added 
          to the database
         odir (path, optional): Location to save the database. Defaults to '.'.
-        uncal (bool, optional): Toggle using uncal files as inputs instead of
-         calints. Defaults to None.
+        suffix (str, optional): Input filename suffix, e.g. 'uncal' or 'calints'. Defaults to 'calints'.
         overwrite (bool, optional): If true, overwrite the existing caldb.
 
     Returns:
@@ -147,9 +146,9 @@ def build_refdb(idir,odir='.',uncal=False,overwrite=False):
         else:
             raise Exception(f'This operation is trying to overwrite {outpath}.\nIf this is what you want, set overwrite=True.')
 
-    # Read in uncal files 
+    # Read input files 
     print('Reading input files...')
-    suffix = 'uncal' if uncal else 'calints'
+    suffix = suffix.strip('_')
     fpaths = sorted(glob.glob(os.path.join(idir,f"*_{suffix}.fits")))
 
     # Start a dataframe with the header info we want from each file
@@ -175,6 +174,7 @@ def build_refdb(idir,odir='.',uncal=False,overwrite=False):
         'FILTER',
         'PUPIL',
     ]
+
     for fpath in fpaths:
         row = []
         hdr = fits.getheader(fpath)
@@ -313,7 +313,10 @@ def build_refdb(idir,odir='.',uncal=False,overwrite=False):
     return df_out
 
 
-def get_sciref_files(sci_target, refdb, idir=None, spt_choice=None, filters=None, exclude_disks=False):
+def get_sciref_files(sci_target, refdb, idir=None, 
+                     spt_choice=None, 
+                     filters=None, 
+                     exclude_disks=False):
     """Construct a list of science files and reference files to input to a PSF subtraction routine.
 
     Args:
