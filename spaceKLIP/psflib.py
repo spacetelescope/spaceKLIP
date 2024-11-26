@@ -19,6 +19,7 @@ import re
 import mocapy
 import pandas as pd
 from astropy.io import fits
+from spaceKLIP import mast
 
 from astroquery.simbad import Simbad
 import numpy as np
@@ -157,6 +158,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
         'TARGPROP',
         'TARGNAME', # Save 2MASS ID also
         'FILENAME',
+        'OBS_ID',
         'DATE-OBS',
         'TIME-OBS',
         'DURATION', # Total exposure time 
@@ -313,6 +315,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
 
     return df_out
 
+
 def get_sciref_files(sci_target, refdb, idir=None, 
                      spt_choice=None, 
                      filters=None, 
@@ -417,8 +420,16 @@ def get_sciref_files(sci_target, refdb, idir=None,
         
     return [sci_fpaths, ref_fpaths]
 
-# # TESTING
-# idir = 'DATA/NANREPLACED_v0'
-# ref_db = build_refdb(idir,overwrite=True)
 
-# print('Done Done.')
+def download_mast(ref_db,token=None,
+                  overwrite=False,exists_ok=True,
+                  progress=False, verbose=False,
+                  base_dir=os.path.join('DATA','MAST_DOWNLOAD')):
+    
+    for fname in list(ref_db.FILENAME):
+        mast.get_mast_filename(fname,
+                               outputdir=base_dir,
+                               overwrite=overwrite, exists_ok=exists_ok,
+                               progress=progress, verbose=verbose,
+                               mast_api_token=token)
+
