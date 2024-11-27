@@ -47,6 +47,7 @@ from astropy.io import fits
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 import scipy.ndimage
 import lmfit
+import re
 
 import logging
 log = logging.getLogger(__name__)
@@ -500,13 +501,16 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'medsub'.
+
         method : str, optional
-            'robust' for a robust median after masking out bright stars,
-            'sigma_clipped' for another version of robust median using astropy
-                sigma_clipped_stats on the whole image,
-            'border' for robust median on the outer border region only, to
-                ignore the bright stellar PSF in the center,
-            or 'simple'  for a simple np.nanmedian.
+
+            - 'robust' for a robust median after masking out bright stars,
+            - 'sigma_clipped' for another version of robust median using astropy
+               sigma_clipped_stats on the whole image,
+            - 'border' for robust median on the outer border region only, to
+              ignore the bright stellar PSF in the center,
+            - 'simple'  for a simple np.nanmedian.
+
         sigma : float, optional
             number of standard deviations to use for the clipping limit in
             sigma_clipped_stats, if the robust option is selected.
@@ -676,6 +680,9 @@ class ImageTools():
                     data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
 
                     # Subtract the background per frame
+                    head, tail = os.path.split(fitsfile)
+                    log.info('  --> Background subtraction: ' + tail)
+
                     data -= bg_data
 
                     # Loop over integrations
@@ -1067,17 +1074,17 @@ class ImageTools():
       
 
     def fix_bad_pixels(self,
-                   method='timemed+localmed+medfilt',
-                   sigclip_kwargs={},
-                   custom_kwargs={},
-                   timemed_kwargs={},
-                   localmed_kwargs={},
-                   medfilt_kwargs={},
-                   types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
-                   subdir='bpcleaned',
-                   restrict_to=None):
+                       method='timemed+localmed+medfilt',
+                       sigclip_kwargs={},
+                       custom_kwargs={},
+                       timemed_kwargs={},
+                       localmed_kwargs={},
+                       medfilt_kwargs={},
+                       types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
+                       subdir='bpcleaned',
+                       restrict_to=None):
         """
-        **** TO BE DEPRECATED BY FIND_BAD_PIXELS() AND CLEAN_BAD_PIXELS() ****
+        TO BE DEPRECATED BY FIND_BAD_PIXELS() AND CLEAN_BAD_PIXELS()
         Identify and fix bad pixels.
 
         Parameters
@@ -1590,6 +1597,7 @@ class ImageTools():
             
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
+
             The default is {}.
         
         Returns
@@ -2322,7 +2330,7 @@ class ImageTools():
         Function to inject synthetic PSFs into a set of frames loaded from a dataset, and save the new frames with the
         injected companion.
 
-        Parameters (some may need to be adjusted!)
+        Parameters
         ----------
         companions : list of list of three float, optional
             List of companions to be injected.
@@ -2553,25 +2561,43 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key,ww, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
 
-    def update_nircam_centers(self):
+    def update_nircam_centers(self,
+                              force_siaf_center=False, 
+                              force_db_center=False):
         """
-        Determine offset between SIAF reference pixel position and true mask
-        center from Jarron and update the current reference pixel position to
-        reflect the true mask center. Account for filter-dependent distortion.
+        Checks SIAF PRD version against FITS header PRD version and updates
+        CRPIX if SIAF version is newer. Also accounts for filter-dependent distortion.
         Might not be required for simulated data.
 
         This step uses lookup tables of information derived from NIRCam
         commissioning activities CAR-30 and CAR-31, by J. Leisenring and J. Girard,
         and subsequent reanalyses using additional data from PSF SGD observations.
 
-        This information will eventually be applied as updates into the SIAF,
-        after which point this step will become not necessary.
+        Parameters
+        ----------
+        force_siaf_center : bool, optional
+            Force the use of the SIAF reference pixel position irrespective of
+            versions. The default is False
+
+        force_db_center : bool, optional
+            Force the use of the database reference pixel position irrespective
+            of versions. The default is False
 
         Returns
         -------
         None.
 
         """
+
+        if force_siaf_center and force_db_center:
+            raise UserWarning('Both force_siaf_center and force_db_center are set to True. Only one can be True.')
+
+        if not force_db_center:
+            siaf = pysiaf.Siaf('NIRCAM')
+            # Use same RegEx as pysiaf to get sorted PRDS for later comparison
+            prds = [prd for i, prd in enumerate(pysiaf.prd_list) if 
+                    bool(re.match(r"^[A-Z]-\d+", pysiaf.prd_list[i].split("PRDOPSSOC-")[1]))
+                    is False]  # PRDs matching format: PRODOSSOC-###
 
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
@@ -2593,21 +2619,21 @@ class ImageTools():
                     head, tail = os.path.split(fitsfile)
                     log.info('  --> Update NIRCam coronagraphy centers: ' + tail)
 
-                    # Get current reference pixel position.
-                    crpix1 = self.database.obs[key]['CRPIX1'][j]
-                    crpix2 = self.database.obs[key]['CRPIX2'][j]
+                    # Get PRD version used for the current file.
+                    file_prd_ver = head_pri['PRD_VER']
 
-                    # Get SIAF reference pixel position.
-                    siaf = pysiaf.Siaf('NIRCAM')
-                    apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
-                    xsciref, ysciref = (apsiaf.XSciRef, apsiaf.YSciRef)
-
-                    # Get true mask center from Jarron.
-                    try:
-                        crpix1_jarron, crpix2_jarron = crpix_jarron[self.database.obs[key]['APERNAME'][j]]
-                    except KeyError:
-                        log.warning('  --> Update NIRCam coronagraphy centers: no true mask center found for ' + self.database.obs[key]['APERNAME'][j])
-                        crpix1_jarron, crpix2_jarron = xsciref, ysciref
+                    # use SIAF for reference pixel positions if its PRD is
+                    # newer or if force_siaf_center unless force_db_center.
+                    if (not force_db_center) and ((np.searchsorted(prds, file_prd_ver) < np.searchsorted(prds, pysiaf.JWST_PRD_VERSION)) 
+                        or force_siaf_center):
+                        log.info('  --> Update NIRCam coronagraphy centers: using CRPIX from pysiaf')
+                        apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
+                        crpix1 = apsiaf.XSciRef
+                        crpix2 = apsiaf.YSciRef
+                    else:
+                        log.info('  --> Update NIRCam coronagraphy centers: using CRPIX from database')
+                        crpix1 = self.database.obs[key]['CRPIX1'][j]
+                        crpix2 = self.database.obs[key]['CRPIX2'][j]
 
                     # Get filter shift from Jarron.
                     try:
@@ -2616,11 +2642,7 @@ class ImageTools():
                         log.warning('  --> Update NIRCam coronagraphy centers: no filter shift found for ' + self.database.obs[key]['FILTER'][j])
                         xshift_jarron, yshift_jarron = 0., 0.
 
-                    # Determine offset between SIAF reference pixel position
-                    # and true mask center from Jarron and update current
-                    # reference pixel position. Account for filter-dependent
-                    # distortion.
-                    xoff, yoff = crpix1_jarron + xshift_jarron - xsciref, crpix2_jarron + yshift_jarron - ysciref
+                    xoff, yoff = xshift_jarron, yshift_jarron
                     log.info('  --> Update NIRCam coronagraphy centers: old = (%.2f, %.2f), new = (%.2f, %.2f)' % (crpix1, crpix2, crpix1 + xoff, crpix2 + yoff))
                     crpix1 += xoff
                     crpix2 += yoff

@@ -67,7 +67,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         
         Parameters
         ----------
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 detector pipeline keyword arguments.
         
         Returns
@@ -248,7 +248,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         save_results : bool, optional
             Save the JWST pipeline step product? None will default to the JWST
             pipeline step default. The default is None.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST pipeline step keyword arguments.
         
         Returns
@@ -310,7 +310,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 saturation step keyword arguments.
         
         Returns
@@ -430,7 +430,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 refpix step keyword arguments.
         
         Returns
@@ -470,7 +470,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 refpix step keyword arguments.
         
         Returns
@@ -589,7 +589,7 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
             Default: False.
         - ramp_fit/maximum_cores : str, optional
             max number of parallel processes to create during ramp fitting.
-            'none', 'quarter', 'half', or 'all'. Default: 'quarter'.
+            'none', 'quarter', 'half', or 'all'. Default: 'none'.
 
         The default is {}. 
     
@@ -714,7 +714,7 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
     pipeline.ramp_fit.suppress_one_group = kwargs.get('suppress_one_group', False)
     # Number of processor cores to use during ramp fitting process
     # 'none', 'quarter', 'half', or 'all'
-    pipeline.ramp_fit.maximum_cores      = kwargs.get('maximum_cores', 'quarter')
+    pipeline.ramp_fit.maximum_cores      = kwargs.get('maximum_cores', 'none')
 
     # Set parameters from step dictionary
     for key1 in steps.keys():
@@ -803,7 +803,7 @@ def run_obs(database,
             Default: False.
         - ramp_fit/maximum_cores : str, optional
             max number of parallel processes to create during ramp fitting.
-            'none', 'quarter', 'half', or 'all'. Default: 'quarter'.
+            'none', 'quarter', 'half', or 'all'. Default: 'none'.
 
         Default is {}.
         Each of these parameters can be passed directly through `kwargs`.
