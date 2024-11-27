@@ -919,7 +919,7 @@ class ImageTools():
     
     def find_bad_pixels(self,
                         method='dqarr',
-                        overwrite_dq=True,
+                        set_dq_zero=True,
                         dqarr_kwargs={},
                         sigclip_kwargs={},
                         custom_kwargs={},
@@ -934,24 +934,24 @@ class ImageTools():
         Parameters
         ----------
         method : str, optional
-            Sequence of bad pixel cleaning methods to be run on the data. 
+            Sequence of bad pixel cleaning methods to be run on the data.
             Different methods must be joined by a '+' sign without
             whitespace. Available methods are:
-        
+
             - dqarr: uses DQ array to identify bad pixels
-            
+
             - sigclip: use sigma clipping to identify additional bad pixels.
 
             - custom: use a custom bad pixel map
 
             The default is 'dqarr'.
-        overwrite_dq : bool, optional
+        set_dq_zero : bool, optional
             Toggle to start a new empty DQ array, or built upon the existing array.
 
             The default is True
         dqarr_kwargs : dict, optional
             Keyword arguments for the 'dqarr' identification method. Available keywords are:
-            
+
             The default is {}.
         sigclip_kwargs : dict, optional
             Keyword arguments for the 'sigclip' identification methods. Available keywords are:
@@ -974,7 +974,7 @@ class ImageTools():
 
             The default is {}.
         types : list of str, optional
-            List of data types for which bad pixels shall be identified. 
+            List of data types for which bad pixels shall be identified.
             The default is ['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'].
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
@@ -989,36 +989,43 @@ class ImageTools():
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        
+
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
-            # if we limit to only processing some concatenations, 
+            # if we limit to only processing some concatenations,
             # check whether this concatenation matches the pattern
             if (restrict_to is not None) and (restrict_to not in key):
                 continue
 
             log.info('--> Concatenation ' + key)
-            
+
             # Loop through FITS files.
             nfitsfiles = len(self.database.obs[key])
             for j in range(nfitsfiles):
-                
+
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
 
-                if overwrite_dq:
+                if set_dq_zero: #set_dq_zero
                     # Make copy of DQ array filled with zeros, i.e. all good pixels
                     pxdq_temp = np.zeros_like(pxdq)
                 else:
+                    # Make copy of DQ array
                     pxdq_temp = pxdq.copy()
-                
+
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
                     # Call bad pixel identification routines.
                     method_split = method.split('+')
+                    if method_split[0] != 'dqarr' and not set_dq_zero:
+                        # If the first methond is not dqarr and you are not using a boolean mask for pxdq_temp,
+                        # convert pxdq_temp to a boolean mask or some of the next steps won't work.
+                        # This is just a place holder. We need to think about how this mask will look like
+                        pxdq_temp = (pxdq_temp > 0)
+
                     for k in range(len(method_split)):
                         head, tail = os.path.split(fitsfile)
                         if method_split[k] == 'dqarr':
@@ -1042,14 +1049,12 @@ class ImageTools():
                         else:
                             log.info('  --> Unknown method ' + method_split[k] + ': skipped')
 
-                do_not_use = jwst.datamodels.dqflags.pixel['DO_NOT_USE']
-                new_dq = np.bitwise_and(pxdq.copy(),
-                                        np.invert(do_not_use))  # retain all other bits except the do_not_use bit
-                new_dq = np.bitwise_or(new_dq, pxdq_temp)  # add in the do_not_use bit from the cleaned version
-                new_dq = new_dq.astype(np.uint32)
-
-                # # The new DQ will just be the pxdq_temp we've been modifying
-                # new_dq = pxdq_temp.astype(np.uint32)
+                if set_dq_zero:
+                    # The new DQ will just be the pxdq_temp we've been modifying
+                    new_dq = pxdq_temp.astype(np.uint32)
+                else:
+                    # The new DQ will be the original pxdq with added the flagged pixels from the pxdq_temp we've been modifying as do_not_use
+                    new_dq = np.bitwise_or(pxdq.copy(), pxdq_temp).astype(np.uint32)
 
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts, maskoffs)
@@ -1381,6 +1386,7 @@ class ImageTools():
                 new_dq = np.bitwise_or(new_dq, pxdq_temp)  # add in the do_not_use bit from the cleaned version
                 new_dq = new_dq.astype(np.uint32)   # ensure correct output type for saving
                                                     # (the bitwise steps otherwise return np.int64 which isn't FITS compatible)
+
                 # Finish figure for this file
                 ax.hist(data.flatten(), 
                         bins=int(np.sqrt(len(data.flatten()))),
