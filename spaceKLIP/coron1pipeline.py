@@ -67,7 +67,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         
         Parameters
         ----------
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 detector pipeline keyword arguments.
         
         Returns
@@ -248,7 +248,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         save_results : bool, optional
             Save the JWST pipeline step product? None will default to the JWST
             pipeline step default. The default is None.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST pipeline step keyword arguments.
         
         Returns
@@ -310,7 +310,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 saturation step keyword arguments.
         
         Returns
@@ -430,7 +430,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 refpix step keyword arguments.
         
         Returns
@@ -470,7 +470,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        **kwargs : keyword arguments
+        \*\*kwargs : keyword arguments
             Default JWST stage 1 refpix step keyword arguments.
         
         Returns
@@ -589,7 +589,7 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
             Default: False.
         - ramp_fit/maximum_cores : str, optional
             max number of parallel processes to create during ramp fitting.
-            'none', 'quarter', 'half', or 'all'. Default: 'quarter'.
+            'none', 'quarter', 'half', or 'all'. Default: 'none'.
 
         The default is {}. 
     
@@ -714,7 +714,7 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
     pipeline.ramp_fit.suppress_one_group = kwargs.get('suppress_one_group', False)
     # Number of processor cores to use during ramp fitting process
     # 'none', 'quarter', 'half', or 'all'
-    pipeline.ramp_fit.maximum_cores      = kwargs.get('maximum_cores', 'quarter')
+    pipeline.ramp_fit.maximum_cores      = kwargs.get('maximum_cores', 'none')
 
     # Set parameters from step dictionary
     for key1 in steps.keys():
@@ -803,7 +803,7 @@ def run_obs(database,
             Default: False.
         - ramp_fit/maximum_cores : str, optional
             max number of parallel processes to create during ramp fitting.
-            'none', 'quarter', 'half', or 'all'. Default: 'quarter'.
+            'none', 'quarter', 'half', or 'all'. Default: 'none'.
 
         Default is {}.
         Each of these parameters can be passed directly through `kwargs`.
@@ -939,6 +939,10 @@ def run_obs(database,
                                                                fitspath, 
                                                                fitstype,
                                                                quiet)
+                    elif steps['mask_groups']['mask_method'] == 'custom':
+                        steps = prepare_group_masking_custom(steps,
+                                                            database.obs[key], 
+                                                            quiet)
                 else:
                     # Even though we are using mask_groups, this particular file will not have any groups masked
                     # Instruct to skip the step, but keep a record using skip_revert so we can undo for the next file.
@@ -1077,9 +1081,49 @@ def prepare_group_masking_basic(steps, observations, quiet=False):
 
         # Assign to steps so this stage doesn't get repeated. 
         steps['mask_groups']['mask_array'] = mask_array
-        print(mask_array)
 
     return steps
+
+
+def prepare_group_masking_custom(steps, observations, quiet=False):
+
+    if 'mask_array' not in steps['mask_groups']:
+        '''First time in the file loop, or groups_to_mask has been preset, 
+        run the optimisation and set groups to mask. '''
+        if not quiet: 
+            log.info('  --> Coron1Pipeline: Masking custom number of groups in ramp')
+
+        if 'custom_group' not in steps['mask_groups']:
+            raise KeyError('mask_method "custom" requires you to set the "custom_group" keyword argument in the "mask_groups" step.')
+
+        # Get science frames and reference cubes
+        sci_frames = []
+        ref_cubes = []
+        nfitsfiles = len(observations)
+        for j in range(nfitsfiles):
+            if observations['TYPE'][j] == 'SCI':
+                with fits.open(os.path.abspath(observations['FITSFILE'][j])) as hdul:
+                    sci_frame = hdul['SCI'].data[:, -1, :, :].astype(float)
+                    sci_frames.append(sci_frame)
+            elif observations['TYPE'][j] == 'REF':
+                with fits.open(os.path.abspath(observations['FITSFILE'][j])) as hdul:
+                    ref_cube = hdul['SCI'].data.astype(float)
+                    ref_shape = ref_cube.shape
+                    ref_cubes.append(ref_cube)
+
+        # Assemble array of groups to mask, starting one above the max group
+        final_max_grp_to_use = int(steps['mask_groups']['custom_group']) 
+        groups_to_mask = np.arange(final_max_grp_to_use+1, ref_cubes[0].shape[1])
+
+        # Make the mask array
+        mask_array = np.zeros(ref_shape, dtype=bool)
+        mask_array[:,groups_to_mask,:,:] = 1
+
+        # Assign to steps so this stage doesn't get repeated. 
+        steps['mask_groups']['mask_array'] = mask_array
+
+    return steps
+
 
 def prepare_group_masking_advanced(steps, observations, refpath, reftype, quiet=False):
 

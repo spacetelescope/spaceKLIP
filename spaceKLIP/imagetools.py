@@ -47,6 +47,7 @@ from astropy.io import fits
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 import scipy.ndimage
 import lmfit
+import re
 
 import logging
 log = logging.getLogger(__name__)
@@ -500,13 +501,16 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'medsub'.
+
         method : str, optional
-            'robust' for a robust median after masking out bright stars,
-            'sigma_clipped' for another version of robust median using astropy
-                sigma_clipped_stats on the whole image,
-            'border' for robust median on the outer border region only, to
-                ignore the bright stellar PSF in the center,
-            or 'simple'  for a simple np.nanmedian.
+
+            - 'robust' for a robust median after masking out bright stars,
+            - 'sigma_clipped' for another version of robust median using astropy
+               sigma_clipped_stats on the whole image,
+            - 'border' for robust median on the outer border region only, to
+              ignore the bright stellar PSF in the center,
+            - 'simple'  for a simple np.nanmedian.
+
         sigma : float, optional
             number of standard deviations to use for the clipping limit in
             sigma_clipped_stats, if the robust option is selected.
@@ -676,6 +680,9 @@ class ImageTools():
                     data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
 
                     # Subtract the background per frame
+                    head, tail = os.path.split(fitsfile)
+                    log.info('  --> Background subtraction: ' + tail)
+
                     data -= bg_data
 
                     # Loop over integrations
@@ -919,7 +926,7 @@ class ImageTools():
     
     def find_bad_pixels(self,
                         method='dqarr',
-                        overwrite_dq=True,
+                        set_dq_zero=True,
                         dqarr_kwargs={},
                         sigclip_kwargs={},
                         custom_kwargs={},
@@ -934,24 +941,24 @@ class ImageTools():
         Parameters
         ----------
         method : str, optional
-            Sequence of bad pixel cleaning methods to be run on the data. 
+            Sequence of bad pixel cleaning methods to be run on the data.
             Different methods must be joined by a '+' sign without
             whitespace. Available methods are:
-        
+
             - dqarr: uses DQ array to identify bad pixels
-            
+
             - sigclip: use sigma clipping to identify additional bad pixels.
 
             - custom: use a custom bad pixel map
 
             The default is 'dqarr'.
-        overwrite_dq : bool, optional
+        set_dq_zero : bool, optional
             Toggle to start a new empty DQ array, or built upon the existing array.
 
             The default is True
         dqarr_kwargs : dict, optional
             Keyword arguments for the 'dqarr' identification method. Available keywords are:
-            
+
             The default is {}.
         sigclip_kwargs : dict, optional
             Keyword arguments for the 'sigclip' identification methods. Available keywords are:
@@ -974,7 +981,7 @@ class ImageTools():
 
             The default is {}.
         types : list of str, optional
-            List of data types for which bad pixels shall be identified. 
+            List of data types for which bad pixels shall be identified.
             The default is ['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'].
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
@@ -989,36 +996,43 @@ class ImageTools():
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        
+
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
-            # if we limit to only processing some concatenations, 
+            # if we limit to only processing some concatenations,
             # check whether this concatenation matches the pattern
             if (restrict_to is not None) and (restrict_to not in key):
                 continue
 
             log.info('--> Concatenation ' + key)
-            
+
             # Loop through FITS files.
             nfitsfiles = len(self.database.obs[key])
             for j in range(nfitsfiles):
-                
+
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
 
-                if overwrite_dq:
+                if set_dq_zero: #set_dq_zero
                     # Make copy of DQ array filled with zeros, i.e. all good pixels
                     pxdq_temp = np.zeros_like(pxdq)
                 else:
+                    # Make copy of DQ array
                     pxdq_temp = pxdq.copy()
-                
+
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
                     # Call bad pixel identification routines.
                     method_split = method.split('+')
+                    if method_split[0] != 'dqarr' and not set_dq_zero:
+                        # If the first methond is not dqarr and you are not using a boolean mask for pxdq_temp,
+                        # convert pxdq_temp to a boolean mask or some of the next steps won't work.
+                        # This is just a place holder. We need to think about how this mask will look like
+                        pxdq_temp = (pxdq_temp > 0)
+
                     for k in range(len(method_split)):
                         head, tail = os.path.split(fitsfile)
                         if method_split[k] == 'dqarr':
@@ -1042,8 +1056,12 @@ class ImageTools():
                         else:
                             log.info('  --> Unknown method ' + method_split[k] + ': skipped')
 
-                # The new DQ will just be the pxdq_temp we've been modifying
-                new_dq = pxdq_temp.astype(np.uint32)
+                if set_dq_zero:
+                    # The new DQ will just be the pxdq_temp we've been modifying
+                    new_dq = pxdq_temp.astype(np.uint32)
+                else:
+                    # The new DQ will be the original pxdq with added the flagged pixels from the pxdq_temp we've been modifying as do_not_use
+                    new_dq = np.bitwise_or(pxdq.copy(), pxdq_temp).astype(np.uint32)
 
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts, maskoffs)
@@ -1056,17 +1074,17 @@ class ImageTools():
       
 
     def fix_bad_pixels(self,
-                   method='timemed+localmed+medfilt',
-                   sigclip_kwargs={},
-                   custom_kwargs={},
-                   timemed_kwargs={},
-                   localmed_kwargs={},
-                   medfilt_kwargs={},
-                   types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
-                   subdir='bpcleaned',
-                   restrict_to=None):
+                       method='timemed+localmed+medfilt',
+                       sigclip_kwargs={},
+                       custom_kwargs={},
+                       timemed_kwargs={},
+                       localmed_kwargs={},
+                       medfilt_kwargs={},
+                       types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
+                       subdir='bpcleaned',
+                       restrict_to=None):
         """
-        **** TO BE DEPRECATED BY FIND_BAD_PIXELS() AND CLEAN_BAD_PIXELS() ****
+        TO BE DEPRECATED BY FIND_BAD_PIXELS() AND CLEAN_BAD_PIXELS()
         Identify and fix bad pixels.
 
         Parameters
@@ -1369,6 +1387,7 @@ class ImageTools():
                 #  The pxdq variable here is effectively just the DO_NOT_USE flag, discarding other bits.
                 #  We want to make a new dq which retains the other bits as much as possible.
                 #  first, retain all the other bits (bits greater than 1), then add in the new/cleaned DO_NOT_USE bit
+
                 do_not_use = jwst.datamodels.dqflags.pixel['DO_NOT_USE']
                 new_dq = np.bitwise_and(pxdq.copy(), np.invert(do_not_use))  # retain all other bits except the do_not_use bit
                 new_dq = np.bitwise_or(new_dq, pxdq_temp)  # add in the do_not_use bit from the cleaned version
@@ -1578,6 +1597,7 @@ class ImageTools():
             
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
+
             The default is {}.
         
         Returns
@@ -2310,7 +2330,7 @@ class ImageTools():
         Function to inject synthetic PSFs into a set of frames loaded from a dataset, and save the new frames with the
         injected companion.
 
-        Parameters (some may need to be adjusted!)
+        Parameters
         ----------
         companions : list of list of three float, optional
             List of companions to be injected.
@@ -2541,25 +2561,43 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key,ww, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
 
-    def update_nircam_centers(self):
+    def update_nircam_centers(self,
+                              force_siaf_center=False, 
+                              force_db_center=False):
         """
-        Determine offset between SIAF reference pixel position and true mask
-        center from Jarron and update the current reference pixel position to
-        reflect the true mask center. Account for filter-dependent distortion.
+        Checks SIAF PRD version against FITS header PRD version and updates
+        CRPIX if SIAF version is newer. Also accounts for filter-dependent distortion.
         Might not be required for simulated data.
 
         This step uses lookup tables of information derived from NIRCam
         commissioning activities CAR-30 and CAR-31, by J. Leisenring and J. Girard,
         and subsequent reanalyses using additional data from PSF SGD observations.
 
-        This information will eventually be applied as updates into the SIAF,
-        after which point this step will become not necessary.
+        Parameters
+        ----------
+        force_siaf_center : bool, optional
+            Force the use of the SIAF reference pixel position irrespective of
+            versions. The default is False
+
+        force_db_center : bool, optional
+            Force the use of the database reference pixel position irrespective
+            of versions. The default is False
 
         Returns
         -------
         None.
 
         """
+
+        if force_siaf_center and force_db_center:
+            raise UserWarning('Both force_siaf_center and force_db_center are set to True. Only one can be True.')
+
+        if not force_db_center:
+            siaf = pysiaf.Siaf('NIRCAM')
+            # Use same RegEx as pysiaf to get sorted PRDS for later comparison
+            prds = [prd for i, prd in enumerate(pysiaf.prd_list) if 
+                    bool(re.match(r"^[A-Z]-\d+", pysiaf.prd_list[i].split("PRDOPSSOC-")[1]))
+                    is False]  # PRDs matching format: PRODOSSOC-###
 
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
@@ -2581,21 +2619,21 @@ class ImageTools():
                     head, tail = os.path.split(fitsfile)
                     log.info('  --> Update NIRCam coronagraphy centers: ' + tail)
 
-                    # Get current reference pixel position.
-                    crpix1 = self.database.obs[key]['CRPIX1'][j]
-                    crpix2 = self.database.obs[key]['CRPIX2'][j]
+                    # Get PRD version used for the current file.
+                    file_prd_ver = head_pri['PRD_VER']
 
-                    # Get SIAF reference pixel position.
-                    siaf = pysiaf.Siaf('NIRCAM')
-                    apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
-                    xsciref, ysciref = (apsiaf.XSciRef, apsiaf.YSciRef)
-
-                    # Get true mask center from Jarron.
-                    try:
-                        crpix1_jarron, crpix2_jarron = crpix_jarron[self.database.obs[key]['APERNAME'][j]]
-                    except KeyError:
-                        log.warning('  --> Update NIRCam coronagraphy centers: no true mask center found for ' + self.database.obs[key]['APERNAME'][j])
-                        crpix1_jarron, crpix2_jarron = xsciref, ysciref
+                    # use SIAF for reference pixel positions if its PRD is
+                    # newer or if force_siaf_center unless force_db_center.
+                    if (not force_db_center) and ((np.searchsorted(prds, file_prd_ver) < np.searchsorted(prds, pysiaf.JWST_PRD_VERSION)) 
+                        or force_siaf_center):
+                        log.info('  --> Update NIRCam coronagraphy centers: using CRPIX from pysiaf')
+                        apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
+                        crpix1 = apsiaf.XSciRef
+                        crpix2 = apsiaf.YSciRef
+                    else:
+                        log.info('  --> Update NIRCam coronagraphy centers: using CRPIX from database')
+                        crpix1 = self.database.obs[key]['CRPIX1'][j]
+                        crpix2 = self.database.obs[key]['CRPIX2'][j]
 
                     # Get filter shift from Jarron.
                     try:
@@ -2604,11 +2642,7 @@ class ImageTools():
                         log.warning('  --> Update NIRCam coronagraphy centers: no filter shift found for ' + self.database.obs[key]['FILTER'][j])
                         xshift_jarron, yshift_jarron = 0., 0.
 
-                    # Determine offset between SIAF reference pixel position
-                    # and true mask center from Jarron and update current
-                    # reference pixel position. Account for filter-dependent
-                    # distortion.
-                    xoff, yoff = crpix1_jarron + xshift_jarron - xsciref, crpix2_jarron + yshift_jarron - ysciref
+                    xoff, yoff = xshift_jarron, yshift_jarron
                     log.info('  --> Update NIRCam coronagraphy centers: old = (%.2f, %.2f), new = (%.2f, %.2f)' % (crpix1, crpix2, crpix1 + xoff, crpix2 + yoff))
                     crpix1 += xoff
                     crpix2 += yoff
