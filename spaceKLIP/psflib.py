@@ -24,6 +24,10 @@ from spaceKLIP import mast
 from astroquery.simbad import Simbad
 import numpy as np
 
+import logging
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+
 sp_class_letters = ['O','B','A','F','G','K','M','T','Y']
 
 # Helper functions for logic with database series
@@ -146,7 +150,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
             raise Exception(f'This operation is trying to overwrite {outpath}.\nIf this is what you want, set overwrite=True.')
 
     # Read input files 
-    print('Reading input files...')
+    log.info('Reading input files...')
     suffix = suffix.strip('_')
     fpaths = sorted(glob.glob(os.path.join(idir,f"*_{suffix}.fits")))
     if len(fpaths) == 0:
@@ -191,7 +195,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     df_unique = pd.DataFrame(np.transpose([targnames]),columns=['TARGNAME'])
 
     # Get 2MASS IDs
-    print('Collecting 2MASS IDs...')
+    log.info('Collecting 2MASS IDs...')
     twomass_ids = []
     for targname in targnames:
         result_table = Simbad.query_objectids(targname)
@@ -210,7 +214,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     df_unique.set_index('2MASS_ID',inplace=True)
 
     # Query SIMBAD
-    print('Querying SIMBAD...')
+    log.info('Querying SIMBAD...')
 
     customSimbad = Simbad()
     customSimbad.add_votable_fields('sptype', 
@@ -239,7 +243,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     df_unique = pd.concat([df_unique,df_simbad.loc[:,simbad_cols.keys()]],axis=1)
 
     # Query mocadb.ca for extra info
-    print('Querying MOCADB (this may take a minute)...')
+    log.info('Querying MOCADB (this may take a minute)...')
     names_df = pd.DataFrame(list(df_unique.index),columns=['designation'])
     moca = mocapy.MocaEngine()
     mdf = moca.query("SELECT tt.designation AS input_designation, sam.* FROM tmp_table AS tt LEFT JOIN mechanics_all_designations AS mad ON(mad.designation LIKE tt.designation) LEFT JOIN summary_all_objects AS sam ON(sam.moca_oid=mad.moca_oid)", tmp_table=names_df)
@@ -255,7 +259,6 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
 
     # Update the column names for consistency
     for col,moca_col in moca_cols.items():
-        # print(col, list(mdf[moca_col]))
         mdf[col] = list(mdf[moca_col])
 
     # Fill in values missing from SIMBAD with MOCA
@@ -310,9 +313,8 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     
     # Save dataframe
     df_out.to_csv(outpath)
-    print(f'Database saved to {outpath}')
-    print(f'Done.')
-
+    log.info(f'Database saved to {outpath}')
+    
     return df_out
 
 
