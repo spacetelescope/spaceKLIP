@@ -3035,14 +3035,18 @@ class ImageTools():
 
         # Plot data, model PSF, and scene overview.
         if output_dir is not None:
-            fig, ax = plt.subplots(1, 3, figsize=(3 * 6.4, 1 * 4.8))
-            ax[0].imshow(datasub, origin='lower', cmap='Reds')
+            fig, ax = plt.subplots(1, 3, figsize=(9,3))
+            ax[0].imshow(datasub, origin='lower', cmap='Purples')
             ax[0].contourf(masksub, levels=[0.00, 0.25, 0.50, 0.75], cmap='Greys_r', vmin=0., vmax=2., alpha=0.5)
-            ax[0].set_title('1. SCI frame & transmission mask')
-            ax[1].imshow(model_psf, origin='lower', cmap='Reds')
+            ax[0].set_title('Science frame')
+            ax[0].set_xlabel('[pix]')
+            ax[0].set_ylabel('[pix]')
+            ax[1].imshow(model_psf, origin='lower', cmap='Purples')
             ax[1].contourf(masksub, levels=[0.00, 0.25, 0.50, 0.75], cmap='Greys_r', vmin=0., vmax=2., alpha=0.5)
-            ax[1].set_title('Model PSF & transmission mask')
-            ax[2].scatter((xsciref), (ysciref), marker='+', color='black', label='SIAF reference point')
+            ax[1].set_title('Model PSF')
+            ax[1].set_xlabel('[pix]')
+            ax[1].set_ylabel('[pix]')
+            # ax[2].scatter((xsciref), (ysciref), marker='+', color='black', label='SIAF reference point')
             ax[2].scatter((crpix1 + 1), (crpix2 + 1), marker='x', color='skyblue', label='True mask center')
             ax[2].scatter((xc + 1), (yc + 1), marker='*', color='red', label='Computed star position')
             ax[2].set_aspect('equal')
@@ -3062,10 +3066,8 @@ class ImageTools():
             ax[2].set_title('Scene overview (1-indexed)')
             plt.tight_layout()
             if save_figures:
-                output_file = os.path.split(self.database.obs[key]['FITSFILE'][j])[1]
-                output_file = output_file.replace('.fits', '.pdf')
-                output_file = os.path.join(output_dir, output_file)
-                plt.savefig(output_file)
+                output_file = os.path.join(output_dir, key + '_recenter.pdf')
+                plt.savefig(output_file, bbox_inches='tight')
                 log.info(f" Plot saved in {output_file}")
             plt.show()
             plt.close(fig)
