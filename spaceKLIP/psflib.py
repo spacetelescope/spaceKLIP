@@ -424,9 +424,24 @@ def get_sciref_files(sci_target, refdb, idir=None,
 def download_mast(ref_db,token=None,
                   overwrite=False,exists_ok=True,
                   progress=False, verbose=False,
+                  suffix=None, # e.g. 'calints'
                   base_dir=os.path.join('DATA','MAST_DOWNLOAD')):
     
-    for fname in list(ref_db.FILENAME):
+    fnames = list(ref_db.FILENAME)
+
+    # Update file suffix if provided
+    if not suffix == None:
+            new_suffix = suffix.strip('_')
+
+            for ff,fname in enumerate(fnames):
+                fname_split = fname.split('_')
+                new_fname = '_'.join(fname_split[:-1]) + f'_{new_suffix}.fits'
+
+                fnames[ff] = new_fname    
+        
+    # Download each file
+    for fname in fnames:
+        
         mast.get_mast_filename(fname,
                                outputdir=base_dir,
                                overwrite=overwrite, exists_ok=exists_ok,
