@@ -2883,7 +2883,7 @@ class ImageTools():
 
         pass
 
-    @plt.style.context('spaceKLIP.sk_style')
+    # @plt.style.context('spaceKLIP.sk_style')
     def find_nircam_centers(self,
                             data0,
                             key,
@@ -3076,7 +3076,7 @@ class ImageTools():
         # Return star position.
         return xc, yc, median_xshift, median_yshift
 
-    @plt.style.context('spaceKLIP.sk_style')
+    # @plt.style.context('spaceKLIP.sk_style')
     def align_frames(self,
                      method='fourier',
                      shift_method='fourier',
@@ -3421,7 +3421,7 @@ class ImageTools():
                 plt.show()
                 plt.close(fig)
                 
-    @plt.style.context('spaceKLIP.sk_style')
+    # @plt.style.context('spaceKLIP.sk_style')
     def subtract_nircam_coron_background(self,
                                         subdir='bgsub',
                                         mask_snr_threshold=2,

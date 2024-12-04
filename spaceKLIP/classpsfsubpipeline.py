@@ -165,15 +165,15 @@ def run_obs(database,
                     temp = np.ones_like(data)
                     temp[data > kwargs['mask_bright']] = 0
                     temp = (temp > 0.5) & (pxdq < 0.5)
-                    with plt.style.context('spaceKLIP.sk_style'):
-                        plt.figure()
-                        plt.imshow(data, origin='lower', vmin=0, vmax=50)
-                        plt.imshow(temp, origin='lower', cmap='Greys_r', alpha=0.5)
-                        plt.colorbar()
-                        plt.tight_layout()
-                        plt.savefig(os.path.join(output_dir, key + '_mask.pdf'))
-                        # plt.show()
-                        plt.close()
+                    # with plt.style.context('spaceKLIP.sk_style'):
+                    plt.figure()
+                    plt.imshow(data, origin='lower', vmin=0, vmax=50)
+                    plt.imshow(temp, origin='lower', cmap='Greys_r', alpha=0.5)
+                    plt.colorbar()
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(output_dir, key + '_mask.pdf'))
+                    # plt.show()
+                    plt.close()
                 else:
                     temp = None
                 

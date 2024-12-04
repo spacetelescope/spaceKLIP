@@ -341,65 +341,65 @@ class AnalysisTools():
                 # Plot masked data.
                 klmodes = self.database.red[key]['KLMODES'][j].split(',')
                 fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
-                with plt.style.context('spaceKLIP.sk_style'):
-                    fig = plt.figure(figsize=(6.4, 4.8))
-                    ax = plt.gca()
-                    xx = np.arange(data.shape[2]) - center[0]  # pix
-                    yy = np.arange(data.shape[1]) - center[1]  # pix
-                    extent = (-(xx[0] - 0.5) * pxsc_arcsec, -(xx[-1] + 0.5) * pxsc_arcsec, (yy[0] - 0.5) * pxsc_arcsec, (yy[-1] + 0.5) * pxsc_arcsec)
-                    vmax = np.nanmax(data[-1])
-                    ax.imshow(data[-1], origin='lower', cmap='inferno',
-                            norm=matplotlib.colors.SymLogNorm(vmin=-vmax, vmax=vmax, linthresh=vmax/100 ),
-                            extent=extent)
-                    ax.set_xlabel(r'$\Delta$RA [arcsec]')
-                    ax.set_ylabel(r'$\Delta$Dec [arcsec]')
-                    ax.set_title(f'Masked data in {filt}, {psfsub_strategy} ({klmodes[-1]} KL)')
-                    for r in [5,10]:
-                        ax.add_patch(matplotlib.patches.Circle((0,0), r, ls='--', facecolor='none', edgecolor='cyan', clip_on=True))
-                        ax.text(r, 0, f" {r}''", color='cyan')
-                    import textwrap
-                    ax.text(0.01, 0.99, textwrap.fill(os.path.basename(fitsfile), width=40),
-                                        transform=ax.transAxes, color='black', verticalalignment='top', fontsize=9)
-                    plt.colorbar(mappable=ax.images[0], label=self.database.red[key]['BUNIT'][j])
-                    plt.tight_layout()
-                    if save_figures:
-                        output_file = fitsfile[:-5] + '_masked.pdf'
-                        plt.savefig(output_file)
-                        log.info(f" Plot saved in {output_file}")
-                    plt.show()
-                    plt.close(fig)
+                # with plt.style.context('spaceKLIP.sk_style'):
+                fig = plt.figure(figsize=(6.4, 4.8))
+                ax = plt.gca()
+                xx = np.arange(data.shape[2]) - center[0]  # pix
+                yy = np.arange(data.shape[1]) - center[1]  # pix
+                extent = (-(xx[0] - 0.5) * pxsc_arcsec, -(xx[-1] + 0.5) * pxsc_arcsec, (yy[0] - 0.5) * pxsc_arcsec, (yy[-1] + 0.5) * pxsc_arcsec)
+                vmax = np.nanmax(data[-1])
+                ax.imshow(data[-1], origin='lower', cmap='inferno',
+                        norm=matplotlib.colors.SymLogNorm(vmin=-vmax, vmax=vmax, linthresh=vmax/100 ),
+                        extent=extent)
+                ax.set_xlabel(r'$\Delta$RA [arcsec]')
+                ax.set_ylabel(r'$\Delta$Dec [arcsec]')
+                ax.set_title(f'Masked data in {filt}, {psfsub_strategy} ({klmodes[-1]} KL)')
+                for r in [5,10]:
+                    ax.add_patch(matplotlib.patches.Circle((0,0), r, ls='--', facecolor='none', edgecolor='cyan', clip_on=True))
+                    ax.text(r, 0, f" {r}''", color='cyan')
+                import textwrap
+                ax.text(0.01, 0.99, textwrap.fill(os.path.basename(fitsfile), width=40),
+                                    transform=ax.transAxes, color='black', verticalalignment='top', fontsize=9)
+                plt.colorbar(mappable=ax.images[0], label=self.database.red[key]['BUNIT'][j])
+                plt.tight_layout()
+                if save_figures:
+                    output_file = fitsfile[:-5] + '_masked.pdf'
+                    plt.savefig(output_file)
+                    log.info(f" Plot saved in {output_file}")
+                plt.show()
+                plt.close(fig)
 
                 # Plot raw contrast.
                 klmodes = self.database.red[key]['KLMODES'][j].split(',')
                 fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
                 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
                 mod = len(colors)
-                with plt.style.context('spaceKLIP.sk_style'):
-                    fig = plt.figure(figsize=(6.4, 4.8))
-                    ax = plt.gca()
-                    for k in range(data.shape[0]):
-                        if mask is None:
-                            ax.plot(seps[k], cons[k], color=colors[k % mod], label=klmodes[k] + ' KL')
-                        else:
-                            ax.plot(seps[k], cons[k], color=colors[k % mod], alpha=0.3, ls='--')
-                            ax.plot(seps[k], cons_mask[k], color=colors[k % mod], label=klmodes[k] + ' KL')
-                    ax.set_yscale('log')
-                    ax.set_ylim([None,1])
-                    if plot_xlim is not None:
-                        ax.set_xlim(plot_xlim)
-                    ax.set_xlabel('Separation [arcsec]')
-                    ax.set_ylabel(r'5-$\sigma$ contrast')
-                    ax.legend(loc='upper right', ncols=3,
-                            title=None if mask is None else 'Dashed lines exclude coronagraph mask throughput',
-                            title_fontsize=10)
-                    ax.set_title(f'Raw contrast in {filt}, {psfsub_strategy}')
-                    plt.tight_layout()
-                    if save_figures:
-                        output_file = fitsfile[:-5] + '_rawcon.pdf'
-                        plt.savefig(output_file)
-                        log.info(f" Plot saved in {output_file}")
-                    plt.show()
-                    plt.close(fig)
+                # with plt.style.context('spaceKLIP.sk_style'):
+                fig = plt.figure(figsize=(6.4, 4.8))
+                ax = plt.gca()
+                for k in range(data.shape[0]):
+                    if mask is None:
+                        ax.plot(seps[k], cons[k], color=colors[k % mod], label=klmodes[k] + ' KL')
+                    else:
+                        ax.plot(seps[k], cons[k], color=colors[k % mod], alpha=0.3, ls='--')
+                        ax.plot(seps[k], cons_mask[k], color=colors[k % mod], label=klmodes[k] + ' KL')
+                ax.set_yscale('log')
+                ax.set_ylim([None,1])
+                if plot_xlim is not None:
+                    ax.set_xlim(plot_xlim)
+                ax.set_xlabel('Separation [arcsec]')
+                ax.set_ylabel(r'5-$\sigma$ contrast')
+                ax.legend(loc='upper right', ncols=3,
+                        title=None if mask is None else 'Dashed lines exclude coronagraph mask throughput',
+                        title_fontsize=10)
+                ax.set_title(f'Raw contrast in {filt}, {psfsub_strategy}')
+                plt.tight_layout()
+                if save_figures:
+                    output_file = fitsfile[:-5] + '_rawcon.pdf'
+                    plt.savefig(output_file)
+                    log.info(f" Plot saved in {output_file}")
+                plt.show()
+                plt.close(fig)
 
                 if output_filetype.lower()=='ecsv':
                     # Save outputs as astropy ECSV text tables
@@ -752,7 +752,7 @@ class AnalysisTools():
 
                 # Define some local utilty functions for plot setup.
                 # This makes the plotting code below less repetitive and more consistent
-                @plt.style.context('spaceKLIP.sk_style')
+                # @plt.style.context('spaceKLIP.sk_style')
                 def standardize_plots_setup():
                     fig = plt.figure(figsize=(6.4, 4.8))
                     ax = plt.gca()
@@ -761,7 +761,7 @@ class AnalysisTools():
                     ax.set_prop_cycle(cc)
                     return fig, ax
 
-                @plt.style.context('spaceKLIP.sk_style')
+                # @plt.style.context('spaceKLIP.sk_style')
                 def standardize_plots_annotate_save(ax, title="",
                                                     ylabel='Throughput',
                                                     xlim=plot_xlim,
