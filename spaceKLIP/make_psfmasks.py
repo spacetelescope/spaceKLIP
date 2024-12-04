@@ -71,6 +71,9 @@ for apername in crpix_jarron.keys():
             fitsfile = 'jwst_nircam_psfmask_0027.fits'
             xcen, ycen = 160.5, 160.5
             cval = 0.99088
+        elif '400X256_MASKLWB' in apername:
+            fitsfile = 'jwst_nircam_psfmask_0112.fits'
+            xcen, ycen = 264.7, 145.4
 
         # Get true mask center from Jarron.
         crpix1_jarron, crpix2_jarron = crpix_jarron[apername]
