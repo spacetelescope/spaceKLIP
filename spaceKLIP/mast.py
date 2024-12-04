@@ -9,6 +9,7 @@ import numpy as np
 import astropy, astropy.table
 from astroquery.mast import Mast
 import requests
+import tqdm
 
 import logging
 log = logging.getLogger(__name__)
