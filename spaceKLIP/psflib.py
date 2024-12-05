@@ -32,6 +32,16 @@ sp_class_letters = ['O','B','A','F','G','K','M','T','Y']
 
 # Helper functions for logic with database series
 def isnone(series):
+    """Helper function to determine which elements of a series
+    are NaN, None, or empty strings.
+
+    Args:
+        series (list-like): input data to check
+
+    Returns:
+        boolean array: True values where input array is NaN/None/''
+    """
+
     try:
         return np.isnan(series)
     except:
@@ -64,6 +74,19 @@ def load_refdb(fpath):
 
 
 def decode_simbad_sptype(input_sptypes):
+    """Decodes the complicated SIMBAD spectral type string into simplified 
+    spectral type components.
+
+    Args:
+        input_sptypes (str or list): SIMBAD spectral type string (or list of strings)
+
+    Returns:
+        tuple: list of spectral class letters, list of subclass numbers, 
+            and list of luminosity class numerals for each input string.
+    """
+
+    # TODO:
+        # - test this!
 
     if isinstance(input_sptypes,str):
         input_sptypes = [input_sptypes]
@@ -98,7 +121,56 @@ def decode_simbad_sptype(input_sptypes):
     return (sp_classes,sp_subclasses,sp_lclasses)
 
 
+def adjust_spttype(spt_tup):
+    # TODO: 
+    # - Tests:
+        # - input hotter than O0
+        # - input colder than Y9
+        # - subclass not int                
+        # - known transitions: A10 -> F0, M-3 -> F7
+
+    spt_class, spt_subclass = spt_tup
+
+    spt_subclass = int(spt_subclass)
+
+    if not spt_class in sp_class_letters:
+        raise Exception(f'Invalid spectral class letter: {spt_class}')
+
+    i_class = sp_class_letters.index(spt_class)
+
+    while spt_subclass > 9:
+
+        if spt_class == sp_class_letters[-1]:
+            return (spt_class,9)
+
+        i_class += 1
+        spt_class = sp_class_letters[i_class]
+        spt_subclass -= 10
+
+    while spt_subclass < 0:
+
+        if spt_class == sp_class_letters[0]:
+            return (spt_class,0)
+        
+        i_class -= 1
+        spt_class = sp_class_letters[i_class]
+        spt_subclass += 10
+
+    return (spt_class,spt_subclass)
+
+
 def update_db_sptypes(refdb):
+    """
+    Separate the spectral type column into a column each for the
+    spectral class letter, subclass number, and luminosity class numeral.
+
+    Args:
+        refdb (pandas.DataFrame): PSF reference dataframe
+
+    Returns:
+        pandas.DataFrame: updated PSF reference dataframe
+    """
+
     simbad_sptypes = refdb.SPTYPE.values
 
     sp_classes, sp_subclasses, sp_lclasses = decode_simbad_sptype(simbad_sptypes)
@@ -319,7 +391,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
 
 
 def get_sciref_files(sci_target, refdb, idir=None, 
-                     spt_choice=None, 
+                     spt_tolerance=None, 
                      filters=None, 
                      exclude_disks=False):
     """Construct a list of science files and reference files to input to a PSF subtraction routine.
@@ -333,11 +405,12 @@ def get_sciref_files(sci_target, refdb, idir=None,
             the build_refdb() function.
         idir (str):
             path to directory of input data, to be appended to file names.
-        spt_choice (str, optional): 
+        spt_tolerance (str or int, optional): 
             None (default): use all spectral types.
-            'near' : use only references with the same spectral class letter.
-            'nearer' : use only refs within +- 1 spectral type. ie. M3-5 for an M4 science target.
-            'nearest' : use only refs with the exact same spectral type.
+            'exact' : use only refs with the exact same spectral type.
+            'class' : use only references with the same spectral class letter.
+            'subclass' : use only references with the same spectral class letter and subclass number. (ignores luminosity class)
+            int : use only refs within +- N spectral subclasses, e.g. M3-5 for an M4 science target if spt_tolerance = 1.
         filters (str or list, optional): 
             None (default) : include all filters.
             'F444W' or other filter name: include only that filter.
@@ -350,15 +423,7 @@ def get_sciref_files(sci_target, refdb, idir=None,
     """
 
     # TODO:
-        # - filter out flags?
-        # - sptype filters 
-        # - tests:
-            # - sci_target in index
-            # - sci_target in 2MASS_ID
-            # - sci_target in TARGPROP
-            # - sci_target not in refdb 
-            # - exceptions if 0 science fnames are returned
-            # - warnings if 0 reference observations are returned
+        # - filter out manual flags
 
     if isinstance(refdb,str):
         refdb = load_refdb(refdb)
@@ -377,6 +442,7 @@ def get_sciref_files(sci_target, refdb, idir=None,
         targ_2mass = refdb_temp.loc[sci_target,'2MASS_ID'].to_list()[0]
     
     else:
+        log.error(f'Science target {sci_target} not found in reference database.')
         raise Exception(f'Science target {sci_target} not found in reference database.')
     
     refdb_temp = refdb.reset_index()
@@ -384,13 +450,65 @@ def get_sciref_files(sci_target, refdb, idir=None,
 
     # Collect all the science files
     sci_fnames = refdb_temp.index[refdb_temp['2MASS_ID'] == targ_2mass].to_list()
+    first_scifile = sci_fnames[0]
 
     # Start list of reference files
     ref_fnames = refdb_temp.index[refdb_temp['2MASS_ID'] != targ_2mass].to_list()
 
     # Collect the reference files
-    if spt_choice != None:
-        raise Exception('Only spt_choice=None is currently supported.')
+    if spt_tolerance != None:
+
+        # Consider handling float subclasses (e.g. M4.5) better. Take floor for now.
+        refdb_temp['SP_SUBCLASS'] = np.floor(refdb_temp['SP_SUBCLASS'])
+
+        targ_sp_class = refdb_temp.loc[first_scifile,'SP_CLASS']
+        targ_sp_subclass = refdb_temp.loc[first_scifile,'SP_SUBCLASS']
+        targ_sp_lclass = refdb_temp.loc[first_scifile,'SP_LCLASS']
+        
+        if isinstance(spt_tolerance,str):
+            if spt_tolerance.lower() == 'exact':
+
+                spt_fnames = refdb_temp.index[(refdb_temp['SP_CLASS'] == targ_sp_class) & 
+                                                (refdb_temp['SP_SUBCLASS'] == targ_sp_subclass) & 
+                                                (refdb_temp['SP_LCLASS'] == targ_sp_lclass)
+                                                ].to_list()
+                
+            elif spt_tolerance.lower() == 'class':
+
+                spt_fnames = refdb_temp.index[(refdb_temp['SP_CLASS'] == targ_sp_class)
+                                                ].to_list()
+
+            elif spt_tolerance.lower() == 'subclass':
+
+                spt_fnames = refdb_temp.index[(refdb_temp['SP_CLASS'] == targ_sp_class) & 
+                                                (refdb_temp['SP_SUBCLASS'] == targ_sp_subclass)
+                                                ].to_list()
+            
+            else:
+                raise Exception(f'spt_tolerance {spt_tolerance} not configured.')
+        
+        else:
+
+            assert isinstance(spt_tolerance,int)
+
+            spt_fnames = []
+            
+            for i in range(-spt_tolerance,spt_tolerance+1):
+
+                spt_tup = (targ_sp_class,targ_sp_subclass+i)
+            
+                # Carry over spectral classes and subclasses correctly
+                spt_tup = adjust_spttype(spt_tup)
+            
+                spt_fnames.extend(refdb_temp.index[(refdb_temp['SP_CLASS'] == spt_tup[0]) & 
+                                                   (refdb_temp['SP_SUBCLASS'] == spt_tup[1])
+                                                  ].to_list())
+            
+        if len(spt_fnames) == 0:
+            raise Warning(f'No observations found with specified spectral type filter.')
+        
+        sci_fnames = list(set(sci_fnames).intersection(spt_fnames))
+        ref_fnames = list(set(ref_fnames).intersection(spt_fnames))
 
     # Remove observations with disks flagged
     if exclude_disks:
