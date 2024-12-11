@@ -14,7 +14,7 @@ import astropy.io.fits as pyfits
 import numpy as np
 
 import webbpsf, webbpsf_ext
-from webbpsf_ext import synphot_ext as S
+from webbpsf_ext import synphot_ext as Sz
 
 from pyklip.klip import rotate as nanrotate
 from scipy.ndimage import rotate
@@ -399,9 +399,9 @@ class JWST_PSF():
                     return_oversample=False, do_shift=False, normalize='first'):
         """
         Generate offset PSF in detector frame.
-        
+
         Generate a PSF with some (x,y) position in some coordinate frame (default idl).
-        
+
         Parameters
         ----------
         coord_vals : tuple or None
@@ -413,14 +413,15 @@ class JWST_PSF():
                 * 'sci': pixels, in DMS axes orientation; aperture-dependent
                 * 'det': pixels, in raw detector read out axes orientation
                 * 'idl': arcsecs relative to aperture reference location.
+
         quick : bool
             Use linear combination of on-axis and off-axis PSFs to generate
             PSF as a function of corongraphic mask throughput. Typically takes
-            10s of msec, compared to standard calculations using coefficients 
+            10s of msec, compared to standard calculations using coefficients
             (~1 sec) or on-the-fly calcs w/ webbpsf (10s of sec).
             Only applicable for NIRCam.
         sp : :class:`webbpsf_ext.synphot_ext.Spectrum`
-            Manually specify spectrum to get a desired wavelength weighting. 
+            Manually specify spectrum to get a desired wavelength weighting.
             Only applicable if ``quick=False``. If not set, defaults to ``self.sp``.
         return_oversample : bool
             Return the oversampled version of the PSF?
@@ -431,12 +432,13 @@ class JWST_PSF():
             How to normalize the PSF. Options are:
                 * 'first': Normalize to 1.0 at entrance pupil
                 * 'exit_pupil': Normalize to 1.0 at exit pupil
+
             Only works for `quick=False`.
-        
+
         Returns
         -------
         None.
-        
+
         """
         
         from scipy.interpolate import interp1d
@@ -543,6 +545,7 @@ class JWST_PSF():
             How to normalize the PSF. Options are:
                 * 'first': Normalize to 1.0 at entrance pupil
                 * 'exit_pupil': Normalize to 1.0 at exit pupil
+
             Only works for `quick=False`.
                         
         Keyword Args

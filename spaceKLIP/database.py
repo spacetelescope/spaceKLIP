@@ -113,8 +113,8 @@ class Database():
                             cr_from_siaf=False,
                             assoc_using_targname=True):
         """
-        Read JWST stage 0 (*uncal), 1 (*rate or *rateints), or 2 (*cal or
-        *calints) data into the Database.obs dictionary. It contains a table of
+        Read JWST stage 0 (\*uncal), 1 (\*rate or \*rateints), or 2 (\*cal or
+        \*calints) data into the Database.obs dictionary. It contains a table of
         metadata for each concatenation, which are identified automatically
         based on instrument, filter, pupil mask, and image mask. The tables can
         be edited by the user at any stage of the data reduction process and
@@ -208,10 +208,13 @@ class Database():
         else:
             allpaths = np.array(datapaths)
         Nallpaths = len(allpaths)
+
         for i in range(Nallpaths):
             hdul = pyfits.open(allpaths[i])
             head = hdul[0].header
-            data = hdul['SCI'].data
+            # Only read in the data if needed.
+            data = hdul['SCI'].data if not head.get('NINTS') else None
+
             if 'uncal' in allpaths[i]:
                 DATAMODL += ['STAGE0']
             elif 'rate' in allpaths[i] or 'rateints' in allpaths[i]:
@@ -248,7 +251,7 @@ class Database():
                 raise UserWarning('Data originates from unknown telescope')
             EXP_TYPE += [head.get('EXP_TYPE', 'UNKNOWN')]
             EXPSTART += [head.get('EXPSTART', np.nan)]
-            NINTS += [head.get('NINTS', data.shape[0] if data.ndim == 3 else 1)]
+            NINTS += [head.get('NINTS', data.shape[0] if data is not None and data.ndim == 3 else 1)]
             EFFINTTM += [head.get('EFFINTTM', np.nan)]
             IS_PSF += [head.get('IS_PSF', 'NONE')]
             SELFREF += [head.get('SELFREF', 'NONE')]
@@ -596,7 +599,7 @@ class Database():
                           datapaths,
                           cr_from_siaf=False):
         """
-        Read JWST stage 3 data (this can be *i2d data from the official JWST
+        Read JWST stage 3 data (this can be \*i2d data from the official JWST
         pipeline, or data products from the pyKLIP and classical PSF
         subtraction pipelines implemented in spaceKLIP) into the Database.red
         dictionary. It contains a table of metadata for each concatenation,
