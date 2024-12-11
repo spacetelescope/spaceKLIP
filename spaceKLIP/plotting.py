@@ -549,15 +549,19 @@ def display_image_comparisons(database,
 
         # Check if any SCI data remains after filtering.
         if not any(row['TYPE'] == 'SCI' for row in filtered_table):
-            print(f"No SCI type files found in key: {key}."
-            f" Exiting. Check 'restrict_to' criteria.")
-            return
+            print(f"No SCI type files found in key: {key}.")
+            # f" Exiting. Check 'restrict_to' criteria.")
+            continue
        
         # Identify the first SCI frame for subtraction, store it for later use.
         first_sci_file = next((row['FITSFILE'] for row in filtered_table if row['TYPE'] == 'SCI'), None)
         root_dir = first_sci_file.split(os.sep)[0]
         for base_dir in base_dirs:
             image_files[base_dir]['first_sci_file'] = os.path.join(root_dir, base_dir, os.path.basename(first_sci_file))
+
+    if len(filtered_files)==0:
+        print("No files found. Check 'restrict_to' criteria. Exiting.")
+        return 
 
     # Create figure of appropriate size.
     num_dirs = len(base_dirs)
