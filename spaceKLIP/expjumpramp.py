@@ -585,7 +585,8 @@ class Covar:
         the covariance matrix of the resultant differences, and the time 
         intervals between the resultant midpoints.
 
-        Arguments:
+        Parameters
+        ----------
         1. readtimes [list of values or lists for the times of reads.  If 
                       a list of lists, times for reads that are averaged
                       together to produce a resultant.]
@@ -651,21 +652,20 @@ class Covar:
         Calculate the bias in the best-fit count rate from estimating the
         covariance matrix.  This calculation is derived in the paper.
 
-        Arguments:
+        Parameters
+        ----------
         1. countrates [array of count rates at which the bias is desired]
         2. sig [float, single read noise]
-        3. cvec [weight vector on resultant differences for initial
-                 estimation of count rate for the covariance matrix.
-                 Will be renormalized inside this function.]
-        Optional argument:
-        4. da [float, fraction of the count rate plus sig**2 to use for finite
-               difference estimate of the derivative.  Default 1e-7.]
+        3. cvec [weight vector on resultant differences for initial estimation of count rate for the covariance matrix]
 
-        Returns:
+        Optional argument:
+        4. da [float, fraction of the count rate plus sig**2 to use for finite difference estimate of the derivative.]
+
+        Returns
+        -------
         1. bias [array, bias of the best-fit count rate from using cvec
                  plus the observed resultants to estimate the covariance
                  matrix]
-        
         """
         
         if self.pedestal:
@@ -744,7 +744,8 @@ class Ramp_Result:
         fewer omitted resultant differences to get the correct values
         without double-coundint omissions.
 
-        Arguments:
+        Parameters
+        ----------
         1. diffs2use [a 2D array matching self.countrate_oneomit in 
                       shape with zero for resultant differences that 
                       were masked and one for differences that were 
@@ -789,7 +790,8 @@ def fit_ramps(diffs, Cov, sig, countrateguess=None, diffs2use=None,
     covariance matrix for the read differences as given by the diagonal
     elements and the off-diagonal elements.
 
-    Arguments:
+    Parameters
+    ----------
     1. diffs [resultant differences, shape (ndiffs, npix)]
     2. Cov [class Covar, holds the covariance matrix information]
     3. sig [read noise, 1D array, shape (npix)]
@@ -1082,17 +1084,18 @@ def fit_ramps(diffs, Cov, sig, countrateguess=None, diffs2use=None,
 
 def mask_jumps(diffs, Cov, sig, threshold_oneomit=20.25,
                threshold_twoomit=23.8, diffs2use=None):
-
     """
 
     Function mask_jumps implements a likelihood-based, iterative jump
     detection algorithm.
 
-    Arguments:
+    Parameters
+    ----------
     1. diffs [resultant differences]
     2. Cov [class Covar, holds the covariance matrix information.  Must
             be based on differences alone (i.e. without the pedestal)]
     3. sig [read noise, 1D array]
+
     Optional arguments:
     4. threshold_oneomit [float, minimum chisq improvement to exclude 
                           a single resultant difference.  Default 20.25,
@@ -1107,7 +1110,8 @@ def mask_jumps(diffs, Cov, sig, threshold_oneomit=20.25,
                   which will only flag additional differences and
                   overwrite the data in this array. Default None]
 
-    Returns:
+    Returns
+    -------
     1. diffs2use [a 2D array of the same shape as d, one for resultant
                   differences that appear ok and zero for resultant
                   differences flagged as contaminated.]
@@ -1254,7 +1258,9 @@ def getramps(countrate, sig, readtimes, nramps=10):
 
     """
     Function getramps: make some synthetic ramps
-    Arguments:
+
+    Parameters
+    ----------
     1. countrate [electrons/time]
     2. sig [single read read noise, electrons]
     3. readtimes [list of values or lists for the times of reads.  If 
@@ -1263,7 +1269,8 @@ def getramps(countrate, sig, readtimes, nramps=10):
     Optional Arguments:
     4. nramps [number of ramps desired, default 10]
 
-    Returns:
+    Returns
+    -------
     1. counts [electrons in each read, shape (nreads, nramps)]
     """
 

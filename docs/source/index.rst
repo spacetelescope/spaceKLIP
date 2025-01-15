@@ -92,7 +92,7 @@ Compatible Simulated Data: `Here <https://stsci.box.com/s/cktghuyrwrallb401rw5y5
    :hidden:
 
    spaceKLIP
-   gen_index
+
 
 
 
