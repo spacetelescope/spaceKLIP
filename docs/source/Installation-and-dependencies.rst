@@ -5,13 +5,13 @@ it is recommended that you clone the git repository directory for installation:
 
 ::
 
-	git clone https://github.com/kammerje/spaceKLIP.git
+	git clone https://github.com/spacetelescope/spaceKLIP.git
 
 If you would like a specific branch:
 
 ::
 
-	git clone https://github.com/kammerje/spaceKLIP.git@branch
+	git clone https://github.com/spacetelescope/spaceKLIP.git@branch
 
 From here, it is **highly** recommended that you create a unique anaconda environment to hold all of the spaceKLIP
 dependencies. spaceKLIP is not currently compatible with python 3.12
