@@ -1216,7 +1216,17 @@ class AnalysisTools():
                     guess_spec = np.array([1.])
                     guess_sep = np.sqrt(guess_dx**2 + guess_dy**2)  # pix
                     guess_pa = np.rad2deg(np.arctan2(guess_dx, guess_dy))  # deg
-                    
+
+                    # Need to check if the guesses actually fall within the data
+                    # cube. If not, then the fit will fail.
+                    # Get image extent in x and y
+                    x_extent = dataset.input.shape[2]
+                    y_extent = dataset.input.shape[1]
+                    # Check if the guess is within the image extent
+                    if guess_dx < 0 or guess_dx > x_extent or guess_dy < 0 or guess_dy > y_extent:
+                        log.warning(f"Companion {k+1} guess is outside the image extent. Skipping.")
+                        continue
+
                     # The initial guesses are made in RA/Dec space, but the
                     # model PSFs are defined by the offset between the
                     # coronagraphic mask center and the companion. Hence, we
