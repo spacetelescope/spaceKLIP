@@ -1000,6 +1000,11 @@ class AnalysisTools():
                 resolution = 1e-6 * self.database.red[key]['CWAVEL'][j] / diam / pxsc_rad  # pix
                 if not np.isnan(self.database.obs[key]['BLURFWHM'][j]):
                     resolution = np.hypot(resolution, self.database.obs[key]['BLURFWHM'][j])
+
+                # Log the subtraction information for this concatenation for later
+                mode = self.database.red[key]['MODE'][j]
+                annuli = int(self.database.red[key]['ANNULI'][j])
+                subsections = int(self.database.red[key]['SUBSECTS'][j])
                 
                 # Find science and reference files.
                 filepaths, psflib_filepaths, maxnumbasis = get_pyklip_filepaths(self.database, key, return_maxbasis=True)
@@ -1349,9 +1354,6 @@ class AnalysisTools():
                     # Compute the FM dataset if it does not exist yet, or if
                     # overwrite is True.
                     # Compute the FM dataset.
-                    mode = self.database.red[key]['MODE'][j]
-                    annuli = int(self.database.red[key]['ANNULI'][j])
-                    subsections = int(self.database.red[key]['SUBSECTS'][j])
                     fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fmpsf-KLmodes-all.fits')
                     klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-klipped-KLmodes-all.fits')
                     if overwrite or (not os.path.exists(fmdataset) or not os.path.exists(klipdataset)):
