@@ -1914,9 +1914,6 @@ class AnalysisTools():
                             self.database.obs = temp
                         
                         # Reduce companion-subtracted data.
-                        mode = self.database.red[key]['MODE'][j]
-                        annuli = self.database.red[key]['ANNULI'][j]
-                        subsections = self.database.red[key]['SUBSECTS'][j]
                         parallelized.klip_dataset(dataset=dataset_orig,
                                                   mode=mode,
                                                   outputdir=output_dir_fm,
