@@ -578,7 +578,8 @@ class AnalysisTools():
                 # Get stellar magnitudes and filter zero points, but use the same file as rawcon
                 ccinfo = os.path.join(rawcon_dir, 'contrast_curve_info.txt')
                 with open(ccinfo) as cci:
-                    starfile, spectral_type = cci.readline().strip('\n').split(' /// ')
+                    starfile, spectral_type_info = cci.readline().strip('\n').split(' /// ')
+                    spectral_type = spectral_type_info.split(': ')[1]
                     starfile = os.path.join(rawcon_dir, starfile.replace('#',''))
                 mstar, fzero = get_stellar_magnitudes(starfile,
                                                       spectral_type,
