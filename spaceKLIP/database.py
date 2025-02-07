@@ -1245,28 +1245,33 @@ class Database():
         
         pass
 
-    def adjust_red_dir(self, red_dir):
+    def adjust_dir(self, dir_path, data_type):
         """
-        Adjust the directory of the reduced data products.
+        Adjust the directory of the data products.
 
         Parameters
         ----------
-        red_dir : str
-            New directory of the reduced data products.
+        dir_path : str
+            New directory of the data products.
+        data_type : str
+            Type of data to adjust ('red' for reduced data, 'obs' for observations data, 'src' for source data).
 
         Returns
         -------
         None.
 
         """
-        # Adjust the directory of the reduced data products.
+        # Adjust the directory of the data products.
         try:
-            for key in self.red.keys():
-                for i in range(len(self.red[key])):
-                    self.red[key]['FITSFILE'][i] = os.path.join(red_dir, os.path.split(self.red[key]['FITSFILE'][i])[1])
-                    self.red[key]['MASKFILE'][i] = os.path.join(red_dir, os.path.split(self.red[key]['MASKFILE'][i])[1])
+            data_dict = getattr(self, data_type)
+            for key in data_dict.keys():
+                for i in range(len(data_dict[key])):
+                    data_dict[key]['FITSFILE'][i] = os.path.join(dir_path,
+                                                                 os.path.split(data_dict[key]['FITSFILE'][i])[1])
+                    data_dict[key]['MASKFILE'][i] = os.path.join(dir_path,
+                                                                 os.path.split(data_dict[key]['MASKFILE'][i])[1])
         except Exception as e:
-            raise UserWarning(f"Invalid directory: {red_dir}. Error: {e}")
+            raise UserWarning(f"Invalid directory: {dir_path}. Error: {e}")
 
         pass
     
