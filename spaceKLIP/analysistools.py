@@ -145,10 +145,16 @@ class AnalysisTools():
             os.makedirs(output_dir)
 
         # Copy the starfile that will be used into this directory
-        starfile_ext = os.path.splitext(starfile)[1]
         new_starfile_path = output_dir+'/'+starfile.split('/')[-1]
-        new_header = '#'+starfile.split('/')[-1] + ' /// {}'.format(spectral_type)+'\n'
+        if starfile[-4:] == '.vot':
+            # Will be using the input spectral type, should record it
+            spectype_str = 'Spectral Type: {}'.format(spectral_type)
+        else:
+            # Spectral type won't be relevant, don't record misleading info
+            spectype_str = 'Spectral Type: N/A'
+        new_header = '#'+starfile.split('/')[-1] + f' /// {spectype_str}'+'\n'
         contrast_curve_info_path = output_dir+'/contrast_curve_info.txt'
+        # Also copy this info to the contrast curve file
         with open(contrast_curve_info_path, 'w') as ccinfo:
             ccinfo.write(new_header)
         log.info('Copying starfile {} to {}'.format(starfile, new_starfile_path))
@@ -572,7 +578,8 @@ class AnalysisTools():
                 # Get stellar magnitudes and filter zero points, but use the same file as rawcon
                 ccinfo = os.path.join(rawcon_dir, 'contrast_curve_info.txt')
                 with open(ccinfo) as cci:
-                    starfile, spectral_type = cci.readline().strip('\n').split(' /// ')
+                    starfile, spectral_type_info = cci.readline().strip('\n').split(' /// ')
+                    spectral_type = spectral_type_info.split(': ')[1]
                     starfile = os.path.join(rawcon_dir, starfile.replace('#',''))
                 mstar, fzero = get_stellar_magnitudes(starfile,
                                                       spectral_type,
