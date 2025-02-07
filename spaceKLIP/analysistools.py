@@ -1232,7 +1232,7 @@ class AnalysisTools():
                         guess_dx > x_extent / 2 or
                         guess_dy < -y_extent / 2 or
                         guess_dy > y_extent / 2):
-                        log.warning(f"Companion {k + 1} guess is outside the image extent (dx: {guess_dx}, dy: {guess_dy}). Skipping.")
+                        log.warning(f"Companion {k + 1} guess is outside the image extent (dx: {-guess_dx}, dy: {guess_dy}). Skipping.")
                         continue
 
                     # The initial guesses are made in RA/Dec space, but the
@@ -1946,8 +1946,8 @@ class AnalysisTools():
                 self.database.update_src(key, j, tab)
 
                 # Save the results table.
-                output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                    subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                output_ecsv_path = os.path.join(output_dir_kl, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                    subsections) + '_' + key + '-results.ecsv')
                 tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
                 print(f'Table saved to {output_ecsv_path}')
         pass
