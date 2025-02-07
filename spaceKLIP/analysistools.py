@@ -1228,8 +1228,11 @@ class AnalysisTools():
                     x_extent = dataset.input.shape[2]
                     y_extent = dataset.input.shape[1]
                     # Check if the guess is within the image extent
-                    if guess_dx < 0 or guess_dx > x_extent or guess_dy < 0 or guess_dy > y_extent:
-                        log.warning(f"Companion {k+1} guess is outside the image extent. Skipping.")
+                    if (guess_dx < -x_extent / 2 or
+                        guess_dx > x_extent / 2 or
+                        guess_dy < -y_extent / 2 or
+                        guess_dy > y_extent / 2):
+                        log.warning(f"Companion {k + 1} guess is outside the image extent (dx: {guess_dx}, dy: {guess_dy}). Skipping.")
                         continue
 
                     # The initial guesses are made in RA/Dec space, but the
