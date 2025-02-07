@@ -1244,6 +1244,31 @@ class Database():
             self.src[key] = [None] * index + [tab]
         
         pass
+
+    def adjust_red_dir(self, red_dir):
+        """
+        Adjust the directory of the reduced data products.
+
+        Parameters
+        ----------
+        red_dir : str
+            New directory of the reduced data products.
+
+        Returns
+        -------
+        None.
+
+        """
+        # Adjust the directory of the reduced data products.
+        try:
+            for key in self.red.keys():
+                for i in range(len(self.red[key])):
+                    self.red[key]['FITSFILE'][i] = os.path.join(red_dir, os.path.split(self.red[key]['FITSFILE'][i])[1])
+                    self.red[key]['MASKFILE'][i] = os.path.join(red_dir, os.path.split(self.red[key]['MASKFILE'][i])[1])
+        except Exception as e:
+            raise UserWarning(f"Invalid directory: {red_dir}. Error: {e}")
+
+        pass
     
     def summarize(self):
         """
