@@ -1232,6 +1232,16 @@ class AnalysisTools():
                     # Need to check if the guesses actually fall within the data
                     # cube. If not, then the fit will fail.
                     if not xy_check_override==True:
+                        # Get image extent in x and y
+                        x_extent = dataset.input.shape[2]
+                        y_extent = dataset.input.shape[1]
+                        # Check if the guess is within the image extent
+                        if (guess_dx < -x_extent / 2 or
+                                guess_dx > x_extent / 2 or
+                                guess_dy < -y_extent / 2 or
+                                guess_dy > y_extent / 2):
+                            log.warning(f"Companion {k + 1} guess is outside the image extent (dx: {-guess_dx}, dy: {guess_dy}). Skipping.")
+                            continue
                         # Get approximate integer pixel position
                         xcen = (dataset.input.shape[2] - 1) / 2.0
                         ycen = (dataset.input.shape[1] - 1) / 2.0
