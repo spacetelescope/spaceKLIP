@@ -867,6 +867,7 @@ class AnalysisTools():
                            planetfile=None,
                            klmode='max',
                            date='auto',
+                           xy_check_override=False,
                            use_fm_psf=True,
                            highpass=False,
                            fitmethod='mcmc',
@@ -913,6 +914,8 @@ class AnalysisTools():
             date. If 'auto', will grab date from the FITS file header. If None,
             then the default WebbPSF OPD is used (RevAA). The default is
             'auto'.
+        xy_check_override : bool, optional
+            If True, override the x-y position check to ensure the companion falls in the FOV. The default is False.
         use_fm_psf : bool, optional
             If True, use a FM PSF generated with pyKLIP, otherwise use a more
             simple integration time-averaged model offset PSF which does not
@@ -1224,16 +1227,16 @@ class AnalysisTools():
 
                     # Need to check if the guesses actually fall within the data
                     # cube. If not, then the fit will fail.
-                    # Get image extent in x and y
-                    x_extent = dataset.input.shape[2]
-                    y_extent = dataset.input.shape[1]
-                    # Check if the guess is within the image extent
-                    if (guess_dx < -x_extent / 2 or
-                        guess_dx > x_extent / 2 or
-                        guess_dy < -y_extent / 2 or
-                        guess_dy > y_extent / 2):
-                        log.warning(f"Companion {k + 1} guess is outside the image extent (dx: {-guess_dx}, dy: {guess_dy}). Skipping.")
-                        continue
+                    if not xy_check_override==True:
+                        # Get approximate integer pixel position
+                        xcen = (dataset.input.shape[2] - 1) / 2.0
+                        ycen = (dataset.input.shape[1] - 1) / 2.0
+                        xpos = int(xcen - guess_dx)  # Minus because RA direction
+                        ypos = int(ycen + guess_dy)
+                        # Use the mask file to determine if we're in a good region.
+                        if np.isnan(mask[ypos, xpos]):
+                            log.warning(f"Companion {k + 1} guess is outside the image extent (dx: {-guess_dx}, dy: {guess_dy}). Skipping.")
+                            continue
 
                     # The initial guesses are made in RA/Dec space, but the
                     # model PSFs are defined by the offset between the
