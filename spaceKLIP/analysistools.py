@@ -1013,6 +1013,10 @@ class AnalysisTools():
                 filepaths, psflib_filepaths, maxnumbasis = get_pyklip_filepaths(self.database, key, return_maxbasis=True)
                 if 'maxnumbasis' not in kwargs_temp.keys() or kwargs_temp['maxnumbasis'] is None:
                     kwargs_temp['maxnumbasis'] = maxnumbasis
+
+                # Read in the mask file
+                maskfile = self.database.red[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
                 
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
