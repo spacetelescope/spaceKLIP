@@ -880,6 +880,7 @@ class AnalysisTools():
                            overwrite=True,
                            subdir='companions',
                            save_figures=True,
+                           save_individual_ecsv=True,
                            **kwargs):
         """
         Extract the best fit parameters of a number of companions from each
@@ -1955,6 +1956,13 @@ class AnalysisTools():
                     # Restore original pyKLIP dataset.
                     if subtract:
                         dataset = dataset_orig
+
+                    # Save individual file if necessary
+                    if save_individual_ecsv:
+                        ind_tab = tab[-1:]
+                        output_ind_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS'
+                                                            + str(subsections) + '_' + key + '-results.ecsv')
+                        ind_tab.write(output_ind_ecsv_path, format='ascii.ecsv', overwrite=True)
 
                 # Update source database.
                 self.database.update_src(key, j, tab)
