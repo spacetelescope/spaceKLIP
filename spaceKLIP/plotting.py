@@ -1048,11 +1048,17 @@ def plot_subimages(imgdirs, subdirs, filts, submodes, numKL,
 
         # get center information
         if instrument == 'NIRCAM':
-            center_pix = (int(np.rint(hdr['CRPIX2']-1)), 
-                          int(np.rint(hdr['CRPIX1']-1)))
+            center_pix = (int(np.rint(hdr.get('STARCENY', hdr['MASKCENY'])-1)),
+                          int(np.rint(hdr.get('STARCENX', hdr['MASKCENX'])-1)),
+                          )
+            # center_pix = (int(np.rint(hdr['STARCENY']-1)), 
+            #              int(np.rint(hdr['STARCENX']-1)))
             window_pix = int(np.rint(window_size / pltscale['NIRCAM'] / 2))
             offset = (window_pix - window_size / 0.063 / 2) *0.063
         else:
+            # center_pix = (int(np.rint(hdr.get('STARCENY', hdr['MASKCENY'])-1)),
+            #               int(np.rint(hdr.get('STARCENX', hdr['MASKCENX'])-1)),
+            #               ) # potential replacement!
             center_pix = miri_img_centers[flt]
             window_pix = int(np.rint(window_size / pltscale['MIRI'] / 2))
             offset = (window_pix - window_size / 0.11 / 2) *0.11
