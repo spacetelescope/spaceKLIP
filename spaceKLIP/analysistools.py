@@ -564,8 +564,17 @@ class AnalysisTools():
                 ### Now want to perform the injection and recovery of companions. 
                 # Define the seps and PAs to inject companions at
                 if injection_seps == 'default':
-                    inj_seps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 
-                                1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0]
+                    if filt in ["F444W"]:
+                        inj_seps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 
+                                    1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0]
+                    elif filt in ["F200W"]:
+                        inj_seps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 
+                                    1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0,]
+                    else:
+                        inj_seps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 
+                                    1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0]
+
+                        raise UserWarning("Injection Separations are not defined, assuming Long Wavelength")
                 else:
                     inj_seps = injection_seps
                 inj_seps_pix = inj_seps / pxsc_arcsec #Convert separation to pixels

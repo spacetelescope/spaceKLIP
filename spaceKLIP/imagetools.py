@@ -1679,6 +1679,7 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 
+
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
                 log.info('  --> Recenter frames: ' + tail)
@@ -1686,12 +1687,14 @@ class ImageTools():
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
                 shifts = []  # shift between star position and image center (data.shape // 2)
                 maskoffs_temp = []  # shift between star and coronagraphic mask position
-                
+                datapad=[]#temp arrays for padding
+                erropad=[]
                 # SCI and REF data.
                 if j in ww_sci or j in ww_ref:
                     
                     # NIRCam coronagraphy.
                     if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                        
                         for k in range(data.shape[0]):
                             
                             # For the first SCI frame, get the star position
@@ -1706,19 +1709,35 @@ class ImageTools():
                                                                                   date=head_pri['DATE-BEG'],
                                                                                   output_dir=output_dir)
                             
+                            
                             # Apply the same shift to all SCI and REF frames.
                             shifts += [np.array([-(xc - data.shape[-1]//2), -(yc - data.shape[-2]//2)])]
                             maskoffs_temp += [np.array([xshift, yshift])]
-                            data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                            erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            
+                            # data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            # erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+
+                            datapad += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)]
+                            erropad += [ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)]
+
                         if mask is not None:
-                            # mask = ut.imshift(mask, [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            # mask = ut.imshift(mask, [shifts[k][0], shifts[k][1]], method="spline", kwargs=kwargs)
+                            pad=max(np.abs([int(shifts[k][1]),int(shifts[k][0])])) + 5 #extra padding needed?
+                            # mask=np.pad(mask,((np.abs(int(shifts[k][1])),np.abs(int(shifts[k][1]))),(np.abs(int(shifts[k][0])),np.abs(int(shifts[k][0])))),mode="constant",constant_values=1)
+                            mask=np.pad(mask,pad,mode="constant",constant_values=1)
+                            #Unsure if we need to pad the mask here?
                             mask = spline_shift(mask, [shifts[k][1], shifts[k][0]], order=0, mode='constant', cval=np.nanmedian(mask))
+
+                        erro = np.array(erropad)#no need for the temp variables now
+                        data = np.array(datapad)
+
                         xoffset = self.database.obs[key]['XOFFSET'][j] - self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
                         yoffset = self.database.obs[key]['YOFFSET'][j] - self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
                         crpix1 = data.shape[-1]//2 + 1  # 1-indexed
                         crpix2 = data.shape[-2]//2 + 1  # 1-indexed
                     
+                        
+
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
                         log.warning('  --> Recenter frames: not implemented for MIRI coronagraphy, skipped')
@@ -1779,7 +1798,7 @@ class ImageTools():
                         maskoffs_temp += [np.array([0., 0.])]
                         data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                         erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                        
+
                         # Recenter TA frames to integer pixel precision by
                         # rolling the image.
                         ww_max = np.unravel_index(np.argmax(data[k]), data[k].shape)
@@ -2111,8 +2130,8 @@ class ImageTools():
                 # Align frames.
                 head, tail = os.path.split(fitsfile)
                 log.info('  --> Align frames: ' + tail)
-                if np.sum(np.isnan(data)) != 0:
-                    raise UserWarning('Please replace nan pixels before attempting to align frames')
+                # if np.sum(np.isnan(data)) != 0:
+                #     raise UserWarning('Please replace nan pixels before attempting to align frames')
                 shifts = []
                 for k in range(data.shape[0]):
                     
@@ -2163,6 +2182,7 @@ class ImageTools():
                     # using defined method. 
                     shifts += [np.array([pp[0], pp[1], pp[2]])]
                     if j != ww_sci[0] or k != 0:
+                        
                         data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                         erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                 shifts = np.array(shifts)
@@ -2203,6 +2223,20 @@ class ImageTools():
                 head_pri['YOFFSET'] = yoffset #arcseconds 
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
+
+                #DQ array needs to be the same shape as the image for pyklip subtractions?
+                if data.shape != pxdq.shape:
+                    log.info("  --> DQ array size does not agree with science array, Correcting...")
+                    _,sy,sx=data.shape
+                    ydata,xdata=np.where(~np.isnan(data[0]))
+                    xmax = max(xdata) 
+                    xmin = min(xdata)
+                    ymax = max(ydata)
+                    ymin = min(ydata)
+
+                    npix=[xmin, sx-(xmax+1), ymin, sy-(ymax+1)]
+                    pxdq = np.pad(pxdq, ((0, 0), (npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=4) ################
+
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
                 

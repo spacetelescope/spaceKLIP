@@ -22,6 +22,7 @@ from scipy.ndimage import shift as spline_shift
 
 from webbpsf_ext.imreg_tools import get_coron_apname as nircam_apname
 from webbpsf_ext.image_manip import expand_mask
+import matplotlib.pyplot as plt
 
 import logging
 log = logging.getLogger(__name__)
@@ -439,10 +440,34 @@ def crop_image(image,
         return imsub, xsub_indarr, ysub_indarr
     else:
         return imsub
+    
+def reflectpad(image, shift, extra_pad=5):
+    sx, sy = image.shape
+    xshift, yshift = shift
+    try: 
+        #if the shifts are two floats (y,x) then pad the image with the largest magnitude to stop wrapping
+        pad = max(np.abs([int(xshift), int(yshift)])) + extra_pad
+        impad = np.pad(image, pad, mode="reflect") 
+        return impad, pad, pad, sy, sx,extra_pad
+    
+    except: 
+        #if the shifts are touples then the image passed was orignally padded - pad to the same dimentions 
+        (padx1, padx2), (pady1, pady2) = xshift, yshift
+        padx1 = np.abs(int(padx1))
+        padx2 = np.abs(int(padx2))
+        pady1 = np.abs(int(pady1))
+        pady2 = np.abs(int(pady2))
+
+        # Pad the image with the reflection of the data
+        impad = np.pad(image, ((padx1, padx2), (pady1, pady2))[::-1], mode="reflect") 
+        return impad, (pady1,pady2), (padx1,padx2), sy, sx, extra_pad
+
+
 
 def imshift(image,
             shift,
             pad=False,
+            better_pad=True,
             cval=0.,
             method='fourier',
             kwargs={}):
@@ -457,7 +482,10 @@ def imshift(image,
         X- and y-shift to be applied.
     pad : bool, optional
         Pad the image before shifting it? Otherwise, it will wrap around
-        the edges. The default is True.
+        the edges. The default is False.
+    better_pad: bool, optional
+        Pad the image before shifting it with itself reflected and mask out the padded area after
+        The default the True.
     cval : float, optional
         Fill value for the padded pixels. The default is 0.
     method : 'fourier' or 'spline' (not recommended), optional
@@ -472,9 +500,11 @@ def imshift(image,
         The shifted image.
     
     """
+    if not shift[0] and not shift[1]:
+         # if there is no shift needed (the shift is too small and is set to 0):
+        return image
     
     if pad:
-        
         # Pad image.
         sy, sx = image.shape
         xshift, yshift = shift
@@ -491,7 +521,54 @@ def imshift(image,
             raise UserWarning('Image shift method "' + method + '" is not known')
         
         # Crop image to original size.
-        return imsft[pady:pady + sy, padx:padx + sx]
+        return imsft[pady:pady+sy, padx:padx+sx]
+    
+    elif better_pad:
+    
+        if np.sum(np.isnan(image))!=0: #If the image has nans it has been padded already
+            ydata,xdata=np.where(~np.isnan(image)) #find where isnt nans
+
+            xmax = max(xdata) 
+            xmin = min(xdata)
+            ymax = max(ydata)
+            ymin = min(ydata)
+           
+            mask=np.ones_like(image, dtype=int)
+            for i,j in zip(xdata,ydata):
+                mask[j,i]=0 # create the mask so the full image can be reconstructed
+                
+            # sx, sy = image.shape
+            sy, sx = image.shape
+            image = image[ymin:ymax+1, xmin:xmax+1] #Crop so only data remains
+            
+            impad, pady, padx, sy, sx, extra_pad = reflectpad(image, ((xmin, sx-(xmax+1)), (ymin, sy-(ymax+1))))
+            
+            ynan, xnan = np.where(np.isnan(impad)) # Correct for any nans in image left? Maybe be degrigated
+            for i, j in zip(xnan, ynan):
+                mask[j,i] = 1
+                impad[j,i] = 0 # for some reason the array can get nans after padding????
+                
+        else:
+            impad, pady, padx, sy, sx, extra_pad = reflectpad(image, shift)
+            mask = np.pad(np.zeros_like(image,dtype=int), ((padx,padx),(pady,pady)), mode="constant", constant_values=1)
+            
+        # Shift the image
+        if method == "fourier":
+            imsft = np.fft.ifftn(fourier_shift(np.fft.fftn(impad), shift[::-1])).real
+        elif method == "spline":
+            imsft = spline_shift(impad, shift[::-1], **kwargs)
+        else:
+            raise UserWarning('Image shift method "' + method + '" is not known')
+        
+        # Move mask to new shifted location.    
+        masksft = spline_shift(mask, shift[::-1], order=1, cval=1)
+        masksft = np.array([[1 if x!=0 else 0 for x in y] for y in masksft])
+        
+        #apply the image masked with mask
+        imsft = np.ma.masked_array(imsft, mask = masksft).filled(np.nan)
+        return imsft
+    
+
     else:
         if method == 'fourier':
             return np.fft.ifftn(fourier_shift(np.fft.fftn(image), shift[::-1])).real
