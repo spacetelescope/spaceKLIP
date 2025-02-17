@@ -308,7 +308,6 @@ class ImageTools():
                 head_sci['CRPIX2'] = crpix2
                 head_sci['CRPIX1_SHIFT'] = npix[0]
                 head_sci['CRPIX2_SHIFT'] = npix[2]
-                print(crpix1, crpix2)
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs, var_poisson=var_poisson, var_rnoise=var_rnoise, var_flat=var_flat)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
@@ -373,12 +372,11 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
                 crpix2 = self.database.obs[key]['CRPIX2'][j]
-                print(crpix1, crpix2)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
 
-                    # Crop frames.
+                    # pad frames.
                     head, tail = os.path.split(fitsfile)
                     log.info('  --> Frame padding: ' + tail)
                     sh = data.shape
@@ -397,6 +395,7 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
+                print(crpix1,crpix2)
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs, var_poisson=var_poisson, var_rnoise=var_rnoise, var_flat=var_flat)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
@@ -2755,6 +2754,7 @@ class ImageTools():
 
                             # Apply the shift
                             shifts += [np.array([shift_x, shift_y])]
+                            maskoffs_temp += [np.array([xc, yc])]
                             data[k] = ut.imshift(data[k], [shift_x, shift_y], method=method, kwargs=kwargs)
                             erro[k] = ut.imshift(erro[k], [shift_x, shift_y], method=method, kwargs=kwargs)
 
@@ -2765,9 +2765,13 @@ class ImageTools():
                         head_sci['CRPIX1'] = crpix1
                         head_sci['CRPIX2'] = crpix2
 
+                        if imshifts is not None:
+                            imshifts += shifts
+                        else:
+                            imshifts = shifts
+
                         # Restore NaNs to original locations
                         data[nan_mask] = np.nan
-                        print(crpix1, crpix2)
                         
                         fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
 
