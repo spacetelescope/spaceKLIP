@@ -49,6 +49,11 @@ import scipy.ndimage
 import lmfit
 import re
 
+from stdatamodels.jwst import datamodels
+from jwst.datamodels import ModelContainer, ModelLibrary
+from collections import defaultdict
+from jwst.resample import resample_step
+
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -2882,6 +2887,76 @@ class ImageTools():
                 self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
 
         pass
+
+    def resample_frames(self, user_input):
+        def to_container(model):
+            """Convert to a ModelContainer of ImageModels for each plane"""
+
+            container = ModelContainer()
+            for plane in range(model.shape[0]):
+                image = datamodels.ImageModel()
+                for attribute in [
+                    'data', 'dq', 'err', 'zeroframe', 'area',
+                    'var_poisson', 'var_rnoise', 'var_flat'
+                ]:
+                    try:
+                        setattr(image, attribute, model.getarray_noinit(attribute)[plane])
+                    except AttributeError:
+                        pass
+                image.update(model)
+                try:
+                    image.meta.wcs = model.meta.wcs
+                except AttributeError:
+                    pass
+                container.append(image)
+            return container
+
+        asn_exptypes = ['science', 'psf']
+
+        # Create a DM object using the association table
+        input_models = datamodels.open(user_input, asn_exptypes=asn_exptypes)
+
+        # This asn_id assignment is important as it allows outlier detection
+        # to know the asn_id since that step receives the cube as input.
+        resample_step.ResampleStep.asn_id = input_models.meta.asn_table.asn_id
+
+        # Store the output file for future use
+        resample_step.ResampleStep.output_file = input_models.meta.asn_table.products[0].name
+
+        # Find all the member types in the product
+        members_by_type = defaultdict(list)
+        prod = input_models.meta.asn_table.products[0].instance
+
+        for member in prod['members']:
+            members_by_type[member['exptype'].lower()].append(member['expname'])
+
+        resample_step.ResampleStep.blendheaders = False
+
+        # Extract lists of all the PSF and science target members
+        psf_files = members_by_type['psf']
+        targ_files = members_by_type['science']
+
+
+
+
+        # Call the sequence of steps: outlier_detection, align_refs, and klip
+        # once for each input target exposure
+        resample_input = ModelContainer()
+        for target_file in targ_files:
+            with datamodels.open(target_file) as target:
+                # Split out the integrations into separate models
+                # in a ModelContainer to pass to `resample`
+                for model in to_container(target):
+                    resample_input.append(model)
+
+        # Call the resample step to combine all psf-subtracted target images
+        # for compatibility with image3 pipeline use of ModelLibrary,
+        # convert ModelContainer to ModelLibrary
+        resample_library = ModelLibrary(resample_input, on_disk=False)
+
+        # Output is a single datamodel
+        result = resample_step.ResampleStep(resample_library)
+        print()
 
     @plt.style.context('spaceKLIP.sk_style')
     def find_nircam_centers(self,
