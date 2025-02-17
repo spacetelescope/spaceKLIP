@@ -1412,12 +1412,12 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
-                
+
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
-        
+
         pass
-    
+
     def find_bad_pixels_sigclip(self,
                                 data,
                                 erro,
@@ -2742,13 +2742,13 @@ class ImageTools():
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
                 shifts = []  # shift between star position and image center (data.shape // 2)
                 maskoffs_temp = []  # shift between star and coronagraphic mask position
-
+                datapad=[]#temp arrays for padding
+                erropad=[]
                 # SCI and REF data.
                 if j in ww_sci or j in ww_ref:
 
                     # NIRCam coronagraphy.
                     if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON']:
-
                         for k in range(data.shape[0]):
 
                             # For the first SCI frame, get the star position
@@ -2765,7 +2765,6 @@ class ImageTools():
                                                                                   output_dir=output_dir,
                                                                                   highpass=highpass)
                             
-
                             # Apply the same shift to all SCI and REF frames.
                             shifts += [np.array([-(xc - (data.shape[-1] - 1.) / 2.), -(yc - (data.shape[-2] - 1.) / 2.)])]
                             maskoffs_temp += [np.array([xshift, yshift])]
@@ -2792,8 +2791,6 @@ class ImageTools():
                         crpix1 = (data.shape[-1] - 1.) / 2. + 1.  # 1-indexed
                         crpix2 = (data.shape[-2] - 1.) / 2. + 1.  # 1-indexed
                     
-
-
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
                         log.warning('  --> Recenter frames: not implemented for MIRI coronagraphy, skipped')
@@ -3345,7 +3342,7 @@ class ImageTools():
                     log.info("  --> DQ array size does not agree with science array, Correcting...")
                     _,sy,sx=data.shape
                     ydata,xdata=np.where(~np.isnan(data[0]))
-                    xmax = max(xdata)
+                    xmax = max(xdata) 
                     xmin = min(xdata)
                     ymax = max(ydata)
                     ymin = min(ydata)
