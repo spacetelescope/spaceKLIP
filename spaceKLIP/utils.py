@@ -120,7 +120,8 @@ def read_obs(fitsfile,
         'VAR_POISSON' extension data.
     var_rnoise : 3D-array, optional
         'VAR_RNOISE' extension data.
-    
+    var_flat : 3D-array, optional
+        'VAR_FLAT' extension data.
     """
     
     # Read FITS file.
@@ -155,10 +156,12 @@ def read_obs(fitsfile,
     if return_var:
         var_poisson = hdul['VAR_POISSON'].data
         var_rnoise = hdul['VAR_RNOISE'].data
+        var_flat = hdul['VAR_FLAT'].data
+
     hdul.close()
     
     if return_var:
-        return data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs, var_poisson, var_rnoise
+        return data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs, var_poisson, var_rnoise, var_flat
     else:
         return data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs
 
@@ -173,7 +176,8 @@ def write_obs(fitsfile,
               imshifts=None,
               maskoffs=None,
               var_poisson=None,
-              var_rnoise=None):
+              var_rnoise=None,
+              var_flat=None):
     """
     Write an observation to a FITS file.
     
@@ -205,6 +209,8 @@ def write_obs(fitsfile,
         'VAR_POISSON' extension data. The default is None.
     var_rnoise : 3D-array, optional
         'VAR_RNOISE' extension data. The default is None.
+    var_flat : 3D-array, optional
+        'VAR_FLAT' extension data. The default is None.
     
     Returns
     -------
@@ -241,6 +247,8 @@ def write_obs(fitsfile,
         hdul['VAR_POISSON'].data = var_poisson
     if var_rnoise is not None:
         hdul['VAR_RNOISE'].data = var_rnoise
+    if var_flat is not None:
+        hdul['VAR_FLAT'].data = var_flat
     fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
     hdul.writeto(fitsfile, output_verify='fix', overwrite=True)
     hdul.close()
@@ -786,6 +794,7 @@ def get_tp_comsubst(instrume,
     # Return.
     return tp_comsubst
 
+
 def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
     """ Load filter information from the SVO Filter Profile Service or webbpsf
 
@@ -1144,9 +1153,9 @@ def get_dqmask(dqarr, bitvalues):
 
     return dqmask
 
+
 def pop_pxar_kw(filepaths):
     """
-    
     Populate the PIXAR_A2 SCI header keyword which is required by pyKLIP in
     case it is not already available.
 
@@ -1155,7 +1164,7 @@ def pop_pxar_kw(filepaths):
     filepaths : list or array
         File paths of the FITS files whose headers shall be checked.
     """
-    
+
     for filepath in filepaths:
         try:
             pxar = pyfits.getheader(filepath, 'SCI')['PIXAR_A2']
@@ -1171,13 +1180,15 @@ def pop_pxar_kw(filepaths):
             elif hdul[0].header['INSTRUME'] == 'MIRI':
                 ap = siaf_mir[hdul[0].header['APERNAME']]
             else:
-                raise UserWarning('Data originates from unknown JWST instrument')
+                raise UserWarning('Data originates from unknown '
+                                  'JWST instrument')
             pix_scale = (ap.XSciScale + ap.YSciScale) / 2.
             hdul['SCI'].header['PIXAR_A2'] = pix_scale**2
             hdul.writeto(filepath, output_verify='fix', overwrite=True)
             hdul.close()
-    
+
     pass
+
 
 def config_stpipe_log(level='WARNING', suppress=False):
     """
@@ -1191,7 +1202,7 @@ def config_stpipe_log(level='WARNING', suppress=False):
     suppress : bool
         If True, suppresses the log output to ERROR level.
         If False, restores the default logging configuration.
-        
+
     Returns
     -------
     None.
@@ -1215,14 +1226,17 @@ def config_stpipe_log(level='WARNING', suppress=False):
         handler = append:pipeline.log
         level = {level.upper()}
         """
-        stpipe.log.load_configuration(io.BytesIO(suppress_log_configuration.encode()))
+        stpipe.log.load_configuration(io.BytesIO(
+            suppress_log_configuration.encode()))
     else:
         # Restore the default logging configuration.
         stpipe.log.load_configuration(stpipe.log._find_logging_config_file())
+
+
 def get_visitid(visitstr):
     """
     Common util function to handle several various kinds
-    of visit specification.
+    of visit specifications.
 
     Parameters
     ----------
@@ -1239,16 +1253,17 @@ def get_visitid(visitstr):
     if visitstr.startswith("V"):
         return visitstr
     elif ':' in visitstr:
-        # Handle PPS format visit ID
+        # Handle PPS format visit ID.
         try:
             parts = [int(p) for p in visitstr.split(':')]
             if len(parts) != 3:
                 raise ValueError(f"Invalid PPS format: {visitstr}")
             return f"V{parts[0]:05d}{parts[1]:03d}{parts[2]:03d}"
         except ValueError as e:
-            raise ValueError(f"Invalid PPS format in visit string: {visitstr}") from e
+            raise ValueError(f"Invalid PPS format: {visitstr}") from e
     else:
         raise ValueError(f"Unrecognized visit string format: {visitstr}")
+
 
 def get_siaf(inst):
     """

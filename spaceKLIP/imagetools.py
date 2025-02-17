@@ -306,6 +306,9 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
+                head_sci['CRPIX1_SHIFT'] = npix[0]
+                head_sci['CRPIX2_SHIFT'] = npix[2]
+                print(crpix1, crpix2)
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs, var_poisson=var_poisson, var_rnoise=var_rnoise, var_flat=var_flat)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
@@ -370,6 +373,7 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
                 crpix2 = self.database.obs[key]['CRPIX2'][j]
+                print(crpix1, crpix2)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -2658,6 +2662,7 @@ class ImageTools():
 
         pass
 
+
     def recenter_frames_ta(self,
                            method='fourier',
                            plot=False,
@@ -2715,36 +2720,55 @@ class ImageTools():
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
                 log.info('  --> Recenter frames: ' + tail)
+                
+                nan_mask = np.isnan(data)  # Store locations of NaNs.
                 if np.sum(np.isnan(data)) != 0:
-                    raise UserWarning('Please replace nan pixels before attempting to recenter frames')
+                    data[np.isnan(data)] = 0  # Replace NaNs with placeholder 0.
+                    log.info('Temporarily replacing NaNs with 0 for recentering')
+                    #raise UserWarning('Please replace nan pixels before attempting to recenter frames')
+                    
                 shifts = []  # shift between star position and image center (data.shape // 2)
                 maskoffs_temp = []  # shift between star and coronagraphic mask position
 
                 # SCI and REF data.
                 if j in ww_sci or j in ww_ref:
-
-                    # NIRCam coronagraphy.
-                    if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                    
+                    if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON', 'MIR_4QPM', 'MIR_LYOT']:
                         
                         import spaceKLIP.target_acq_tools as acq_tools
-                        target_coords_px = acq_tools.ta_analysis(self.database.obs[key][j]['FITSFILE'], plot=plot, verbose=verbose)
+                        target_coords_px = acq_tools.ta_analysis(self.database.obs[key][j]['FITSFILE'], plot=plot, verbose=verbose, output_dir=output_dir)
                         xc, yc = target_coords_px[0],  target_coords_px[1]
+                        
+                        # Adjust for cropping
+                        xc -= self.database.obs[key]['CRPIX1_SHIFT'][j]  # Adjust X for left cropping
+                        yc -= self.database.obs[key]['CRPIX2_SHIFT'][j]  # Adjust Y for bottom cropping
 
                         for k in range(data.shape[0]):
 
-                            # Apply the same shift to all SCI and REF frames.
-                            shifts += [np.array([-(xc - (data.shape[-1] - 1.) / 2.), -(yc - (data.shape[-2] - 1.) / 2.)])]
-                            data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                            erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                        
-                        #xoffset = self.database.obs[key]['XOFFSET'][j] - self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
-                        #yoffset = self.database.obs[key]['YOFFSET'][j] - self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
-                        crpix1 = (data.shape[-1] - 1.) / 2. + 1.  # 1-indexed
-                        crpix2 = (data.shape[-2] - 1.) / 2. + 1.  # 1-indexed
+                            # Compute the center in cropped frame
+                            x_center = (data.shape[-1] - 1.) / 2.
+                            y_center = (data.shape[-2] - 1.) / 2.
 
+                            # Compute shifts
+                            shift_x = -(xc - x_center)
+                            shift_y = -(yc - y_center)
+
+                            # Apply the shift
+                            shifts += [np.array([shift_x, shift_y])]
+                            data[k] = ut.imshift(data[k], [shift_x, shift_y], method=method, kwargs=kwargs)
+                            erro[k] = ut.imshift(erro[k], [shift_x, shift_y], method=method, kwargs=kwargs)
+
+                        # Update CRPIX values correctly
+                        crpix1 = x_center + 1.  # 1-based index
+                        crpix2 = y_center + 1.  # 1-based index
 
                         head_sci['CRPIX1'] = crpix1
                         head_sci['CRPIX2'] = crpix2
+
+                        # Restore NaNs to original locations
+                        data[nan_mask] = np.nan
+                        print(crpix1, crpix2)
+                        
                         fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
 
                     # Update spaceKLIP database.
