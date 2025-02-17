@@ -611,7 +611,7 @@ def _sp_to_spext(sp, **kwargs):
         flux = sp(sp.waveset)
         wunit = wave.unit.to_string()
         funit = flux.unit.to_string()
-        sp = S.ArraySpectrum(wave.value, flux.value, waveunits=wunit, fluxunits=funit, 
+        sp = Sz.ArraySpectrum(wave.value, flux.value, waveunits=wunit, fluxunits=funit, 
                              name=sp.meta['name'], **kwargs)
 
     return sp

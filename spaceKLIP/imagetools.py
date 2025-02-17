@@ -1466,7 +1466,7 @@ class ImageTools():
         if 'sigma' not in sigclip_kwargs.keys():
             sigclip_kwargs['sigma'] = 5.
         if 'neg_sigma' not in sigclip_kwargs.keys():
-            sigclip_kwargs['neg_sigma'] = 1.
+            sigclip_kwargs['neg_sigma'] = 5.
         if 'shift_x' not in sigclip_kwargs.keys():
             sigclip_kwargs['shift_x'] = [-1, 0, 1]
         if 'shift_y' not in sigclip_kwargs.keys():
@@ -2123,6 +2123,7 @@ class ImageTools():
 
     def blur_frames(self,
                     fact='auto',
+                    overcareful=True,
                     types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
                     subdir='blurred'):
         """
@@ -2197,7 +2198,8 @@ class ImageTools():
                             wave_min = self.database.obs[key]['CWAVEL'][j] - self.database.obs[key]['DWAVEL'][j]  # micron
                             fwhm_current = wave_min * 1e-6 / diam * 180. / np.pi * 3600. / self.database.obs[key]['PIXSCALE'][j]  # pix
                             fwhm_desired = 2.3  # pix; see, e.g., Pawley 2006
-                            fwhm_desired *= 1.5  # go to 1.5 times the theoretically required bluring to safely avoid numerical ringing effects
+                            if overcareful:
+                                fwhm_desired *= 1.5  # go to 1.5 times the theoretically required bluring to safely avoid numerical ringing effects
                             fact_temp = np.sqrt(fwhm_desired**2 - fwhm_current**2)
                             fact_temp /= np.sqrt(8. * np.log(2.))  # fix from Marshall
                         if str(fact_temp) == 'fix23':
@@ -2207,7 +2209,7 @@ class ImageTools():
                             fact_temp /= np.sqrt(8. * np.log(2.))  # fix from Marshall
                         if np.isnan(fact_temp):
                             fact_temp = None
-                            log.info('  --> Frame blurring: skipped')
+                            log.info('  --> Frame blurring: skipped (!)')
                             continue
                         log.info('  --> Frame blurring: factor = %.3f' % fact_temp)
                         for k in range(data.shape[0]):
@@ -2216,7 +2218,7 @@ class ImageTools():
                         if mask is not None:
                             mask = gaussian_filter(mask, fact_temp)
                     else:
-                        log.info('  --> Frame blurring: skipped')
+                        log.info('  --> Frame blurring: skipped (?)')
 
                 # Write FITS file.
                 if fact_temp is None:

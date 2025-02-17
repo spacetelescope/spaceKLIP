@@ -1332,11 +1332,24 @@ class AnalysisTools():
                     # Compute the FM dataset if it does not exist yet, or if
                     # overwrite is True.
                     # Compute the FM dataset.
-                    mode = self.database.red[key]['MODE'][j]
-                    annuli = int(self.database.red[key]['ANNULI'][j])
-                    subsections = int(self.database.red[key]['SUBSECTS'][j])
-                    fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fmpsf-KLmodes-all.fits')
-                    klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-klipped-KLmodes-all.fits')
+                    if 'mode' not in kwargs.keys() or kwargs['mode'] is None:
+                        mode = self.database.red[key]['MODE'][j]
+                    else:
+                        mode = kwargs['mode']
+                    if 'ann' not in kwargs.keys() or kwargs['ann'] is None:
+                        annuli = int(self.database.red[key]['ANNULI'][j])
+                        str_ann = str(annuli)
+                    else:
+                        annuli = kwargs['ann']
+                        str_ann = str(annuli).replace('[','').replace(']','').replace('(','').replace(')','').replace(', ','-')
+                    if 'subs' not in kwargs.keys() or kwargs['subs'] is None:
+                        subsections = int(self.database.red[key]['SUBSECTS'][j])
+                        str_sub = str(subsections)
+                    else:
+                        subsections = kwargs['subs']
+                        str_sub = str(subsections).replace('[','').replace(']','').replace('(','').replace(')','').replace(', ','-')
+                    fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-fmpsf-KLmodes-all.fits')
+                    klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-klipped-KLmodes-all.fits')
                     if overwrite or (not os.path.exists(fmdataset) or not os.path.exists(klipdataset)):
                         
                         # Initialize the pyKLIP FM class. Use sep/pa relative
@@ -1370,7 +1383,7 @@ class AnalysisTools():
                                         fm_class=fm_class,
                                         mode=mode,
                                         outputdir=output_dir_fm,
-                                        fileprefix='FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key,
+                                        fileprefix='FM-' + mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key,
                                         annuli=annuli,
                                         subsections=subsections,
                                         movement=1.,
@@ -1497,7 +1510,7 @@ class AnalysisTools():
                                 nthreads = kwargs['nthreads']
 
                             # Run the MCMC fit.
-                            chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-bka_chain_c%.0f' % (k + 1) + '.pkl')
+                            chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-bka_chain_c%.0f' % (k + 1) + '.pkl')
                             fma.fit_astrometry(nwalkers=nwalkers,
                                                nburn=nburn,
                                                nsteps=nsteps,
@@ -1572,7 +1585,7 @@ class AnalysisTools():
                                 nthreads = kwargs['nthreads']
 
                             # Run the MCMC fit.
-                            chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-bka_chain_c%.0f' % (k + 1) + '.pkl')
+                            chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-bka_chain_c%.0f' % (k + 1) + '.pkl')
                             fma.fit_astrometry(nwalkers=nwalkers,
                                                nburn=nburn,
                                                nsteps=nsteps,
@@ -1582,15 +1595,15 @@ class AnalysisTools():
                             # Plot the MCMC fit results.
                             fig = fma.make_corner_plot()
                             if save_figures:
-                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
-                                fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
+                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
+                                fig.suptitle(mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key)
                                 fig.savefig(path)
                             plt.show()
                             plt.close(fig)
                             fig = fma.best_fit_and_residuals()
                             if save_figures:
-                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
-                                fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
+                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
+                                fig.suptitle(mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key)
                                 fig.savefig(path)
                             plt.show()
                             plt.close(fig)
@@ -1616,7 +1629,7 @@ class AnalysisTools():
                                 mstar_err_temp = mstar_err
                             appmag = mstar[filt] + delmag  # vegamag
                             appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
-                            fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
+                            fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
 
                             if split_fit:
                                 # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
@@ -1625,8 +1638,8 @@ class AnalysisTools():
                                                                          initial_params=gauss_param_guesses)
 
                                 if save_figures:
-                                    path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_conv_c%.0f' % (k + 1) + '.pdf')
-                                    fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
+                                    path = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-model_conv_c%.0f' % (k + 1) + '.pdf')
+                                    fig.suptitle(mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key)
                                     fig.savefig(path)
                                 plt.show()
                                 plt.close(fig)
@@ -1731,14 +1744,14 @@ class AnalysisTools():
                             # Plot the pymultinest fit results.
                             fit.fit_plots()
                             if save_figres:
-                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
+                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
                             plt.close(fig)
 
                             fit.fm_residuals()
                             if save_figres:
-                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
+                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
                             plt.close(fig)
@@ -1764,7 +1777,7 @@ class AnalysisTools():
                                 mstar_err_temp = mstar_err
                             appmag = mstar[filt] + delmag  # vegamag
                             appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
-                            fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
+                            fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
                             tab.add_row((k + 1,
                                          -(fit.fit_x.bestfit - data_centx) * pxsc_arcsec,  # arcsec
                                          fit.fit_x.error * pxsc_arcsec,  # arcsec
@@ -1828,7 +1841,7 @@ class AnalysisTools():
                             ax[3].set_title('Residuals after bg. subtraction')
                             plt.show()
                             if save_figures:
-                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-bgest_c%.0f' % (k + 1) + '.pdf')
+                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key + '-bgest_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                                 log.info(f" Plot saved in {path}")
                                 plt.close()
@@ -1844,13 +1857,13 @@ class AnalysisTools():
                             dec = companions[k][1]  # arcsec
                             con = companions[k][2]
                             inputflux = con * np.array(all_offsetpsfs_nohpf)  # positive to inject companion
-                            fileprefix = 'INJECTED-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key
+                            fileprefix = 'INJECTED-' + mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key
                         else:
                             ra = tab[-1]['RA']  # arcsec
                             dec = tab[-1]['DEC']  # arcsec
                             con = tab[-1]['CON']
                             inputflux = -con * np.array(all_offsetpsfs_nohpf)  # negative to remove companion
-                            fileprefix = 'KILLED-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key
+                            fileprefix = 'KILLED-' + mode + '_NANNU' + str_ann + '_NSUBS' + str_sub + '_' + key
                         sep = np.sqrt(ra**2 + dec**2) / pxsc_arcsec  # pix
                         pa = np.rad2deg(np.arctan2(ra, dec))  # deg
                         thetas = [pa + 90. - all_pa for all_pa in all_pas]
@@ -1892,9 +1905,22 @@ class AnalysisTools():
                             self.database.obs = temp
                         
                         # Reduce companion-subtracted data.
-                        mode = self.database.red[key]['MODE'][j]
-                        annuli = self.database.red[key]['ANNULI'][j]
-                        subsections = self.database.red[key]['SUBSECTS'][j]
+                        if 'mode' not in kwargs.keys() or kwargs['mode'] is None:
+                            mode = self.database.red[key]['MODE'][j]
+                        else:
+                            mode = kwargs['mode']
+                        if 'ann' not in kwargs.keys() or kwargs['ann'] is None:
+                            annuli = int(self.database.red[key]['ANNULI'][j])
+                            str_ann = str(annuli)
+                        else:
+                            annuli = kwargs['ann']
+                            str_ann = str(annuli).replace('[','').replace(']','').replace('(','').replace(')','').replace(', ','-')
+                        if 'subs' not in kwargs.keys() or kwargs['subs'] is None:
+                            subsections = int(self.database.red[key]['SUBSECTS'][j])
+                            str_sub = str(subsections)
+                        else:
+                            subsections = kwargs['subs']
+                            str_sub = str(subsections).replace('[','').replace(']','').replace('(','').replace(')','').replace(', ','-')
                         parallelized.klip_dataset(dataset=dataset_orig,
                                                   mode=mode,
                                                   outputdir=output_dir_fm,
@@ -1924,7 +1950,7 @@ class AnalysisTools():
                 self.database.update_src(key, j, tab)
 
                 # Save the results table.
-                output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str_ann + '_NSUBS' + str(
                     subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
                 tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
                 print(f'Table saved to {output_ecsv_path}')
