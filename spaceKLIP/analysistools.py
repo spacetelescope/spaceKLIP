@@ -89,7 +89,7 @@ class AnalysisTools():
                      starfile,
                      spectral_type='G2V',
                      companions=None,
-                     overwrite_crpix=None,
+                     overwrite_starcen=None,
                      subdir='rawcon',
                      output_filetype='npy',
                      plot_xlim=(0,10),
@@ -111,8 +111,8 @@ class AnalysisTools():
             For each companion, there should be a three element list containing
             [RA offset (arcsec), Dec offset (arcsec), mask radius (lambda/D)].
             The default is None.
-        overwrite_crpix : tuple of two float, optional
-            Overwrite the PSF center with the (CRPIX1, CRPIX2) values provided
+        overwrite_starcen : tuple of two float, optional
+            Overwrite the PSF center with the (STARCENX, STARCENY) values provided
             here (in 1-indexed coordinates). This is required for Coron3 data!
             The default is None.
         subdir : str, optional
@@ -219,10 +219,10 @@ class AnalysisTools():
                     resolution = np.hypot(resolution, self.database.obs[key]['BLURFWHM'][j])
                 
                 # Get the star position.
-                if overwrite_crpix is None:
-                    center = (head_pri['CRPIX1'] - 1., head_pri['CRPIX2'] - 1.)  # pix (0-indexed)
+                if overwrite_starcen is None:
+                    center = (head_pri['STARCENX'] - 1., head_pri['STARCENY'] - 1.)  # pix (0-indexed)
                 else:
-                    center = (overwrite_crpix[0] - 1., overwrite_crpix[1] - 1.)  # pix (0-indexed)
+                    center = (overwrite_starcen[0] - 1., overwrite_starcen[1] - 1.)  # pix (0-indexed)
                 
                 # Mask coronagraph spiders, 4QPM edges, etc. 
                 if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON']:
