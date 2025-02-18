@@ -264,7 +264,8 @@ def display_coron_image(filename,
         # PyKLIP output, we have to open this differently, can't use JWST datamodels.
         image = fits.getdata(filename)
         header = fits.getheader(filename)
-        center_x, center_y = header['CRPIX1'], header['CRPIX2']
+        #display(header)
+        center_x, center_y = header['STARCENX'], header['STARCENY']
         bunit = header['BUNIT']
         wcs = astropy.wcs.WCS(header)
         if image.ndim == 3:
@@ -275,12 +276,16 @@ def display_coron_image(filename,
     else:
         # Handle JWST pipeline outputs.
         # Load in JWST pipeline outputs using jwst.datamodel.
+        header = fits.open(filename)[1].header
+        #display(header)
         modeltype = jwst.datamodels.CubeModel if cube_ints else jwst.datamodels.ImageModel
         model = modeltype(filename)
         image = np.nanmean(model.data, axis=0) if cube_ints else model.data
         dq = model.dq[0] if cube_ints else model.dq
         nints = model.meta.exposure.nints if cube_ints else None
-        center_x, center_y = model.meta.wcsinfo.crpix1, model.meta.wcsinfo.crpix2
+        #center_x, center_y = model.meta.wcsinfo.crpix1, model.meta.wcsinfo.crpix2
+        center_x, center_y = header['STARCENX'], header['STARCENY']
+        
         bunit = model.meta.bunit_data
         is_psf = model.meta.exposure.psf_reference
         annotation_text = (
