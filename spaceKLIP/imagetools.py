@@ -2889,16 +2889,23 @@ class ImageTools():
 
     def resample_frames(self, subdir='resampled'):
 
-        def to_container(model):
+        def to_container(model, target=True):
             """Convert to a ModelContainer of ImageModels for each plane"""
 
             container = ModelContainer()
-            for plane in range(model.shape[0]):
-                image = datamodels.ImageModel()
-                for attribute in [
+            if target:
+                attr_list = [
                     'data', 'dq', 'err', 'zeroframe', 'area',
                     'var_poisson', 'var_rnoise', 'var_flat'
-                ]:
+                ]
+            else:
+                # model = model
+                attr_list = [
+                    'data'
+                ]
+            for plane in range(model.data.shape[0]):
+                image = datamodels.ImageModel()
+                for attribute in attr_list:
                     try:
                         setattr(image, attribute, model.getarray_noinit(attribute)[plane])
                     except AttributeError:
@@ -2941,10 +2948,12 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
 
                 with datamodels.open(target_file) as target:
+                    # #storing wcs information for mask resampling
+                    # wcs = target.meta.wcs
+                    # wcsinfo = target.meta.wcsinfo
                     data_list = []
                     dq_list = []
                     err_list = []
-
                     for model in to_container(target):
                         resample_input = ModelContainer()
                         resample_input.append(model)
@@ -2960,10 +2969,25 @@ class ImageTools():
                         dq_list.append(result.dq)
                         err_list.append(result.err)
 
+                    target.data = np.array([mask])
+                    mask_list = []
+                    for model in to_container(target, target=False):
+                        resample_input = ModelContainer()
+                        resample_input.append(model)
+
+                        # Call the resample step to combine all psf-subtracted target images
+                        # for compatibility with image3 pipeline use of ModelLibrary,
+                        # convert ModelContainer to ModelLibrary
+                        resample_library = ModelLibrary(resample_input, on_disk=False)
+
+                        # Output is a single datamodel
+                        result = resample_step.ResampleStep.call(resample_library)
+                        mask_list.append(result.data[0])
+
                     # Write FITS file and PSF mask.
                     fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d, imshifts,
                                             maskoffs)
-                    maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                    maskfile = ut.write_msk(maskfile, mask_list, fitsfile)
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile)
