@@ -2970,7 +2970,6 @@ class ImageTools():
                         err_list.append(result.err)
 
                     target.data = np.array([mask])
-                    mask_list = []
                     for model in to_container(target, target=False):
                         resample_input = ModelContainer()
                         resample_input.append(model)
@@ -2982,12 +2981,12 @@ class ImageTools():
 
                         # Output is a single datamodel
                         result = resample_step.ResampleStep.call(resample_library)
-                        mask_list.append(result.data[0])
+                        mask = result.data
 
                     # Write FITS file and PSF mask.
                     fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d, imshifts,
                                             maskoffs)
-                    maskfile = ut.write_msk(maskfile, mask_list, fitsfile)
+                    maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile)
