@@ -51,12 +51,7 @@ import re
 
 from stdatamodels.jwst import datamodels
 from jwst.datamodels import ModelContainer, ModelLibrary
-from jwst.model_blender import ModelBlender
-from collections import defaultdict
 from jwst.resample import resample_step
-from coron3pipeline import make_asn_file
-from stpipe import Pipeline
-import os.path as op
 
 import logging
 log = logging.getLogger(__name__)
