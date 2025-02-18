@@ -1,7 +1,7 @@
 ################################################################################
-# This script takes a directory of JWST calints files as input and builds a    #
-# database of reference info for each file, which can then be read via the     #
-# pipeline script.                                                             #
+# This module takes a directory of JWST calints files as input and builds a    #
+# database of reference info for each file, which can then be read and         #
+# filtered.                                                                    #
 #                                                                              #
 # Basically it will hold the target-specific info needed by the pipeline, as   #
 # well as info needed to choose reference observations for a given science     #
@@ -9,6 +9,17 @@
 #                                                                              #
 # Written 2024-07-10 by Ellis Bogat                                            #
 ################################################################################
+
+# TODO:
+# - Create an add_obs() or update_refdb() function to add new files to the 
+#   reference db without overwriting old data
+# - Think about how to compare observations in the ref_db to science files 
+#   not in the ref_db
+# - Create a function to generate an OPD difference grid 
+#   - We want the RMS OPD differences between two given dates
+#   - How often to update this grid with new JWST observations? ~ 1/month?
+#   - How finely to sample the OPD maps in time? Every 2 days?
+#   - Estimate computation time as a function of # of dates to compare 
 
 
 # imports
@@ -52,7 +63,7 @@ def not_isnone(series):
     
     return ~ isnone(series)
 
-
+# Main functions
 def load_refdb(fpath):
     """
     Reads the database of target- and observation-specific reference info for 
@@ -183,7 +194,8 @@ def update_db_sptypes(refdb):
     return refdb_copy
 
 
-def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
+def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
+                prefer_SIMBAD=True):
     """
     Constructs a database of target-specific reference info for each
     calints file in the input directory.
@@ -194,6 +206,8 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
         odir (path, optional): Location to save the database. Defaults to '.'.
         suffix (str, optional): Input filename suffix, e.g. 'uncal' or 'calints'. Defaults to 'calints'.
         overwrite (bool, optional): If true, overwrite the existing caldb.
+        prefer_SIMBAD (bool, optional): Default to choosing database info SIMBAD as opposed to MOCA
+            database. Defaults to True.
 
     Returns:
         pandas.DataFrame: database containing target- and observation-specific 
@@ -209,6 +223,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     #       - header kw missing
     #       - duplicate science target with different program names
     # - logic for if 'HAS_DISK','HAS_CANDS' have a mix of 'unknown' and bool values
+    # - think about how to incorporate synthetic PSFs, which wouldn't have a SIMBAD entry
     
     # Check that you won't accidentally overwrite an existing csv.
     outpath = os.path.join(odir,'ref_lib.csv')
@@ -219,7 +234,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
             warnings.warn(msg)
 
         else:
-            raise Exception(f'This operation is trying to overwrite {outpath}.\nIf this is what you want, set overwrite=True.')
+            raise Exception(f'spaceklip.psflib.build_refdb() is trying to overwrite {outpath}.\nIf this is what you want, set overwrite=True.')
 
     # Read input files 
     log.info('Reading input files...')
@@ -267,23 +282,27 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     df_unique = pd.DataFrame(np.transpose([targnames]),columns=['TARGNAME'])
 
     # Get 2MASS IDs
-    log.info('Collecting 2MASS IDs...')
-    twomass_ids = []
+    log.info('Collecting SIMBAD IDs...')
+    simbad_ids = []
     for targname in targnames:
         result_table = Simbad.query_objectids(targname)
+        #display(result_table)
         if result_table is None:
-            raise Exception(f'No SIMBAD object found for targname {targname}.')    
-        tmids_found = []
+            simbad_ids.append('')
+            warnings.warn(f'No SIMBAD object found for targname {targname}, this is likely a synthetic PSF.')    
+        gaia_ids_found = []
         for name in list(result_table['ID']):
-            if name[:6] == '2MASS ':
-                twomass_ids.append(name)
-                tmids_found.append(name) 
-        if len(tmids_found) < 1:
-            raise Exception(f'No 2MASS ID found for targname {targname}.')
-        elif len(tmids_found) > 1:
-            raise Exception(f'Multiple 2MASS ID found for targname {targname}: {tmids_found}')
-    df_unique['2MASS_ID'] = twomass_ids
-    df_unique.set_index('2MASS_ID',inplace=True)
+            if name.startswith('Gaia DR3'):
+                gaia_ids_found.append(name) 
+        if len(gaia_ids_found) == 1:
+            simbad_ids.extend(gaia_ids_found)
+        if len(gaia_ids_found) < 1:
+            simbad_ids.append(list(result_table['ID'])[0])
+        else:
+            raise Exception(f'Multiple Gaia DR3 IDs found for targname {targname}: {gaia_ids_found}')
+            
+    df_unique['SIMBAD_ID'] = simbad_ids
+    df_unique.set_index('SIMBAD_ID',inplace=True)
 
     # Query SIMBAD
     log.info('Querying SIMBAD...')
@@ -293,12 +312,14 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
                                     'flux(K)', 'flux_error(K)', 
                                     'plx', 'plx_error')
     simbad_list = list(df_unique.index)
+    while "" in simbad_list:
+        simbad_list.remove("")
     scistar_simbad_table = customSimbad.query_objects(simbad_list)
 
-    # Convert to pandas df and make 2MASS IDs the index
+    # Convert to pandas df and make SIMBAD IDs the index
     df_simbad = scistar_simbad_table.to_pandas()
-    df_simbad['2MASS_ID'] = simbad_list
-    df_simbad.set_index('2MASS_ID',inplace=True)
+    df_simbad['SIMBAD_ID'] = simbad_list
+    df_simbad.set_index('SIMBAD_ID',inplace=True)
 
     # Rename some columns
     simbad_cols = { # Full column list here: http://simbad.u-strasbg.fr/Pages/guide/sim-fscript.htx 
@@ -333,24 +354,32 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False):
     for col,moca_col in moca_cols.items():
         mdf[col] = list(mdf[moca_col])
 
-    # Fill in values missing from SIMBAD with MOCA
+    # Fill in values missing from SIMBAD with MOCA (or vice versa if prefer_SIMBAD==False)
 
-    df_unique['COMMENTS'] = 'unknown'
+    df_unique['COMMENTS'] = ''
+    df_unique['DB_SOURCES'] = ''
 
     # Sort all the dfs by index so they match up
     df_unique.sort_index(inplace=True)   
     df_simbad.sort_index(inplace=True)   
     mdf.sort_index(inplace=True)   
 
-    # Replace values and update comments
+    # Replace values and update DB_SOURCES column
     cols_overlap = list(set(list(simbad_cols.keys())).intersection(list(moca_cols.keys())))
     for col in cols_overlap:
-        df_unique.loc[isnone(df_simbad[col]) & ~isnone(mdf[col]),'COMMENTS'] += f"{col} adopted from MOCA. "
-        df_unique.loc[isnone(df_simbad[col]) & ~isnone(mdf[col]),col] = mdf
+        if prefer_SIMBAD:
+            df_unique.loc[~isnone(df_simbad[col]),'DB_SOURCES'] += f"{col} adopted from SIMBAD. "
+            df_unique.loc[isnone(df_simbad[col]) & ~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
+            df_unique.loc[isnone(df_simbad[col]) & ~isnone(mdf[col]),col] = mdf
+        else:
+            df_unique.loc[~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
+            df_unique.loc[isnone(mdf[col]) & ~isnone(df_simbad[col]),'DB_SOURCES'] += f"{col} adopted from SIMBAD. "
+            df_unique.loc[isnone(mdf[col]) & ~isnone(df_simbad[col]),col] = df_simbad
 
+    # Stellar ages only exist in MOCA database.
     for col in ['AGE','AGE_ERR']:
         df_unique[col] = mdf[col]
-        df_unique.loc[~isnone(mdf[col]),'COMMENTS'] += f"{col} adopted from MOCA. "
+        df_unique.loc[~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
 
     # # Replace values
     # df_unique.loc[df_unique['SPTYPE']=='','SPTYPE'] = None
@@ -429,17 +458,17 @@ def get_sciref_files(sci_target, refdb, idir=None,
         refdb = load_refdb(refdb)
 
     # Locate input target 2MASS ID 
-    # (input name could be in index, TARGPROP, or 2MASS_ID column)
-    if sci_target in refdb['2MASS_ID'].to_list():
+    # (input name could be in index, TARGPROP, or SIMBAD_ID column)
+    if sci_target in refdb['SIMBAD_ID'].to_list():
         targ_2mass = sci_target
 
     elif sci_target in refdb.index.to_list():
-        targ_2mass = refdb.loc[sci_target,'2MASS_ID'].to_list()[0]
+        targ_2mass = refdb.loc[sci_target,'SIMBAD_ID'].to_list()[0]
         
     elif sci_target in refdb['TARGPROP'].to_list():
         refdb_temp = refdb.reset_index()
         refdb_temp.set_index('TARGPROP',inplace=True)
-        targ_2mass = refdb_temp.loc[sci_target,'2MASS_ID'].to_list()[0]
+        targ_2mass = refdb_temp.loc[sci_target,'SIMBAD_ID'].to_list()[0]
     
     else:
         log.error(f'Science target {sci_target} not found in reference database.')
@@ -449,11 +478,11 @@ def get_sciref_files(sci_target, refdb, idir=None,
     refdb_temp.set_index('FILENAME',inplace=True)
 
     # Collect all the science files
-    sci_fnames = refdb_temp.index[refdb_temp['2MASS_ID'] == targ_2mass].to_list()
+    sci_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] == targ_2mass].to_list()
     first_scifile = sci_fnames[0]
 
     # Start list of reference files
-    ref_fnames = refdb_temp.index[refdb_temp['2MASS_ID'] != targ_2mass].to_list()
+    ref_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] != targ_2mass].to_list()
 
     # Collect the reference files
     if spt_tolerance != None:
@@ -546,6 +575,18 @@ def download_mast(ref_db,token=None,
                   progress=False, verbose=False,
                   suffix=None, # e.g. 'calints'
                   base_dir=os.path.join('DATA','MAST_DOWNLOAD')):
+    """Given the reference database, downloads MAST data for each file to base_dir.
+    If a file exists already, default is to not download.
+    Set overwrite=True to overwrite existing output file.
+    or set exists_ok=False to raise ValueError.
+
+    Set progress=True to show a progress bar.
+
+    Args:
+        ref_db (pandas.DataFrame): The reference database
+        token (str, optional): MAST token. Default is to reference the environment 
+            variable MAST_API_TOKEN.
+    """
     
     fnames = list(ref_db.FILENAME)
 

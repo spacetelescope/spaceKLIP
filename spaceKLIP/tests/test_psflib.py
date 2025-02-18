@@ -15,11 +15,17 @@ def test_build_refdb():
 
     # Check header kw missing
 
+    # Check synthetic star name
+
+    # Check no Gaia DR3 ID
+
     # Check duplicate science target with different program names
 
     # Check suffix kw behavior
 
     # Check overwrite kw behavior
+
+    # Check preference for SIMBAD vs MOCA
 
     pass
 
