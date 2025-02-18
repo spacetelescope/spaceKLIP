@@ -300,8 +300,8 @@ class ImageTools():
                     pxdq = pxdq[:, npix[2]:-npix[3], npix[0]:-npix[1]]
                     if mask is not None:
                         mask = mask[npix[2]:-npix[3], npix[0]:-npix[1]]
-                    # crpix1 -= npix[0]
-                    # crpix2 -= npix[2]
+                    crpix1 -= npix[0]
+                    crpix2 -= npix[2]
                     starcenx -= npix[0]
                     starceny -= npix[2]
                     maskcenx -= npix[0]
@@ -309,8 +309,8 @@ class ImageTools():
                     log.info('  --> Frame cropping: old shape = ' + str(sh[1:]) + ', new shape = ' + str(data.shape[1:]))
 
                 # Write FITS file and PSF mask.
-                # head_sci['CRPIX1'] = crpix1
-                # head_sci['CRPIX2'] = crpix2
+                head_sci['CRPIX1'] = crpix1
+                head_sci['CRPIX2'] = crpix2
                 head_sci['STARCENX'] = starcenx
                 head_sci['STARCENY'] = starceny
                 head_sci['MASKCENX'] = maskcenx
@@ -396,8 +396,8 @@ class ImageTools():
                     pxdq = np.pad(pxdq, ((0, 0), (npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=0)
                     if mask is not None:
                         mask = np.pad(mask, ((npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=np.nan)
-                    # crpix1 += npix[0]
-                    # crpix2 += npix[2]
+                    crpix1 += npix[0]
+                    crpix2 += npix[2]
                     starcenx += npix[0]
                     starceny += npix[2]
                     maskcenx += npix[0]
@@ -405,8 +405,8 @@ class ImageTools():
                     log.info('  --> Frame padding: old shape = ' + str(sh[1:]) + ', new shape = ' + str(data.shape[1:]) + ', fill value = %.2f' % cval)
 
                 # Write FITS file and PSF mask.
-                # head_sci['CRPIX1'] = crpix1
-                # head_sci['CRPIX2'] = crpix2
+                head_sci['CRPIX1'] = crpix1
+                head_sci['CRPIX2'] = crpix2
                 head_sci['STARCENX'] = starcenx
                 head_sci['STARCENY'] = starceny
                 head_sci['MASKCENX'] = maskcenx
