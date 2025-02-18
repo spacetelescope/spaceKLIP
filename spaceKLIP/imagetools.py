@@ -306,13 +306,13 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
-                head_sci['CRPIX1_SHIFT'] = npix[0]
-                head_sci['CRPIX2_SHIFT'] = npix[2]
+                head_sci['CRP1SHFT'] = npix[0]  #changed for length of header keyword BM
+                head_sci['CRP2SHFT'] = npix[2]
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs, var_poisson=var_poisson, var_rnoise=var_rnoise, var_flat=var_flat)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2, CRP1SHFT=npix[0], CRP2SHFT=npix[2])
 
         pass
 
@@ -2738,19 +2738,24 @@ class ImageTools():
                         target_coords_px = acq_tools.ta_analysis(self.database.obs[key][j]['FITSFILE'], plot=plot, verbose=verbose, output_dir=output_dir)
                         xc, yc = target_coords_px[0],  target_coords_px[1]
                         
+                        
                         # Adjust for cropping
-                        xc -= self.database.obs[key]['CRPIX1_SHIFT'][j]  # Adjust X for left cropping
-                        yc -= self.database.obs[key]['CRPIX2_SHIFT'][j]  # Adjust Y for bottom cropping
+                        xc -= self.database.obs[key]['CRP1SHFT'][j]  # Adjust X for left cropping
+                        yc -= self.database.obs[key]['CRP2SHFT'][j]  # Adjust Y for bottom cropping
+                        
+
 
                         for k in range(data.shape[0]):
 
                             # Compute the center in cropped frame
                             x_center = (data.shape[-1] - 1.) / 2.
                             y_center = (data.shape[-2] - 1.) / 2.
+                            
 
                             # Compute shifts
                             shift_x = -(xc - x_center)
                             shift_y = -(yc - y_center)
+                            
 
                             # Apply the shift
                             shifts += [np.array([shift_x, shift_y])]

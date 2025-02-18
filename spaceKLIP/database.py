@@ -196,8 +196,8 @@ class Database():
         BUNIT = []
         CRPIX1 = []  # pix
         CRPIX2 = []  # pix
-        CRPIX1_SHIFT = []  # crop shift pix
-        CRPIX2_SHIFT = []  # crop shift pix
+        CRP1SHFT = []  # crop shift pix
+        CRP2SHFT = []  # crop shift pix
         VPARITY = []
         V3I_YANG = []  # deg
         RA_REF = []  # deg
@@ -289,8 +289,8 @@ class Database():
             else:
                 CRPIX1 += [head.get('CRPIX1', np.nan)]
                 CRPIX2 += [head.get('CRPIX2', np.nan)]
-            CRPIX1_SHIFT += [head.get('CRPIX1_SHIFT', 0.)]
-            CRPIX2_SHIFT += [head.get('CRPIX2_SHIFT', 0.)]
+            CRP1SHFT += [head.get('CRP1SHFT', 0.)]
+            CRP2SHFT += [head.get('CRP2SHFT', 0.)]
             VPARITY += [head.get('VPARITY', -1)]
             V3I_YANG += [head.get('V3I_YANG', 0.)]
             RA_REF += [head.get('RA_REF', np.nan)]
@@ -327,8 +327,8 @@ class Database():
         BUNIT = np.array(BUNIT)
         CRPIX1 = np.array(CRPIX1)
         CRPIX2 = np.array(CRPIX2)
-        CRPIX1_SHIFT = np.array(CRPIX1_SHIFT)
-        CRPIX2_SHIFT = np.array(CRPIX2_SHIFT)
+        CRP1SHFT = np.array(CRP1SHFT)
+        CRP2SHFT = np.array(CRP2SHFT)
         VPARITY = np.array(VPARITY)
         V3I_YANG = np.array(V3I_YANG)
         RA_REF = np.array(RA_REF)
@@ -427,8 +427,8 @@ class Database():
                                'BUNIT',
                                'CRPIX1',
                                'CRPIX2',
-                               'CRPIX1_SHIFT',
-                               'CRPIX2_SHIFT',
+                               'CRP1SHFT',
+                               'CRP2SHFT',
                                'RA_REF',
                                'DEC_REF',
                                'ROLL_REF',
@@ -548,8 +548,8 @@ class Database():
                              BUNIT[ww][j],
                              CRPIX1[ww][j],
                              CRPIX2[ww][j],
-                             CRPIX1_SHIFT[ww][j],
-                             CRPIX2_SHIFT[ww][j],
+                             CRP1SHFT[ww][j],
+                             CRP2SHFT[ww][j],
                              RA_REF[ww][j],
                              DEC_REF[ww][j],
                              ROLL_REF[ww][j] - V3I_YANG[ww][j] * VPARITY[ww][j],
@@ -672,8 +672,8 @@ class Database():
         BUNIT = []
         CRPIX1 = []  # pix
         CRPIX2 = []  # pix
-        CRPIX1_SHIFT = []  #pix
-        CRPIX2_SHIFT = []  #pix
+        CRP1SHFT = []  #pix
+        CRP2SHFT = []  #pix
         BLURFWHM = []  # pix
         HASH = []
         Ndatapaths = len(datapaths)
@@ -771,8 +771,8 @@ class Database():
             else:
                 CRPIX1 += [head.get('CRPIX1', np.nan)]
                 CRPIX2 += [head.get('CRPIX2', np.nan)]
-            CRPIX1_SHIFT += [head.get('CRPIX1_SHIFT', np.nan)]
-            CRPIX2_SHIFT += [head.get('CRPIX2_SHIFT', np.nan)]
+            CRP1SHFT += [head.get('CRP1SHFT', np.nan)]
+            CRP2SHFT += [head.get('CRP2SHFT', np.nan)]
 
             HASH += [TELESCOP[-1] + '_' + INSTRUME[-1] + '_' + DETECTOR[-1] + '_' + FILTER[-1] + '_' + PUPIL[-1] + '_' + CORONMSK[-1] + '_' + SUBARRAY[-1]]
             hdul.close()
@@ -805,8 +805,8 @@ class Database():
         BUNIT = np.array(BUNIT)
         CRPIX1 = np.array(CRPIX1)
         CRPIX2 = np.array(CRPIX2)
-        CRPIX1_SHIFT = np.array(CRPIX1_SHIFT)
-        CRPIX2_SHIFT = np.array(CRPIX2_SHIFT)
+        CRP1SHFT = np.array(CRP1SHFT)
+        CRP2SHFT = np.array(CRP2SHFT)
         BLURFWHM = np.array(BLURFWHM)
         HASH = np.array(HASH)
         
@@ -1154,8 +1154,8 @@ class Database():
                    yoffset=None,
                    crpix1=None,
                    crpix2=None,
-                   crpix1_shift=None,
-                   crpix2_shift=None,
+                   CRP1SHFT=None,
+                   CRP2SHFT=None,
                    blurfwhm=None,
                    update_pxar=False):
         """
@@ -1190,9 +1190,9 @@ class Database():
         crpix2 : float, optional
             New PSF y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
-        crpix1_shift : tuple, optional
+        CRP1SHFT : tuple, optional
             Stores shifts in x due to any cropping. The default is None.
-        crpix2_shift : tuple, optional
+        CRP2SHFT : tuple, optional
             Stores shifts in y due to any cropping. The default is None.
         blurfwhm : float, optional
             New FWHM for the Gaussian filter blurring (pix) for the observation
@@ -1231,10 +1231,10 @@ class Database():
             self.obs[key]['CRPIX1'][index] = crpix1
         if crpix2 is not None:
             self.obs[key]['CRPIX2'][index] = crpix2
-        if crpix1_shift is not None:
-            self.obs[key]['CRPIX1_SHIFT'][index] = crpix1_shift
-        if crpix2_shift is not None:
-            self.obs[key]['CRPIX2_SHIFT'][index] = crpix2_shift
+        if CRP1SHFT is not None:
+            self.obs[key]['CRP1SHFT'][index] = CRP1SHFT
+        if CRP2SHFT is not None:
+            self.obs[key]['CRP2SHFT'][index] = CRP2SHFT
         if blurfwhm is not None:
             self.obs[key]['BLURFWHM'][index] = blurfwhm
         self.obs[key]['FITSFILE'][index] = fitsfile
