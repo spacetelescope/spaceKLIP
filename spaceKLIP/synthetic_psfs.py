@@ -2,7 +2,7 @@ import os, os.path
 import numpy as np, matplotlib.pyplot as plt
 import jwst
 import webbpsf
-import spaceKLIP.plotting, spaceKLIP.constants
+import spaceKLIP.plotting, spaceKLIP.constants, spaceKLIP.utils
 import scipy
 from skimage.registration import phase_cross_correlation
 import pysiaf
@@ -11,8 +11,7 @@ import pysiaf
 # Files for creating simulated PSFs mock data for synthetic RDI
 
 
-
-def create_miri_synthetic_psf(science_filename, small_grid=None, verbose=True,
+def create_synthetic_psf(science_filename, small_grid=None, verbose=True,
                               choice='closest',
                               fit_radius_arcsec=5,
                               nlambda=None, plot=True,
@@ -58,11 +57,13 @@ def create_miri_synthetic_psf(science_filename, small_grid=None, verbose=True,
 
 
     if verbose:
-        print(f"*** Setting up MIRI simulation instance to match {os.path.basename(science_filename)}")
+        print(f"*** Setting up a simulation to match {os.path.basename(science_filename)}")
 
     # uncomment this once the relevant webbPSF PR is merged:
-    #miri = webbpsf.setup_sim_to_match_file(science_filename, choice=choice, verbose=verbose)
-    miri = webbpsf.setup_sim_to_match_file(science_filename, verbose=verbose)
+    inst = webbpsf.setup_sim_to_match_file(science_filename, verbose=verbose)
+    instname = inst.name
+    if instname not in ['MIRI', 'NIRCam']:
+        raise RuntimeError("The specified filename does not appear to be either a NIRCam or MIRI image.")
     # Open the science file as a datamodel object
     sci_data = jwst.datamodels.open(science_filename)
 
@@ -73,7 +74,7 @@ def create_miri_synthetic_psf(science_filename, small_grid=None, verbose=True,
     mock_data = sci_data.copy()
 
     # extract metadata from the WFS sensing file, and use that to populate metadata for the sim
-    wfs_full_obsid = miri.pupilopd[0].header['OBS_ID']
+    wfs_full_obsid = inst.pupilopd[0].header['OBS_ID']
     wfs_progid = wfs_full_obsid[1:6]
     wfs_obs = wfs_full_obsid[6:9]
     wfs_vis = wfs_full_obsid[9:12]
@@ -81,8 +82,8 @@ def create_miri_synthetic_psf(science_filename, small_grid=None, verbose=True,
     mock_data.meta.observation.program_number = wfs_progid
     mock_data.meta.observation.observation_number = wfs_obs
     mock_data.meta.observation.visit_number = wfs_vis
-    mock_data.meta.observation.date = miri.pupilopd[0].header['DATE-OBS']
-    mock_data.meta.observation.date_beg = miri.pupilopd[0].header['TSTAMP']
+    mock_data.meta.observation.date = inst.pupilopd[0].header['DATE-OBS']
+    mock_data.meta.observation.date_beg = inst.pupilopd[0].header['TSTAMP']
     mock_data.meta.target.proposer_name = 'Synthetic PSF from WFS'
     mock_data.meta.target.catalog_name = 'Synthetic PSF from WFS'
     mock_data.meta.exposure.psf_reference = True
@@ -101,47 +102,75 @@ def create_miri_synthetic_psf(science_filename, small_grid=None, verbose=True,
     mock_data.data[:] = 0   # Discard the original pixel values
     mock_data.err[:] = 0
 
+    if instname == 'MIRI':
+        # Set up size of simulation region, which may be smaller than the size of the file data array for MIRI
+        if inst.filter in ['F1065C', 'F1140C', 'F1550C']:
+            npix_sim = int(np.round(24/inst.pixelscale))
+            # offsets for coronagraph illumiated subregion within the full subarray. 
+            # TO DO: get this better aligned. This is just an eyeball estimate
+            coron_region_y0, coron_region_x0 = 3, 10
+        else:
+            npix_sim = int(np.round(30/inst.pixelscale))
+            raise NotImplementedError("MIRI Lyot coron not yet implemented")
 
-    if miri.filter in ['F1065C', 'F1140C', 'F1550C']:
-        npix_sim = int(np.round(24/miri.pixelscale))
-        # offsets for coronagraph illumiated subregion within the full subarray. 
-        # TO DO: get this better aligned. This is just an eyeball estimate
-        coron_region_y0, coron_region_x0 = 3, 10
+        #-- Setup MIRI small grid dither parameters for iteration
+        if small_grid is None:
+            dithers = ((0,0), )
+        elif small_grid==5:
+            dithers = spaceKLIP.constants.miri_small_grid_dither['5-POINT-SMALL-GRID']
+        elif small_grid==9:
+            dithers = spaceKLIP.constants.miri_small_grid_dither['9-POINT-SMALL-GRID']
+        else:
+            raise ValueError("Value for small_grid must be in [None, 5, 9] for MIRI")
+
+
     else:
-        npix_sim = int(np.round(30/miri.pixelscale))
-        raise NotImplementedError("Lyot coron not yet implemented")
+        # Set up size of simulation region, for NIRCam
+        # This may be rectangular rather than square for some coron apertures
+        npix_sim = mock_data.data.shape[-2:]  # only look at last 2 dimensions, since this can be a datacube of [nints, ny, nx]
+        coron_region_y0, coron_region_x0 = 0 ,0
 
+        #-- Setup NIRCam small grid dither parameters for iteration
+        if small_grid is None:
+            dithers = ((0,0), )
+        elif small_grid==3 and inst.image_mask.endswith('B'):
+            dithers = spaceKLIP.constants.nircam_small_grid_dither['3-POINT-BAR']
+        elif small_grid==5 and inst.image_mask.endswith('B'):
+            dithers = spaceKLIP.constants.nircam_small_grid_dither['5-POINT-BAR']
+        elif small_grid==5 and inst.image_mask.endswith('R'):
+            dithers = spaceKLIP.constants.nircam_small_grid_dither['5-POINT-BOX']
+            # TODO also implement a way to select the 5 point diamond pattern...
+        elif small_grid==9 and inst.image_mask.endswith('R'):
+            dithers = spaceKLIP.constants.nircam_small_grid_dither['9-POINT-CIRCLE']
+        else:
+            raise ValueError("Value for small_grid must be in [None, 3, 5, 9] for NIRCam. 3 and 5 allowed for BAR masks, 5 and 9 for ROUND masks.")
 
-    #-- Setup small grid dither parameters for iteration
-    if small_grid is None:
-        dithers = ((0,0), )
-    elif small_grid==5:
-        dithers = spaceKLIP.constants.miri_small_grid_dither['5-POINT-SMALL-GRID']
-    elif small_grid==9:
-        dithers = spaceKLIP.constants.miri_small_grid_dither['9-POINT-SMALL-GRID']
-    else:
-        raise ValueError("Value for small_grid must be in [None, 5, 9]")
 
     outnames = []
     for idither, (offset_x, offset_y) in enumerate(dithers):
         exp_num = idither + 1
 
         if verbose:
-            print(f"*** Simulating MIRI coronagraphic PSF for {miri.filter}")
+            print(f"*** Simulating {inst.name} coronagraphic PSF for {inst.filter}, {inst.image_mask}")
             print(f"    Dither pos {exp_num} of {len(dithers)}. Offsets = {offset_x}, {offset_y} mas")
 
-        miri.options['source_offset_x'] = offset_x / 1000
-        miri.options['source_offset_y'] = offset_y / 1000
+        inst.options['source_offset_x'] = offset_x / 1000
+        inst.options['source_offset_y'] = offset_y / 1000
 
-        psf = miri.calc_psf(fov_pixels=npix_sim, nlambda=nlambda)
+        psf = inst.calc_psf(fov_pixels=npix_sim, nlambda=nlambda)
         ext = 'DET_DIST'
 
 
         if verbose:
-            print(f"*** Scaling and shifting simulated PSF to align with science data, approximately")
+            print(f"    Scaling and shifting simulated PSF to align with science data, approximately")
         # Stick the simulated PSF into the mock data object
         # set up indices:
-        illuminated_region = np.s_[0, coron_region_y0:coron_region_y0+npix_sim, coron_region_x0:coron_region_x0+npix_sim]
+        if np.isscalar(npix_sim):
+            npix_sim_nx, npix_sim_ny = npix_sim, npix_sim
+        else:
+            npix_sim_nx, npix_sim_ny = npix_sim
+
+        illuminated_region = np.s_[0, coron_region_y0:coron_region_y0+npix_sim_ny, coron_region_x0:coron_region_x0+npix_sim_nx]
 
 
         mock_data.dq[:] = 1 # set all pixels to DO_NOT_USE by default
@@ -157,9 +186,9 @@ def create_miri_synthetic_psf(science_filename, small_grid=None, verbose=True,
             mock_data.data[illuminated_region]  = psf[ext].data  # first version here, to be adjusted below
             shifts, scale, offset = fit_shift_scale_and_offset(sci_data, mock_data.data[0], fit_radius_arcsec)
             if verbose:
-                print(f'Found image registration shifts={shifts}, flux scale {scale}, background offset {offset}. Using fit within {fit_radius_arcsec} arcsec.')
+                print(f'    Found image registration shifts={shifts}, flux scale {scale:.1f}, background offset {offset:.4f}. Using fit within {fit_radius_arcsec} arcsec.')
 
-        aligned_psf_image = np.roll(np.roll(psf[ext].data, int(shifts[0]), axis=0), int(shifts[1]), axis=1)
+        aligned_psf_image = spaceKLIP.utils.roll_zeropad(spaceKLIP.utils.roll_zeropad(psf[ext].data, int(shifts[0]), axis=0), int(shifts[1]), axis=1)
         mock_data.data[illuminated_region]  = aligned_psf_image  * scale + offset   # better scaled version of mock data
 
 #        # Mask to good pixels in the science data, for setting flux ratio
@@ -185,12 +214,13 @@ def create_miri_synthetic_psf(science_filename, small_grid=None, verbose=True,
         #--- Prepare to output
         filetype = sci_data.meta.filename.split('_')[-1]  # this will be "calints.fits" or "rate.fits" or the like
 
+
         outname = f'syn{mock_data.meta.observation.program_number}{mock_data.meta.observation.observation_number}{mock_data.meta.observation.visit_number}_'+\
-                  f'{mock_data.meta.observation.visit_group}{mock_data.meta.observation.sequence_id}{mock_data.meta.observation.activity_id}_{exp_num:05d}_mirimage_{filetype}'
+                  f'{mock_data.meta.observation.visit_group}{mock_data.meta.observation.sequence_id}{mock_data.meta.observation.activity_id}_{exp_num:05d}_{mock_data.meta.instrument.detector.lower()}_{filetype}'
         outname = os.path.join(output_dir, outname)
 
         if verbose:
-            print(f"*** Saving output to {outname}")
+            print(f">>> Saving output to {outname}")
         mock_data.write(outname)
         outnames.append(outname)
 
@@ -198,9 +228,6 @@ def create_miri_synthetic_psf(science_filename, small_grid=None, verbose=True,
             spaceKLIP.plotting.display_coron_image(outname)
 
     return outnames
-
-
-
 
 
 def mask_distance_from_center(sci_datamodel, radius_arcsec):
