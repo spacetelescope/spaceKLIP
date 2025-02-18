@@ -105,6 +105,14 @@ spaceKLIP.psf module
    :undoc-members:
    :show-inheritance:
 
+spaceKLIP.psflib module
+--------------------
+
+.. automodule:: spaceKLIP.psf
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 spaceKLIP.pyklippipeline module
 -------------------------------
 
