@@ -2,15 +2,15 @@
 # IMPORTS
 # =============================================================================
 
+import logging
 import os
 
+import astropy
+import astropy.table
 import numpy as np
-
-import astropy, astropy.table
-from astroquery.mast import Mast
 import requests
+from astroquery.mast import Mast
 
-import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 

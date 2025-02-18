@@ -1,17 +1,17 @@
 from __future__ import division
 
-from jwst.stpipe import Step
-from jwst import datamodels
-from jwst.datamodels import dqflags, RampModel
-from stcal.ramp_fitting.utils import set_if_total_ramp
-from jwst.ramp_fitting.ramp_fit_step import create_image_model, create_integration_model
+import warnings
+from multiprocessing import Pool
 
 import astropy.io.fits as fits
 import numpy as np
+from jwst import datamodels
+from jwst.datamodels import dqflags
+from jwst.ramp_fitting.ramp_fit_step import create_image_model, create_integration_model
+from jwst.stpipe import Step
 from scipy import special
-import warnings
+from stcal.ramp_fitting.utils import set_if_total_ramp
 
-from multiprocessing import Pool
 
 class ExperimentalJumpRampStep(Step):
     """

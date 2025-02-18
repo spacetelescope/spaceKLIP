@@ -1,19 +1,15 @@
-import os
-import numpy as np
-
-import matplotlib
-import matplotlib.pyplot as plt
-
+import logging
 import multiprocessing as mp
+import os
 
-from jwst.stpipe import Step
+import matplotlib.pyplot as plt
+import numpy as np
 from jwst import datamodels
 from jwst.datamodels import dqflags
-
+from jwst.stpipe import Step
 from webbpsf_ext import robust
 from webbpsf_ext.image_manip import expand_mask
 
-import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 

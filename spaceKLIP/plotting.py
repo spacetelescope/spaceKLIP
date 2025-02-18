@@ -2,40 +2,34 @@
 # IMPORTS
 # =============================================================================
 
-import os
-import pdb
-import sys
 import glob
+import logging
+import os
+import shutil
+import tempfile
 from itertools import chain
-
-import numpy as np
-import math
-
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gs
-import matplotlib.patheffects as patheffects
-from matplotlib.patches import Rectangle
-from matplotlib import font_manager
-import scipy.ndimage as ndi
 
 import astropy
 import astropy.io.fits as fits
 import astropy.units as u
 import astropy.visualization as v
-
-from . import wcs_utils
-import jwst.datamodels
-
-import shutil
-import tempfile
 import ipywidgets as widgets
+import jwst.datamodels
+import matplotlib
+import matplotlib.gridspec as gs
 import matplotlib.patches as patches
+import matplotlib.patheffects as patheffects
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.ndimage as ndi
+from matplotlib import font_manager
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
 
-import logging
+from . import wcs_utils
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 

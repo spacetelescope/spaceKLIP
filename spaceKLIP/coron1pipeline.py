@@ -1,34 +1,21 @@
 from __future__ import division
 
-import matplotlib
-
-# =============================================================================
-# IMPORTS
-# =============================================================================
-
+import logging
 import os
-import pdb
-import sys
+import warnings
 
 import astropy.io.fits as fits
 import numpy as np
-
+from jwst import datamodels
+from jwst.datamodels import dqflags, RampModel
+from jwst.pipeline import Detector1Pipeline
+from jwst.stpipe import Step
+from scipy.interpolate import interp1d
 from tqdm import trange
 
-from jwst.lib import reffile_utils
-from jwst.stpipe import Step
-from jwst import datamodels
-from jwst.datamodels import dqflags, RampModel, SaturationModel
-from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
-from .fnoise_clean import kTCSubtractStep, OneOverfStep
 from .expjumpramp import ExperimentalJumpRampStep
-from webbpsf_ext import robust
+from .fnoise_clean import kTCSubtractStep, OneOverfStep
 
-from scipy.interpolate import interp1d
-from skimage.metrics import structural_similarity
-
-import warnings
-import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 

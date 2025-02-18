@@ -1,31 +1,20 @@
 from __future__ import division
 
-import matplotlib
-
-# =============================================================================
-# IMPORTS
-# =============================================================================
-
-import os
+import copy
 import glob
-import pdb
-import sys
+import logging
+import os
 
 import astropy.io.fits as pyfits
 import numpy as np
-
-import copy
-import json
 import pysiaf
-import webbpsf, webbpsf_ext
-
+import webbpsf
 from astropy.table import Table
-from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
+from jwst.pipeline import Detector1Pipeline
 from stdatamodels.jwst import datamodels
 
 from .utils import nircam_apname, get_nrcmask_from_apname, get_filter_info, config_stpipe_log
 
-import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 

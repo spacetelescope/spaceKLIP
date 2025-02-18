@@ -1,54 +1,46 @@
 from __future__ import division
 
-import matplotlib
-
-# =============================================================================
-# IMPORTS
-# =============================================================================
-
+import copy
+import logging
 import os
-import pdb
+import shutil
 import sys
+from functools import partial
+from io import StringIO
 
 import astropy.io.fits as fits
-import matplotlib.pyplot as plt
-from astropy.table import Table
 import astropy.units as u
-
-from cycler import cycler
-import numpy as np
-
-import copy
-import corner
-import emcee
+import matplotlib
 import matplotlib.patheffects as PathEffects
+import matplotlib.pyplot as plt
+import numpy as np
 import pyklip.fakes as fakes
 import pyklip.fitpsf as fitpsf
 import pyklip.fm as fm
 import pyklip.fmlib.fmpsf as fmpsf
-import shutil
-
+import scipy.ndimage.interpolation as sinterp
+from astropy.table import Table
+from cycler import cycler
 from pyklip import klip, parallelized
 from pyklip.instruments.JWST import JWSTData
-from scipy.ndimage import fourier_shift, gaussian_filter, rotate
-import scipy.ndimage.interpolation as sinterp
-from scipy.optimize import minimize
+from scipy.interpolate import interp1d
+from scipy.ndimage import fourier_shift
 from scipy.ndimage import gaussian_filter, rotate, convolve
 from scipy.ndimage import shift as spline_shift
-from scipy.interpolate import interp1d
-from spaceKLIP import utils as ut
-from spaceKLIP.psf import get_offsetpsf, JWST_PSF
-from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
-from spaceKLIP.pyklippipeline import get_pyklip_filepaths
-from spaceKLIP.utils import write_starfile, set_surrounded_pixels, pop_pxar_kw
-from spaceKLIP.imagetools import gaussian_kernel
-
-from functools import partial
+from scipy.optimize import minimize
+from tqdm.auto import trange
 from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 
-from tqdm.auto import trange
-from io import StringIO
-import logging
+from spaceKLIP import utils as ut
+from spaceKLIP.imagetools import gaussian_kernel
+from spaceKLIP.psf import get_offsetpsf, JWST_PSF
+from spaceKLIP.pyklippipeline import get_pyklip_filepaths
+from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
+from spaceKLIP.utils import write_starfile, set_surrounded_pixels, pop_pxar_kw
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 

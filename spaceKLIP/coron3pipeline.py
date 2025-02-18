@@ -1,22 +1,14 @@
 from __future__ import division
 
-import matplotlib
-
-# =============================================================================
-# IMPORTS
-# =============================================================================
-
+import logging
 import os
-import pdb
-import sys
 
 import astropy.io.fits as pyfits
 import numpy as np
+from jwst.pipeline import Coron3Pipeline
 
-from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
 from spaceKLIP.psf import get_transmission
 
-import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 

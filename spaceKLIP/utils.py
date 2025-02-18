@@ -1,32 +1,19 @@
 from __future__ import division
 
-import matplotlib
-
-# =============================================================================
-# IMPORTS
-# =============================================================================
-
-import os
-import pdb
-import sys
+import importlib
 import io
-import stpipe
+import logging
+import os
 
 import astropy.io.fits as pyfits
 import numpy as np
-
-import importlib
+import pysiaf
 import scipy.ndimage.interpolation as sinterp
-
+import stpipe
 from scipy.integrate import simpson
 from scipy.ndimage import fourier_shift, gaussian_filter
 from scipy.ndimage import shift as spline_shift
 
-import pysiaf
-from webbpsf_ext.imreg_tools import get_coron_apname as nircam_apname
-from webbpsf_ext.image_manip import expand_mask
-
-import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
