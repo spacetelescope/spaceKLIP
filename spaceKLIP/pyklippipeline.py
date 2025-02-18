@@ -138,7 +138,12 @@ def run_obs(database,
             dataset = JWSTData(filepaths, psflib_filepaths, highpass=kwargs_temp['highpass'],center_include_offset=False)
             kwargs_temp['dataset'] = dataset
             # Overwrite centers with new header vals
-            dataset.centers = [[database.obs[row]['STARCENX'],database.obs[row]['STARCENY']] for row in database.obs]
+            dataset.centers = [[row['STARCENX'],row['STARCENY']]*row['NINTS'] for row in database.obs[key]]
+            dataset.psflib.aligned_center = dataset.centers[0]
+            print('a')
+            print(dataset.centers)
+            print(dataset._centers)
+            print(dataset.psflib.aligned_center)
             kwargs_temp['aligned_center'] = dataset._centers[0]
             kwargs_temp['psf_library'] = dataset.psflib
             kwargs_temp['mode'] = mode
