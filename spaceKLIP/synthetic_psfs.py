@@ -1,7 +1,7 @@
 import os, os.path
 import numpy as np, matplotlib.pyplot as plt
 import jwst
-import webbpsf
+import stpsf
 import spaceKLIP.plotting, spaceKLIP.constants, spaceKLIP.utils
 import scipy
 from skimage.registration import phase_cross_correlation
@@ -20,33 +20,35 @@ def create_synthetic_psf(science_filename, small_grid=None, verbose=True,
 
     This will create and save one or more simulated files. The output files are
     saved in JWST-compatible format, so should be readable in a standard way
-    interchangable with observed data.  Output filenames use the program and
+    interchangeable with observed data.  Output filenames use the program and
     observation numbers derived from the WFS measurements, so will be distinct
     from the science data.
 
 
     TO DO:
-        * Improve webbpsf MIRI Lyot stop alignment parameters
-        * Improve webbpsf MIRI instrument WFE parameters
-        * Improve registration/alignment for where the coronagraph mask center is in the webbpsf sims
+        * Improve stpsf MIRI Lyot stop alignment parameters
+        * Improve stpsf MIRI instrument WFE parameters
+        * Improve registration/alignment for where the coronagraph mask center is in the stpsf sims
 
 
     Parameters
     ----------
     science_filename : str
-        Filename of a science dataset to match. This is used to determine coronagraph mask, filter, etc
+        Filename of a science dataset to match. This is used to determine coronagraph mask, filter, etc.
     small_grid : None or int
-        Simulate small grid dithers? Set this to 5 or 9 to simulated the MIRI SGD with that number of data points
+        Simulate small grid dithers? Set this to 5 or 9 to simulate the MIRI SGD with that number of data points
     verbose : bool
         Be more verbose in text output?
     choice : str
-        Choice of which WFS sensing data to use. See webbpsf's load_wss_opd_by_date
+        Choice of which WFS sensing data to use. See stpsf's load_wss_opd_by_date
     nlambda : int
-        Number of wavelengths to simulate. Leave None to use the webbpsf default
+        Number of wavelengths to simulate. Leave None to use the stpsf default
     plot : bool
         Output a plot of the simulated synthetic PSF.
     output_dir : str
         Path to output directory to save the synthetic PSF
+    fit_radius_arcsec : float
+        Radius to use when fitting the flux scale factor for a simulated PSF
 
     Returns
     -------
@@ -60,7 +62,7 @@ def create_synthetic_psf(science_filename, small_grid=None, verbose=True,
         print(f"*** Setting up a simulation to match {os.path.basename(science_filename)}")
 
     # uncomment this once the relevant webbPSF PR is merged:
-    inst = webbpsf.setup_sim_to_match_file(science_filename, verbose=verbose)
+    inst = stpsf.setup_sim_to_match_file(science_filename, verbose=verbose, choice=choice)
     instname = inst.name
     if instname not in ['MIRI', 'NIRCam']:
         raise RuntimeError("The specified filename does not appear to be either a NIRCam or MIRI image.")
