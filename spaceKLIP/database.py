@@ -292,8 +292,8 @@ class Database():
                 CRPIX1 += [head.get('CRPIX1', np.nan)]
                 CRPIX2 += [head.get('CRPIX2', np.nan)]
 
-            MASKCENX += [head.get('MASKCENX', CRPIX1[i])]
-            MASKCENY += [head.get('MASKCENY', CRPIX2[i])]
+            MASKCENX += [head.get('MASKCENX', float(CRPIX1[i]))]
+            MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
             STARCENX += [head.get('STARCENX', np.nan)]
             STARCENY += [head.get('STARCENY', np.nan)]
             VPARITY += [head.get('VPARITY', -1)]
