@@ -3292,14 +3292,12 @@ class ImageTools():
                     # frame.
                     if align_to_file is not None or j != ww_sci[0] or k != 0:
                         # Calculate shifts relative to first frame, work in pixels
-                        xfirst = starcenx + (xoffset/pxsc)
-                        xoff_curr_pix = self.database.obs[key]['XOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
-                        xcurrent = self.database.obs[key]['STARCENX'][j] + xoff_curr_pix
+                        xfirst = starcenx
+                        xcurrent = self.database.obs[key]['STARCENX'][j]
                         xshift = xfirst - xcurrent
 
-                        yfirst = starceny + (yoffset/pxsc)
-                        yoff_curr_pix = self.database.obs[key]['YOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
-                        ycurrent = self.database.obs[key]['STARCENY'][j] + yoff_curr_pix
+                        yfirst = starceny
+                        ycurrent = self.database.obs[key]['STARCENY'][j] 
                         yshift = yfirst - ycurrent
 
                         # Get mask center to also register the shift in its location
