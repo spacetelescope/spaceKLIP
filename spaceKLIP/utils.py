@@ -460,7 +460,7 @@ def crop_image(image,
 
 def imshift(image,
             shift,
-            pad=False,
+            pad=True,    #changed from false to true 2/18 BM
             cval=0.,
             method='fourier',
             kwargs={}):
