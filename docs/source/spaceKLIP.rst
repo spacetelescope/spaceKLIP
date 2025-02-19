@@ -106,7 +106,7 @@ spaceKLIP.psf module
    :show-inheritance:
 
 spaceKLIP.psflib module
---------------------
+-----------------------
 
 .. automodule:: spaceKLIP.psflib
    :members:
