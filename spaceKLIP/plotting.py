@@ -265,7 +265,7 @@ def display_coron_image(filename,
         image = fits.getdata(filename)
         header = fits.getheader(filename)
         #display(header)
-        center_x, center_y = header['STARCENX'], header['STARCENY']
+        center_x, center_y = header['CRPIX1'], header['CRPIX2']
         bunit = header['BUNIT']
         wcs = astropy.wcs.WCS(header)
         if image.ndim == 3:
