@@ -2888,7 +2888,20 @@ class ImageTools():
         pass
 
     def resample_frames(self, subdir='resampled'):
+        '''
+        Resample frames applying distortion correction to the data
 
+        Parameters
+        ----------
+         subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'recentered'.
+
+        Returns
+        -------
+        None.
+
+        '''
         def to_container(model, target=True):
             """Convert to a ModelContainer of ImageModels for each plane"""
 
