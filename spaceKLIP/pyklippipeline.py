@@ -138,18 +138,19 @@ def run_obs(database,
             dataset = JWSTData(filepaths, psflib_filepaths, highpass=kwargs_temp['highpass'],center_include_offset=False)
             kwargs_temp['dataset'] = dataset
 
+            ## THIS DIDN'T FIX IT ANYWAY
             # TEMPORARY FIX: Overwrite centers with new header vals
             # Ideally we should modify pyklip.instruments.JWST.py 
             # to reference 'STARCENX/Y' instead of 'CRPIX1/2'
-            sci_centers = []
-            for row in database.obs[key]:
-                if row['TYPE'] == 'SCI':
-                    centers = [[row['STARCENX']-1,row['STARCENY']-1]] * row['NINTS']
-                    sci_centers.extend(centers)
-            sci_centers = np.array(sci_centers)
-            dataset.centers = sci_centers
-            dataset.psflib.aligned_center = dataset.centers[0]
-            kwargs_temp['aligned_center'] = dataset._centers[0]
+            # sci_centers = []
+            # for row in database.obs[key]:
+            #     if row['TYPE'] == 'SCI':
+            #         centers = [[row['STARCENX']-1,row['STARCENY']-1]] * row['NINTS']
+            #         sci_centers.extend(centers)
+            # sci_centers = np.array(sci_centers)
+            # dataset.centers = sci_centers
+            # dataset.psflib.aligned_center = dataset.centers[0]
+            kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
             kwargs_temp['psf_library'] = dataset.psflib
             kwargs_temp['mode'] = mode
             
