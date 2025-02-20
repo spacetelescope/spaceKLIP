@@ -749,7 +749,7 @@ def gen_offsetpsf(obs,
             #     nircam.pupil_mask = 'MASKSWB'
             # elif obs['CORONMSK'][ww_sci[0]] in ['MASKALWB']:
             #     nircam.pupil_mask = 'MASKLWB'
-            if obs['PUPIL'][ww_sci[0]] != 'NONE':
+            if obs['PUPIL'][ww_sci[0]] != 'NONE' and obs['PUPIL'][ww_sci[0]] != 'CLEAR':
                 if obs['PUPIL'][ww_sci[0]] == 'MASKBAR':
                     if 'LWB' in obs['CORONMSK'][ww_sci[0]]:
                         nircam.pupil_mask = 'MASKLWB'
