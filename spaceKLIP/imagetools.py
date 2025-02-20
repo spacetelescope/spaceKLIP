@@ -41,20 +41,13 @@ import copy
 import pyklip.fakes as fakes
 from spaceKLIP.psf import get_offsetpsf
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
-import mcmc_tools
+from spaceKLIP import mcmc_tools
 from pyklip.instruments.JWST import JWSTData
 from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 from astropy.io import fits
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 import scipy.ndimage
 import lmfit
-
-import webbpsf
-import emcee
-from scipy.ndimage import shift
-import corner
-import math
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import logging
 log = logging.getLogger(__name__)
