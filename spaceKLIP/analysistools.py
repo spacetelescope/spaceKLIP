@@ -851,11 +851,14 @@ class AnalysisTools():
                     if maskcons is not None:
                         ax.plot(seps, maskcons_corr[si],
                                 label=f'KL = {KLmodes}', color=f'C{si}')
-                    ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='--',
-                            color=f'C{si}')
-                ax.legend(loc='upper right', ncols=3, fontsize=10,
-                          title = 'Dashed lines exclude coronagraph mask throughput',
-                          title_fontsize=10)
+                        ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='--',
+                                color=f'C{si}')
+                    else:
+                        ax.plot(seps, rawcons_corr[si], color=f'C{si}')
+                if maskcons is not None:
+                    ax.legend(loc='upper right', ncols=3, fontsize=10,
+                              title = 'Dashed lines exclude coronagraph mask throughput',
+                              title_fontsize=10)
                 standardize_plots_annotate_save(ax,
                                                 title=f'Calibrated contrast in {filt}, {psfsub_strategy}',
                                                 ylabel='Contrast',
@@ -864,15 +867,21 @@ class AnalysisTools():
                                                 ylim=plot_ylim)
                 plt.close(fig)
 
-                if maskcons is not None:
-                    # Plot calibrated contrast curves compared to raw
-                    fig, ax = standardize_plots_setup()
-                    for si, seps in enumerate(rawseps):
-                        KLmodes = klip_args['numbasis'][si]
+                # Plot calibrated contrast curves compared to raw
+                fig, ax = standardize_plots_setup()
+                for si, seps in enumerate(rawseps):
+                    KLmodes = klip_args['numbasis'][si]
+                    if maskcons is not None:
                         ax.plot(seps, maskcons_corr[si],
                                 label=f'KL = {KLmodes}', color=f'C{si}')
                         ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
                                 color=f'C{si}')
+                    else:
+                        ax.plot(seps, rawcons_corr[si],
+                                label=f'KL = {KLmodes}', color=f'C{si}')
+                        ax.plot(seps, rawcons[si], alpha=0.3, ls=':',
+                                color=f'C{si}')
+
                 ax.legend(loc='upper right', ncols=3, fontsize=10,
                           title = 'Solid lines = calibrated, dotted lines = raw',
                           title_fontsize=10)
