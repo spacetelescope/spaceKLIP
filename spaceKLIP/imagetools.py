@@ -41,13 +41,20 @@ import copy
 import pyklip.fakes as fakes
 from spaceKLIP.psf import get_offsetpsf
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
+import mcmc_tools
 from pyklip.instruments.JWST import JWSTData
 from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 from astropy.io import fits
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 import scipy.ndimage
 import lmfit
-import re
+
+import webbpsf
+import emcee
+from scipy.ndimage import shift
+import corner
+import math
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import logging
 log = logging.getLogger(__name__)
@@ -501,16 +508,13 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'medsub'.
-
         method : str, optional
-
-            - 'robust' for a robust median after masking out bright stars,
-            - 'sigma_clipped' for another version of robust median using astropy
-               sigma_clipped_stats on the whole image,
-            - 'border' for robust median on the outer border region only, to
-              ignore the bright stellar PSF in the center,
-            - 'simple'  for a simple np.nanmedian.
-
+            'robust' for a robust median after masking out bright stars,
+            'sigma_clipped' for another version of robust median using astropy
+                sigma_clipped_stats on the whole image,
+            'border' for robust median on the outer border region only, to
+                ignore the bright stellar PSF in the center,
+            or 'simple'  for a simple np.nanmedian.
         sigma : float, optional
             number of standard deviations to use for the clipping limit in
             sigma_clipped_stats, if the robust option is selected.
@@ -518,11 +522,11 @@ class ImageTools():
             number of pixels to use when defining the outer border region, if
             the border option is selected. Default is to use the outermost 32
             pixels around all sides of the image.
-        
+
         Returns
         -------
         None.
-        
+
         """
 
         # Set output directory.
@@ -606,16 +610,16 @@ class ImageTools():
 
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
-                
-    
+
+
     def subtract_background_godoy(self,
                                   types=['SCI', 'REF'],
                                   subdir='bgsub'):
 
         """
         Subtract the corresponding background observations from the SCI and REF
-        data in the spaceKLIP database using a method developed by Nico Godoy. 
-        
+        data in the spaceKLIP database using a method developed by Nico Godoy.
+
         Parameters
         ----------
         types : list of str
@@ -624,11 +628,11 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'bgsub'.
-        
+
         Returns
         -------
         None.
-        
+
         """
 
         # Set output directory.
@@ -669,7 +673,7 @@ class ImageTools():
                         bg_pxdq += [pxdq]
                     bg_data, bg_erro, bg_pxdq = np.array(bg_data), np.array(bg_erro), np.array(bg_pxdq)
 
-                    # If multiple files, take the median. Otherwise, carry on. 
+                    # If multiple files, take the median. Otherwise, carry on.
                     if bg_data.ndim == 4:
                         bg_data = np.nanmedian(bg_data, axis=0)
 
@@ -680,9 +684,6 @@ class ImageTools():
                     data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
 
                     # Subtract the background per frame
-                    head, tail = os.path.split(fitsfile)
-                    log.info('  --> Background subtraction: ' + tail)
-
                     data -= bg_data
 
                     # Loop over integrations
@@ -702,13 +703,13 @@ class ImageTools():
                         # Reshape into 1d arrays and concatenate
                         s1 = sect1.reshape(1,sect1.shape[0]*sect1.shape[1])
                         s2 = sect2.reshape(1,sect2.shape[0]*sect2.shape[1])
-                        s12 = np.concatenate((s1[0,:],s2[0,:])) 
+                        s12 = np.concatenate((s1[0,:],s2[0,:]))
 
                         # Take median of concatenated array
                         cte = np.nanmedian(s12)
 
                         # Use filter to determine mask for estimating BG scaling
-                        # at the moment only have it working for F1140C. 
+                        # at the moment only have it working for F1140C.
                         filt = self.database.obs[key]['FILTER'][j]
                         if filt not in ['F1065C', 'F1140C', 'F1550C']:
                             raise NotImplementedError('Godoy subtraction is only supported for MIRI FQPMs at this time!')
@@ -716,13 +717,13 @@ class ImageTools():
                             bgmaskbase = os.path.split(os.path.abspath(__file__))[0]
                             bgmaskfile = os.path.join(bgmaskbase, 'resources/miri_bg_masks/godoy_mask_{}.fits'.format(filt.lower()))
 
-                        # Run minimisation function, 'res' will tell us if there is any residual 
+                        # Run minimisation function, 'res' will tell us if there is any residual
                         # background that wasn't removed in the initial attempt. I.e. do we
-                        # need to subtract a little bit more or less? 
-                        res = minimize(ut.bg_minimize, 
+                        # need to subtract a little bit more or less?
+                        res = minimize(ut.bg_minimize,
                                        x0=cte*100,
-                                       args=(data_submed, bg_submed, bgmaskfile), 
-                                       method='L-BFGS-B', 
+                                       args=(data_submed, bg_submed, bgmaskfile),
+                                       method='L-BFGS-B',
                                        tol=1e-7)
 
                         # Extract scale factor for the background from res
@@ -737,12 +738,11 @@ class ImageTools():
 
                     # Write FITS file and PSF mask.
                     fitsfile = ut.write_obs(fitsfile, output_dir, data_bg_sub, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
-                    
+
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile)
-        
+
         pass
-      
 
     def subtract_background(self,
                             nints_per_med=None,
@@ -923,7 +923,7 @@ class ImageTools():
 
         pass
 
-    
+
     def find_bad_pixels(self,
                         method='dqarr',
                         set_dq_zero=True,
@@ -1016,7 +1016,7 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
 
-                if set_dq_zero: #set_dq_zero
+                if set_dq_zero:  # set_dq_zero
                     # Make copy of DQ array filled with zeros, i.e. all good pixels
                     pxdq_temp = np.zeros_like(pxdq)
                 else:
@@ -1039,7 +1039,7 @@ class ImageTools():
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             # Flag any pixels marked as DO_NOT_USE that aren't NONSCIENCE
                             pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1)) \
-                                         & np.logical_not(pxdq_temp & 512 == 512)
+                                        & np.logical_not(pxdq_temp & 512 == 512)
                         elif method_split[k] == 'sigclip':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             self.find_bad_pixels_sigclip(data, erro, pxdq_temp, pxdq & 512 == 512, sigclip_kwargs)
@@ -1064,27 +1064,27 @@ class ImageTools():
                     new_dq = np.bitwise_or(pxdq.copy(), pxdq_temp).astype(np.uint32)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts,
+                                        maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
-                
+
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
 
         pass
-      
 
     def fix_bad_pixels(self,
-                       method='timemed+localmed+medfilt',
-                       sigclip_kwargs={},
-                       custom_kwargs={},
-                       timemed_kwargs={},
-                       localmed_kwargs={},
-                       medfilt_kwargs={},
-                       types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
-                       subdir='bpcleaned',
-                       restrict_to=None):
+                   method='timemed+localmed+medfilt',
+                   sigclip_kwargs={},
+                   custom_kwargs={},
+                   timemed_kwargs={},
+                   localmed_kwargs={},
+                   medfilt_kwargs={},
+                   types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
+                   subdir='bpcleaned',
+                   restrict_to=None):
         """
-        TO BE DEPRECATED BY FIND_BAD_PIXELS() AND CLEAN_BAD_PIXELS()
+        **** TO BE DEPRECATED BY FIND_BAD_PIXELS() AND CLEAN_BAD_PIXELS() ****
         Identify and fix bad pixels.
 
         Parameters
@@ -1160,7 +1160,7 @@ class ImageTools():
         """
         # log.info('--> WARNING! The fix_bad_pixels() routine is deprecated, the ..........')
         # log.info('--> WARNING! find_bad_pixels() and clean_bad_pixels() are preferred!!!!')
-    
+
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
@@ -1257,7 +1257,7 @@ class ImageTools():
         Parameters
         ----------
         method : str, optional
-            Sequence of bad pixel cleaning methods to be run on the data. 
+            Sequence of bad pixel cleaning methods to be run on the data.
             Different methods must be joined by a '+' sign without
             whitespace. Available methods are:
 
@@ -1311,18 +1311,18 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'bpcleaned'.
-        
+
         Returns
         -------
         None.
 
         """
-        
+
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        
+
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
             # if we limit to only processing some concatenations, check whether this concatenation matches the pattern
@@ -1330,11 +1330,11 @@ class ImageTools():
                 continue
 
             log.info('--> Concatenation ' + key)
-            
+
             # Loop through FITS files.
             nfitsfiles = len(self.database.obs[key])
             for j in range(nfitsfiles):
-                
+
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
@@ -1343,7 +1343,7 @@ class ImageTools():
 
                 fig = plt.figure()
                 ax = plt.gca()
-                ax.hist(data.flatten(), 
+                ax.hist(data.flatten(),
                         bins=int(np.sqrt(len(data.flatten()))),
                         histtype='step',
                         label='Pre Cleaning')
@@ -1353,7 +1353,7 @@ class ImageTools():
 
                 # Don't want to clean anything that isn't bad or is a non-science pixel
                 pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1)) & np.logical_not(pxdq_temp & 512 == 512)
-                
+
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
                     method_split = method.split('+')
@@ -1382,7 +1382,7 @@ class ImageTools():
                             self.fix_bad_pixels_interp2d(data, erro, pxdq_temp, interp2d_kwargs)
                         else:
                             log.info('  --> Unknown method ' + method_split[k] + ': skipped')
-                
+
                 # update the pixel DQ bit flags for the output files.
                 #  The pxdq variable here is effectively just the DO_NOT_USE flag, discarding other bits.
                 #  We want to make a new dq which retains the other bits as much as possible.
@@ -1393,9 +1393,8 @@ class ImageTools():
                 new_dq = np.bitwise_or(new_dq, pxdq_temp)  # add in the do_not_use bit from the cleaned version
                 new_dq = new_dq.astype(np.uint32)   # ensure correct output type for saving
                                                     # (the bitwise steps otherwise return np.int64 which isn't FITS compatible)
-
                 # Finish figure for this file
-                ax.hist(data.flatten(), 
+                ax.hist(data.flatten(),
                         bins=int(np.sqrt(len(data.flatten()))),
                         histtype='step',
                         label='Post Cleaning')
@@ -1412,12 +1411,12 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
-                
+
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
-        
+
         pass
-    
+
     def find_bad_pixels_sigclip(self,
                                 data,
                                 erro,
@@ -1446,7 +1445,7 @@ class ImageTools():
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
             - neg_sigma : float, optional
-                Sigma clipping threshold for negative outliers. The default is 1. 
+                Sigma clipping threshold for negative outliers. The default is 1.
             - shift_x : list of int, optional
                 Pixels in x-direction to which each pixel shall be compared to.
                 The default is [-1, 0, 1].
@@ -1475,7 +1474,7 @@ class ImageTools():
             sigclip_kwargs['shift_x'] += [0]
         if 0 not in sigclip_kwargs['shift_y']:
             sigclip_kwargs['shift_y'] += [0]
-        
+
         # Pad data.
         pad_left = np.abs(np.min(sigclip_kwargs['shift_x']))
         pad_right = np.abs(np.max(sigclip_kwargs['shift_x']))
@@ -1510,12 +1509,12 @@ class ImageTools():
             # Create initial mask of large negative values.
             ww[i] = ww[i] | (data[i] < bg_med - sigclip_kwargs['neg_sigma'] * bg_std)
             ww[i][NON_SCIENCE[i]] = 0
-            
+
             # Loop through max 10 iterations.
             for it in range(10):
                 data_temp[i][ww[i]] = np.nan
                 erro_temp[i][ww[i]] = np.nan
-                
+
                 # Shift data and calculate median and standard deviation of neighbours
                 pad_data = np.pad(data_temp[i], pad_vals, mode='edge')
                 pad_erro = np.pad(erro_temp[i], pad_vals, mode='edge')
@@ -1568,7 +1567,7 @@ class ImageTools():
             pxdq[i][ww[i]] = 1
         print('')
         log.info('  --> Method sigclip: identified %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
-        
+
         pass
 
     def find_bad_pixels_timeints(self,
@@ -1579,7 +1578,7 @@ class ImageTools():
                             timeints_kwargs={}):
         """
         Identify bad pixels from temporal variations across integrations.
-        
+
         Parameters
         ----------
         data : 3D-array
@@ -1594,12 +1593,11 @@ class ImageTools():
             be modified by the routine.
         timeints_kwargs : dict, optional
             Keyword arguments for the 'timeints' method. Available keywords are:
-            
+
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
-
             The default is {}.
-        
+
         Returns
         -------
         None.
@@ -1614,7 +1612,7 @@ class ImageTools():
         ww = pxdq != 0
         data_temp = data.copy()
         data_temp[ww] = np.nan
-        
+
         # Find bad pixels across the cube
 
         med_ints = np.nanmedian(data_temp, axis=0)
@@ -1630,14 +1628,14 @@ class ImageTools():
         # data_temp[mask_new] = 9999
         # plt.imshow(data_temp[1])
         # plt.show()
-        # plt.hist(diff.flatten(), 
+        # plt.hist(diff.flatten(),
         #         bins=int(np.sqrt(len(diff.flatten()))),
         #         histtype='step',
         #         label='Pre Cleaning')
         # plt.yscale('log')
         # plt.show()
 
-        
+
         ww = ww | mask_new
         pxdq[ww] = 1
         print('')
@@ -1663,7 +1661,7 @@ class ImageTools():
 
         sig = gradient_kwargs['sigma']
         threshold = gradient_kwargs['threshold']
-        negative = gradient_kwargs['negative'] 
+        negative = gradient_kwargs['negative']
 
         pxdq_orig = pxdq.copy()
         ww = pxdq != 0
@@ -1688,17 +1686,17 @@ class ImageTools():
 
             newimage=image[~image.mask]
 
-            image_no_nans = griddata((xvalid, yvalid), 
+            image_no_nans = griddata((xvalid, yvalid),
                                     newimage.ravel(),
                                     (xx, yy),
                                     method='linear')
-            
+
             ### get smooth image
             smimage=gaussian_filter(image_no_nans, sigma=sig)
 
             ### get sharp image
             shimage=image_no_nans-smimage
-            
+
             ### get gradients
             image_to_gradient=shimage/smimage
 
@@ -1762,10 +1760,23 @@ class ImageTools():
 
         # Find bad pixels using median of neighbors.
         pxdq_orig = pxdq.copy()
-        pxdq_custom = custom_kwargs[key] != 0
-        if pxdq_custom.ndim == pxdq.ndim - 1: # Enable 3D bad pixel map to flag individual frames
-            pxdq_custom = np.array([pxdq_custom] * pxdq.shape[0])
-        pxdq[pxdq_custom] = 1
+        if key in custom_kwargs.keys():
+            if np.array(custom_kwargs[key]).shape == pxdq_orig.shape:
+                pxdq_custom = custom_kwargs[key] != 0
+            else:
+                pxqd_temp = np.zeros(pxdq.shape)
+                coordinates = np.array(custom_kwargs[key])
+
+                if coordinates.shape[-1] == 2:
+                    pxqd_temp[:, coordinates[:, 1], coordinates[:, 0]] = 1
+                elif coordinates.shape[-1] == 3:
+                    pxqd_temp[coordinates[:, 0], coordinates[:, 2], coordinates[:, 1]] = 1
+
+                pxdq_custom = pxqd_temp != 0
+
+            if pxdq_custom.ndim == pxdq.ndim - 1: # Enable 3D bad pixel map to flag individual frames
+                pxdq_custom = np.array([pxdq_custom] * pxdq.shape[0])
+            pxdq[pxdq_custom] = 1
         log.info('  --> Method custom: flagged %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
 
         pass
@@ -1812,7 +1823,7 @@ class ImageTools():
 
         pass
 
-    
+
     def fix_bad_pixels_localmed(self,
                              data,
                              erro,
@@ -1858,7 +1869,7 @@ class ImageTools():
             localmed_kwargs['shift_x'] += [0]
         if 0 not in localmed_kwargs['shift_y']:
             localmed_kwargs['shift_y'] += [0]
-        
+
         # Pad data.
         pad_left = np.abs(np.min(localmed_kwargs['shift_x']))
         pad_right = np.abs(np.max(localmed_kwargs['shift_x']))
@@ -1959,7 +1970,7 @@ class ImageTools():
                                 interp2d_kwargs={}):
         """
         Replace bad pixels with an interpolation of neighbouring pixels.
-        
+
         Parameters
         ----------
         data : 3D-array
@@ -1982,15 +1993,15 @@ class ImageTools():
         None.
 
         """
-        
+
         # Check input.
         if 'size' not in interp2d_kwargs.keys():
             interp2d_kwargs['size'] = 5
-        
+
         # Fix bad pixels using interpolation of neighbors.
         ww = (pxdq != 0) & np.logical_not(pxdq & 512 == 512)
         log.info('  --> Method interp2d: fixing %.0f bad pixel(s) -- %.2f%%' % (np.sum(ww), 100. * np.sum(ww) / np.prod(ww.shape)))
-        
+
         # NaN pixels to be replaced with interpolation
         data_temp = data.copy()
         data_temp[np.where(np.isnan(data_temp))] = 0
@@ -2027,7 +2038,7 @@ class ImageTools():
                         # Perform interpolation if there are valid values in the box
                         if len(box_values) > interp2d_kwargs['size'] \
                            and len(ebox_values) > interp2d_kwargs['size']:
-                            # Extract x and y coordinates of valid values, same coords for 
+                            # Extract x and y coordinates of valid values, same coords for
                             # data and err
                             x_coords = box_coords[:, 0]
                             y_coords = box_coords[:, 1]
@@ -2035,9 +2046,9 @@ class ImageTools():
                             ey_coords = ebox_coords[:, 1]
 
                             # Perform interpolation of data
-                            data_interp = griddata((x_coords, y_coords), 
-                                                    box_values, 
-                                                    (ci, ri), 
+                            data_interp = griddata((x_coords, y_coords),
+                                                    box_values,
+                                                    (ci, ri),
                                                     method='linear',
                                                     fill_value=np.nan)
 
@@ -2045,9 +2056,9 @@ class ImageTools():
                             data[i][ri, ci] = data_interp
 
                             # Perform interpolation of error
-                            err_interp = griddata((ex_coords, ey_coords), 
-                                                   ebox_values, 
-                                                   (ci, ri), 
+                            err_interp = griddata((ex_coords, ey_coords),
+                                                   ebox_values,
+                                                   (ci, ri),
                                                    method='linear',
                                                    fill_value=np.nan)
 
@@ -2056,7 +2067,7 @@ class ImageTools():
 
 
                             pxdq[i][ww[i]] = 0
-        
+
         pass
 
     def replace_nans(self,
@@ -2330,7 +2341,7 @@ class ImageTools():
         Function to inject synthetic PSFs into a set of frames loaded from a dataset, and save the new frames with the
         injected companion.
 
-        Parameters
+        Parameters (some may need to be adjusted!)
         ----------
         companions : list of list of three float, optional
             List of companions to be injected.
@@ -2561,43 +2572,25 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key,ww, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
 
-    def update_nircam_centers(self,
-                              force_siaf_center=False, 
-                              force_db_center=False):
+    def update_nircam_centers(self):
         """
-        Checks SIAF PRD version against FITS header PRD version and updates
-        CRPIX if SIAF version is newer. Also accounts for filter-dependent distortion.
+        Determine offset between SIAF reference pixel position and true mask
+        center from Jarron and update the current reference pixel position to
+        reflect the true mask center. Account for filter-dependent distortion.
         Might not be required for simulated data.
 
         This step uses lookup tables of information derived from NIRCam
         commissioning activities CAR-30 and CAR-31, by J. Leisenring and J. Girard,
         and subsequent reanalyses using additional data from PSF SGD observations.
 
-        Parameters
-        ----------
-        force_siaf_center : bool, optional
-            Force the use of the SIAF reference pixel position irrespective of
-            versions. The default is False
-
-        force_db_center : bool, optional
-            Force the use of the database reference pixel position irrespective
-            of versions. The default is False
+        This information will eventually be applied as updates into the SIAF,
+        after which point this step will become not necessary.
 
         Returns
         -------
         None.
 
         """
-
-        if force_siaf_center and force_db_center:
-            raise UserWarning('Both force_siaf_center and force_db_center are set to True. Only one can be True.')
-
-        if not force_db_center:
-            siaf = pysiaf.Siaf('NIRCAM')
-            # Use same RegEx as pysiaf to get sorted PRDS for later comparison
-            prds = [prd for i, prd in enumerate(pysiaf.prd_list) if 
-                    bool(re.match(r"^[A-Z]-\d+", pysiaf.prd_list[i].split("PRDOPSSOC-")[1]))
-                    is False]  # PRDs matching format: PRODOSSOC-###
 
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
@@ -2619,21 +2612,21 @@ class ImageTools():
                     head, tail = os.path.split(fitsfile)
                     log.info('  --> Update NIRCam coronagraphy centers: ' + tail)
 
-                    # Get PRD version used for the current file.
-                    file_prd_ver = head_pri['PRD_VER']
+                    # Get current reference pixel position.
+                    crpix1 = self.database.obs[key]['CRPIX1'][j]
+                    crpix2 = self.database.obs[key]['CRPIX2'][j]
 
-                    # use SIAF for reference pixel positions if its PRD is
-                    # newer or if force_siaf_center unless force_db_center.
-                    if (not force_db_center) and ((np.searchsorted(prds, file_prd_ver) < np.searchsorted(prds, pysiaf.JWST_PRD_VERSION)) 
-                        or force_siaf_center):
-                        log.info('  --> Update NIRCam coronagraphy centers: using CRPIX from pysiaf')
-                        apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
-                        crpix1 = apsiaf.XSciRef
-                        crpix2 = apsiaf.YSciRef
-                    else:
-                        log.info('  --> Update NIRCam coronagraphy centers: using CRPIX from database')
-                        crpix1 = self.database.obs[key]['CRPIX1'][j]
-                        crpix2 = self.database.obs[key]['CRPIX2'][j]
+                    # Get SIAF reference pixel position.
+                    siaf = pysiaf.Siaf('NIRCAM')
+                    apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
+                    xsciref, ysciref = (apsiaf.XSciRef, apsiaf.YSciRef)
+
+                    # Get true mask center from Jarron.
+                    try:
+                        crpix1_jarron, crpix2_jarron = crpix_jarron[self.database.obs[key]['APERNAME'][j]]
+                    except KeyError:
+                        log.warning('  --> Update NIRCam coronagraphy centers: no true mask center found for ' + self.database.obs[key]['APERNAME'][j])
+                        crpix1_jarron, crpix2_jarron = xsciref, ysciref
 
                     # Get filter shift from Jarron.
                     try:
@@ -2642,7 +2635,11 @@ class ImageTools():
                         log.warning('  --> Update NIRCam coronagraphy centers: no filter shift found for ' + self.database.obs[key]['FILTER'][j])
                         xshift_jarron, yshift_jarron = 0., 0.
 
-                    xoff, yoff = xshift_jarron, yshift_jarron
+                    # Determine offset between SIAF reference pixel position
+                    # and true mask center from Jarron and update current
+                    # reference pixel position. Account for filter-dependent
+                    # distortion.
+                    xoff, yoff = crpix1_jarron + xshift_jarron - xsciref, crpix2_jarron + yshift_jarron - ysciref
                     log.info('  --> Update NIRCam coronagraphy centers: old = (%.2f, %.2f), new = (%.2f, %.2f)' % (crpix1, crpix2, crpix1 + xoff, crpix2 + yoff))
                     crpix1 += xoff
                     crpix2 += yoff
@@ -2660,6 +2657,7 @@ class ImageTools():
                         shft_exp=1,
                         kwargs={},
                         highpass=False,
+                        fit_NICAM_with_MCMC=False,
                         subdir='recentered'):
         """
         Recenter frames so that the host star position is data.shape // 2. For
@@ -2693,6 +2691,8 @@ class ImageTools():
         kwargs : dict, optional
             Keyword arguments for the scipy.ndimage.shift routine. The default
             is {}.
+        fit_NICAM_with_MCMC: bool, optional
+            Use MCMC Bayesian algorithm to find the shift for NIRCAM data. The default is False.
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'recentered'.
@@ -2709,6 +2709,7 @@ class ImageTools():
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
+        output_dir2 = os.path.join(self.database.output_dir, subdir+'/residual')
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
@@ -2737,6 +2738,7 @@ class ImageTools():
 
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
+                sub_fitsfile = output_dir+'/'+tail
                 log.info('  --> Recenter frames: ' + tail)
                 if np.sum(np.isnan(data)) != 0:
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
@@ -2776,7 +2778,54 @@ class ImageTools():
                         yoffset = self.database.obs[key]['YOFFSET'][j] - self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
                         crpix1 = (data.shape[-1] - 1.) / 2. + 1.  # 1-indexed
                         crpix2 = (data.shape[-2] - 1.) / 2. + 1.  # 1-indexed
-                    
+
+                    # NIRCam imaging.
+                    elif self.database.obs[key]['EXP_TYPE'][j] in ['NRC_IMAGE'] and fit_NICAM_with_MCMC:
+                        MCMCTools = mcmc_tools.MCMCTools(data, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs)
+                        for k in range(data.shape[0]):
+                            crpix1 = (data.shape[-1] - 1.) / 2.+1#(data.shape[-1]) // 2. + 1.  # 1-indexed
+                            crpix2 = (data.shape[-1] - 1.) / 2.+1#(data.shape[-2]) // 2. + 1.  # 1-indexed
+                            if k == 0:
+                                # Initialize a function that can generate model offset PSFs.
+                                filt = self.database.obs[key]['FILTER'][j]
+                                apername = self.database.obs[key]['APERNAME'][j]
+                                date = fits.getheader(self.database.obs[key]['FITSFILE'][ww_sci[0]], 0)['DATE-BEG']
+                                offsetpsf_func = JWST_PSF(apername,
+                                                          filt,
+                                                          date=date,
+                                                          fov_pix=65,
+                                                          oversample=2,
+                                                          sp=None,
+                                                          use_coeff=False)
+                                psf_no_coronmsk = offsetpsf_func.gen_psf([0,0],return_oversample=False, quick=False)
+                                psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
+                                MCMCTools.run(np.median(data, axis=0).copy(),
+                                                               psf_no_coronmsk,
+                                                               x_guess=MCMCTools.x_guess,
+                                                               y_guess=MCMCTools.y_guess,
+                                                               r=MCMCTools.r,
+                                                               nsteps=MCMCTools.nsteps,
+                                                               ndim = len(MCMCTools.initial_guess),
+                                                               nwalkers = MCMCTools.nwalkers,
+                                                               initial_guess = MCMCTools.initial_guess,
+                                                               limits = MCMCTools.limits,
+                                                               verbose=MCMCTools.verbose,
+                                                               size=MCMCTools.size,
+                                                               binarity=MCMCTools.binarity,
+                                                               filename=output_dir+'/'+self.database.obs[key]['FITSFILE'][j].split('/')[-1].split('.fits')[0])
+
+                            # Apply the same shift to all SCI and REF frames.
+                            shifts += [np.array([-(MCMCTools.dx_guess-MCMCTools.best_fit_params[0]), -(MCMCTools.dy_guess-MCMCTools.best_fit_params[1])])]
+                            # shifts += [[-(dx_guess+best_fit_params[0]), -(dy_guess+best_fit_params[1])]]
+
+                            maskoffs_temp += [np.array([0., 0.])]
+                            data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method,
+                                                 kwargs=kwargs)
+                            erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method,
+                                                 kwargs=kwargs)
+
+                        xoffset = 0.  # arcsec
+                        yoffset = 0.  # arcsec
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
                         log.warning('  --> Recenter frames: not implemented for MIRI coronagraphy, skipped')
@@ -2877,9 +2926,14 @@ class ImageTools():
                 head_sci['CRPIX2'] = crpix2
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
-
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+
+                if fit_NICAM_with_MCMC:
+                    MCMCTools.plot_data_model_residual(data, apername=apername, filt=filt, date=date,
+                                                  offsetpsf_func=None, vmin=0, vmax=5000,
+                                                  vminres=None, vmaxres=None, mask=True, binarity=MCMCTools.binarity,
+                                                  path2fitsfile=output_dir+'/'+self.database.obs[key]['FITSFILE'][j].split('/')[-1].split('.fits')[0])
 
         pass
 
