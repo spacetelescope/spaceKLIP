@@ -23,7 +23,8 @@ from pyklip.instruments.JWST import JWSTData
 from pyklip.klip import _rotate_wcs_hdr
 from spaceKLIP.psf import get_transmission
 from spaceKLIP.utils import pop_pxar_kw
-
+from spaceKLIP import mcmc_tools
+from scipy.ndimage import median_filter
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -35,6 +36,7 @@ log.setLevel(logging.INFO)
 
 def run_obs(database,
             restrict_to=None,
+            sub_NICAM_with_MCMC=False,
             kwargs={},
             subdir='klipsub'):
     """
@@ -78,8 +80,13 @@ def run_obs(database,
     None.
 
     """
-    
     # Check input.
+    if 'MCMC' in kwargs.keys():
+        kwargs_mcmc = {'MCMC': kwargs['MCMC'].copy()}
+        del kwargs['MCMC']
+        mcmc_output_dir = os.path.join(database.output_dir, subdir+'/MCMC')
+        if not os.path.exists(mcmc_output_dir):
+            os.makedirs(mcmc_output_dir)
     if 'mode' not in kwargs.keys():
         kwargs['mode'] = ['ADI+RDI']
     if not isinstance(kwargs['mode'], list):
@@ -115,7 +122,7 @@ def run_obs(database,
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     kwargs_temp['outputdir'] = output_dir
-    
+
     # Loop through concatenations.
     datapaths = []
     for i, key in enumerate(database.obs.keys()):
@@ -136,6 +143,8 @@ def run_obs(database,
             # Initialize pyKLIP dataset.
             pop_pxar_kw(np.append(filepaths, psflib_filepaths))
             dataset = JWSTData(filepaths, psflib_filepaths, highpass=kwargs_temp['highpass'])
+            if sub_NICAM_with_MCMC:
+                dataset.IWA=0
             kwargs_temp['dataset'] = dataset
             kwargs_temp['aligned_center'] = dataset._centers[0]
             kwargs_temp['psf_library'] = dataset.psflib
@@ -235,6 +244,53 @@ def run_obs(database,
                             hdul[0].header['CD2_1'] = head_sci['CD2_1']
                             hdul[0].header['CD2_2'] = head_sci['CD2_2']
                             hdul.writeto(datapath.replace('-KLmodes-all.fits', '-KLmodes-all_roll%.0f.fits' % n_roll), output_verify='fix', overwrite=True)
+
+                            if sub_NICAM_with_MCMC:
+                                hdul2 = fits.open(database.obs[key]['FITSFILE'][j])
+                                data  = hdul2[1].data
+                                hdul2.close()
+
+                                psf_sub_res_hdul = hdul.copy()
+                                for elno in range(len(psf_sub_res_hdul[0].data.copy())):
+                                    KL = kwargs['numbasis'][elno]
+                                    res = psf_sub_res_hdul[0].data[elno]
+                                    nan_mask = np.isnan(res)
+                                    filtered = median_filter(np.where(nan_mask, np.nanmedian(res), res), size=5,
+                                                             mode='nearest')
+                                    res[nan_mask] = filtered[nan_mask]
+
+                                    psf_no_coronmsk = data[0].copy() - res
+                                    psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
+
+                                    # filename = output_dir + '/' +f'PSFSUB_{key}-KLmodes-all_roll{n_roll}'
+                                    MCMCTools = mcmc_tools.MCMCTools(data, kwargs=kwargs_mcmc)
+                                    MCMCTools.run(data[0].copy(),
+                                                        psf_no_coronmsk,
+                                                        x_guess=MCMCTools.x_guess,
+                                                        y_guess=MCMCTools.y_guess,
+                                                        r=MCMCTools.r,
+                                                        nsteps=MCMCTools.nsteps,
+                                                        ndim=len(MCMCTools.initial_guess),
+                                                        nwalkers=MCMCTools.nwalkers,
+                                                        initial_guess=MCMCTools.initial_guess,
+                                                        limits=MCMCTools.limits,
+                                                        verbose=MCMCTools.verbose,
+                                                        size=MCMCTools.size,
+                                                        binarity=MCMCTools.binarity,
+                                                        filename=mcmc_output_dir+ '/' +f'PSFSUB_{key}-KL{KL}-all_roll{n_roll}')
+
+                                    psf_sub_res_hdul[0].data[elno] = MCMCTools.plot_data_model_residual(np.array(data), psf_no_coronmsk=psf_no_coronmsk,
+                                                                       offsetpsf_func=None, vmin=0, vmax=5000,
+                                                                       vminres=None, vmaxres=None, mask=True,
+                                                                       path2fitsfile=mcmc_output_dir+ '/' +f'PSFSUB_{key}-KL{KL}-all_roll{n_roll}',
+                                                                       binarity=MCMCTools.binarity,
+                                                                       return_residuals = True)
+
+                                # hdul3 = hdul.copy()
+                                # hdul3[0].data = residuals
+                                psf_sub_res_hdul.writeto(output_dir + '/' +f'PSFSUB_{key}-KLmodes-all_roll{n_roll}.fits', output_verify='fix', overwrite=True)
+                                psf_sub_res_hdul.close()
+
                             hdul.close()
                             n_roll += 1
         
