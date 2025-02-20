@@ -394,7 +394,7 @@ class AnalysisTools():
                     if plot_xlim is not None:
                         ax.set_xlim(plot_xlim)
                     if plot_ylim is not None:
-                        ax.set_xlim(plot_ylim)
+                        ax.set_ylim(plot_ylim)
                     else:
                         ax.set_ylim([None, 1])
                     ax.set_xlabel('Separation [arcsec]')
