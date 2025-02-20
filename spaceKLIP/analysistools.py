@@ -93,6 +93,7 @@ class AnalysisTools():
                      subdir='rawcon',
                      output_filetype='npy',
                      plot_xlim=(0,10),
+                     plot_ylim=None,
                      save_figures=True,
                      **kwargs):
         """
@@ -390,9 +391,12 @@ class AnalysisTools():
                             ax.plot(seps[k], cons[k], color=colors[k % mod], alpha=0.3, ls='--')
                             ax.plot(seps[k], cons_mask[k], color=colors[k % mod], label=klmodes[k] + ' KL')
                     ax.set_yscale('log')
-                    ax.set_ylim([None,1])
                     if plot_xlim is not None:
                         ax.set_xlim(plot_xlim)
+                    if plot_ylim is not None:
+                        ax.set_xlim(plot_ylim)
+                    else:
+                        ax.set_ylim([None, 1])
                     ax.set_xlabel('Separation [arcsec]')
                     ax.set_ylabel(r'5-$\sigma$ contrast')
                     ax.legend(loc='upper right', ncols=3,
