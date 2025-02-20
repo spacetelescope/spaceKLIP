@@ -21,7 +21,6 @@
 #   - How finely to sample the OPD maps in time? Every 2 days?
 #   - Estimate computation time as a function of # of dates to compare 
 
-
 # imports
 import os
 import warnings
@@ -98,6 +97,8 @@ def decode_simbad_sptype(input_sptypes):
 
     # TODO:
         # - test this!
+        # - figure out all the weird edge cases or find documentation 
+        #   on SIMBAD spectypes
 
     if isinstance(input_sptypes,str):
         input_sptypes = [input_sptypes]
@@ -108,7 +109,14 @@ def decode_simbad_sptype(input_sptypes):
     sp_lclasses = []
 
     for simbad_spectype in input_sptypes:
-        
+
+        if not isinstance(simbad_spectype,str):
+            warnings.warn('Spectral type decoder encountered a non-string spectral type. Skipping.')
+            sp_classes.append('')
+            sp_subclasses.append('')
+            sp_lclasses.append('')
+            continue
+
         m = re.search(r'([OBAFGKMTY])(\d\.*\d*)[-+/]*(\d\.*\d*)*[-+/]*(I*V*I*)[-/]*(I*V*I*)',simbad_spectype)
         
         if m is None:
@@ -201,10 +209,11 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     calints file in the input directory.
 
     Args:
-        idir (path): Path to pre-processed (stage 2) JWST images to be added 
-         to the database
+        idir (str or list): Path to directory containing JWST images, or list of
+            individual file paths, to construct the database from.
         odir (path, optional): Location to save the database. Defaults to '.'.
-        suffix (str, optional): Input filename suffix, e.g. 'uncal' or 'calints'. Defaults to 'calints'.
+        suffix (str, optional): Input filename suffix, e.g. 'uncal' or 'calints'. 
+            Defaults to 'calints'. Does not apply if list of fpaths is provided to idir.
         overwrite (bool, optional): If true, overwrite the existing caldb.
         prefer_SIMBAD (bool, optional): Default to choosing database info SIMBAD as opposed to MOCA
             database. Defaults to True.
@@ -216,14 +225,16 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     
     # TODO:
     # - describe each column & its units
-    # - write tests for build_refdb()
+    # - write tests for build_refdb() 
+    #       - directory vs filelist input
     #       - nonexistent input directory
     #       - empty input directory 
     #       - no calints files in input directory
     #       - header kw missing
     #       - duplicate science target with different program names
+    #       - synthetic PSFs 
+    #       - slightly wrong SIMBAD names
     # - logic for if 'HAS_DISK','HAS_CANDS' have a mix of 'unknown' and bool values
-    # - think about how to incorporate synthetic PSFs, which wouldn't have a SIMBAD entry
     
     # Check that you won't accidentally overwrite an existing csv.
     outpath = os.path.join(odir,'ref_lib.csv')
@@ -239,9 +250,19 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     # Read input files 
     log.info('Reading input files...')
     suffix = suffix.strip('_')
-    fpaths = sorted(glob.glob(os.path.join(idir,f"*_{suffix}.fits")))
-    if len(fpaths) == 0:
-        raise Exception(f'No "{suffix}" files found in input directory {idir} .')
+    if isinstance(idir,str):
+        fpaths = sorted(glob.glob(os.path.join(idir,f"*_{suffix}.fits")))
+        if len(fpaths) == 0:
+            raise Exception(f'No "{suffix}" files found in input directory {idir} .')
+    elif isinstance(idir,list):
+        fpaths = idir
+        for path in fpaths:
+            if not (f'{suffix}.fits' in path and os.path.exists(path)):
+                fpaths.remove(path)
+        if len(fpaths) == 0:
+            raise Exception(f'No existing "{suffix}" files found in input file list.')
+            
+
 
     # Start a dataframe with the header info we want from each file
     csv_list = []
@@ -280,23 +301,26 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     # Make a df with only one entry for each unique target
     targnames = np.unique(df['TARGNAME']) 
     df_unique = pd.DataFrame(np.transpose([targnames]),columns=['TARGNAME'])
-
     # Get 2MASS IDs
     log.info('Collecting SIMBAD IDs...')
+    i = 0
     simbad_ids = []
     for targname in targnames:
         result_table = Simbad.query_objectids(targname)
-        #display(result_table)
-        if result_table is None:
-            simbad_ids.append('')
-            warnings.warn(f'No SIMBAD object found for targname {targname}, this is likely a synthetic PSF.')    
+        
+        if result_table is None or len(result_table)==0:
+            simbad_ids.append(f'UNKNOWN STAR {i}')
+            i += 1
+            warnings.warn(f'No SIMBAD object found for targname {targname}, this is likely a synthetic PSF.') 
+            continue  
+
         gaia_ids_found = []
         for name in list(result_table['ID']):
             if name.startswith('Gaia DR3'):
                 gaia_ids_found.append(name) 
         if len(gaia_ids_found) == 1:
             simbad_ids.extend(gaia_ids_found)
-        if len(gaia_ids_found) < 1:
+        elif len(gaia_ids_found) < 1:
             simbad_ids.append(list(result_table['ID'])[0])
         else:
             raise Exception(f'Multiple Gaia DR3 IDs found for targname {targname}: {gaia_ids_found}')
@@ -312,14 +336,19 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
                                     'flux(K)', 'flux_error(K)', 
                                     'plx', 'plx_error')
     simbad_list = list(df_unique.index)
-    while "" in simbad_list:
-        simbad_list.remove("")
-    scistar_simbad_table = customSimbad.query_objects(simbad_list)
+    short_simbad_list = list(df_unique.index)
+    for st_name in short_simbad_list:
+        if st_name.startswith('UNKNOWN STAR'):
+            short_simbad_list.remove(st_name)
+    scistar_simbad_table = customSimbad.query_objects(short_simbad_list)
 
     # Convert to pandas df and make SIMBAD IDs the index
-    df_simbad = scistar_simbad_table.to_pandas()
-    df_simbad['SIMBAD_ID'] = simbad_list
-    df_simbad.set_index('SIMBAD_ID',inplace=True)
+    short_df_simbad = scistar_simbad_table.to_pandas()
+    short_df_simbad['SIMBAD_ID'] = short_simbad_list
+    short_df_simbad.set_index('SIMBAD_ID',inplace=True)
+    # Add empty rows for stars not in SIMBAD (e.g. synthetic PSFs)
+    df_simbad = pd.DataFrame(index=simbad_list, columns=short_df_simbad.columns, dtype='object')
+    df_simbad.loc[short_df_simbad.index] = short_df_simbad.values
 
     # Rename some columns
     simbad_cols = { # Full column list here: http://simbad.u-strasbg.fr/Pages/guide/sim-fscript.htx 
@@ -359,10 +388,12 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     df_unique['COMMENTS'] = ''
     df_unique['DB_SOURCES'] = ''
 
-    # Sort all the dfs by index so they match up
+    # Sort all the dfs by index and check that they match up
     df_unique.sort_index(inplace=True)   
     df_simbad.sort_index(inplace=True)   
     mdf.sort_index(inplace=True)   
+    assert np.all(np.array(df_unique.index)==np.array(df_simbad.index)), "Index Error"
+    assert np.all(np.array(df_unique.index)==np.array(mdf.index)), "Index Error"
 
     # Replace values and update DB_SOURCES column
     cols_overlap = list(set(list(simbad_cols.keys())).intersection(list(moca_cols.keys())))
@@ -380,14 +411,6 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     for col in ['AGE','AGE_ERR']:
         df_unique[col] = mdf[col]
         df_unique.loc[~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
-
-    # # Replace values
-    # df_unique.loc[df_unique['SPTYPE']=='','SPTYPE'] = None
-    # df_unique_replaced = df_unique.loc[:,cols_overlap].combine_first(mdf.loc[:,cols_overlap])
-    # df_unique.loc[:,cols_overlap] = df_unique_replaced.loc[:,cols_overlap]
-    # cols_overlap = ['SPTYPE','PLX','PLX_ERR']
-    # df_unique.loc[isnone(df_unique.loc[:,cols_overlap]),cols_overlap] = mdf.loc[isnone(df_unique.loc[:,cols_overlap]),cols_overlap]
-    # df_unique.loc[:,cols_overlap].where(not_isnone,other=mdf,inplace=True)
 
     # Calculate distances from plx in mas
     df_unique['DIST'] = 1. / (df_unique['PLX'] / 1000)
