@@ -551,7 +551,10 @@ class AnalysisTools():
 
                     rawseps = np.load(os.path.join(rawcon_dir,seps_file))
                     rawcons = np.load(os.path.join(rawcon_dir,rawcons_file))
-                    maskcons = np.load(os.path.join(rawcon_dir,maskcons_file))
+                    if self.database.red[key]['PUPIL'] !='NONE' and self.database.red[key]['PUPIL'] !='CLEAR':
+                        maskcons = np.load(os.path.join(rawcon_dir,maskcons_file))
+                    else:
+                        maskcons = None
                 elif rawcon_filetype == 'ecsv':
                     raise NotImplementedError('.ecsv save format not currently supported for \
                         calibrated contrasts. Please use .npy raw contrasts as input.')
@@ -717,7 +720,8 @@ class AnalysisTools():
                     # Get the raw separation and contrast for this KL mode
                     this_KL_rawseps = rawseps[k]
                     this_KL_rawcons = rawcons[k]
-                    this_KL_maskcons = maskcons[k]
+                    if maskcons is not None:
+                        this_KL_maskcons = maskcons[k]
 
                     # Get fluxes for this KL mode subtracted image
                     this_KL_retr_fluxes = all_retr_fluxes[:,k]
@@ -749,7 +753,8 @@ class AnalysisTools():
 
                     # Apply contrast correction
                     rawcons_corr.append(rawcons[k] / contrast_correction)
-                    maskcons_corr.append(maskcons[k] / contrast_correction)
+                    if maskcons is not None:
+                        maskcons_corr.append(maskcons[k] / contrast_correction)
                     all_corrections.append(contrast_correction)
 
                 all_corrections = np.squeeze(all_corrections) #Tidy array
@@ -760,7 +765,8 @@ class AnalysisTools():
                 # Save the corrected contrasts, as well as the separations for convenience. 
                 np.save(save_string+'_cal_seps.npy', rawseps)
                 np.save(save_string+'_cal_cons.npy', rawcons_corr)
-                np.save(save_string+'_cal_maskcons.npy', maskcons_corr)
+                if maskcons is not None:
+                    np.save(save_string+'_cal_maskcons.npy', maskcons_corr)
 
                 # Define some local utilty functions for plot setup.
                 # This makes the plotting code below less repetitive and more consistent
@@ -863,8 +869,9 @@ class AnalysisTools():
                     KLmodes = klip_args['numbasis'][si]
                     ax.plot(seps, maskcons_corr[si],
                             label=f'KL = {KLmodes}', color=f'C{si}')
-                    ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
-                            color=f'C{si}')
+                    if maskcons is not None:
+                        ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
+                                color=f'C{si}')
                 ax.legend(loc='upper right', ncols=3, fontsize=10,
                           title = 'Solid lines = calibrated, dotted lines = raw',
                           title_fontsize=10)
