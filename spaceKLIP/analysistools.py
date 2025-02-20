@@ -454,6 +454,7 @@ class AnalysisTools():
                            use_saved=False,
                            thrput_fit_method='median',
                            plot_xlim=(0,10),
+                           plot_ylim=None,
                            **kwargs
                            ):
         """ 
@@ -776,6 +777,7 @@ class AnalysisTools():
                 def standardize_plots_annotate_save(ax, title="",
                                                     ylabel='Throughput',
                                                     xlim=plot_xlim,
+                                                    ylim=plot_ylim,
                                                     filename=None):
                     ax.set_xlabel('Separation (")')
                     ax.set_title(title, fontsize=11)
@@ -788,6 +790,8 @@ class AnalysisTools():
                         ax.set_ylim(None, 1)
                     if xlim is not None:
                         ax.set_xlim(*xlim)
+                    if ylim is not None:
+                        ax.set_ylim(*ylim)
                     ax.grid(axis='both', alpha=0.15)
                     if filename is not None:
                         plt.savefig(filename,
@@ -804,7 +808,9 @@ class AnalysisTools():
                     ax.plot(rawseps[ci], corr, label='KL = {}'.format(KLmodes))
                 ax.legend(ncol=3, fontsize=10)
                 standardize_plots_annotate_save(ax, title=f'Injected companions in {filt}, {psfsub_strategy}, all KL modes', ylabel='Throughput',
-                    filename=save_string + '_allKL_throughput.pdf')
+                                                filename=save_string + '_allKL_throughput.pdf',
+                                                xlim=plot_xlim,
+                                                ylim=None)
                 plt.close(fig)
 
 
@@ -825,7 +831,10 @@ class AnalysisTools():
                 standardize_plots_annotate_save(ax,
                                                 title=f"Injected companions in {filt}, {psfsub_strategy}, for KL={klip_args['numbasis'][median_KL_index]}",
                                                 ylabel='Throughput',
-                                                filename=save_string + '_medKL_throughput.pdf')
+                                                filename=save_string + '_medKL_throughput.pdf',
+                                                xlim=plot_xlim,
+                                                ylim=None)
+
                 plt.close(fig)
 
 
@@ -843,7 +852,9 @@ class AnalysisTools():
                 standardize_plots_annotate_save(ax,
                                                 title=f'Calibrated contrast in {filt}, {psfsub_strategy}',
                                                 ylabel='Contrast',
-                                                filename=save_string + '_calcon.pdf')
+                                                filename=save_string + '_calcon.pdf',
+                                                xlim=plot_xlim,
+                                                ylim=plot_ylim)
                 plt.close(fig)
 
                 # Plot calibrated contrast curves compared to raw
