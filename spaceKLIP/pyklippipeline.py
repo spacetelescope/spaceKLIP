@@ -135,21 +135,11 @@ def run_obs(database,
             
             # Initialize pyKLIP dataset.
             pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-            dataset = JWSTData(filepaths, psflib_filepaths, highpass=kwargs_temp['highpass'],center_include_offset=False)
+            dataset = JWSTData(filepaths, psflib_filepaths, 
+                               highpass=kwargs_temp['highpass'],
+                               center_include_offset=False,
+                               center_keywords=['STARCENX','STARCENY'])
             kwargs_temp['dataset'] = dataset
-
-            ## THIS DIDN'T FIX IT ANYWAY
-            # TEMPORARY FIX: Overwrite centers with new header vals
-            # Ideally we should modify pyklip.instruments.JWST.py 
-            # to reference 'STARCENX/Y' instead of 'CRPIX1/2'
-            # sci_centers = []
-            # for row in database.obs[key]:
-            #     if row['TYPE'] == 'SCI':
-            #         centers = [[row['STARCENX']-1,row['STARCENY']-1]] * row['NINTS']
-            #         sci_centers.extend(centers)
-            # sci_centers = np.array(sci_centers)
-            # dataset.centers = sci_centers
-            # dataset.psflib.aligned_center = dataset.centers[0]
             kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
             kwargs_temp['psf_library'] = dataset.psflib
             kwargs_temp['mode'] = mode
@@ -208,6 +198,8 @@ def run_obs(database,
                     w = wcs.WCS(head_sci)
                     _rotate_wcs_hdr(w, database.obs[key]['ROLL_REF'][ww_sci[0]])
                     hdul[0].header['WCSAXES'] = head_sci['WCSAXES']
+                    hdul[0].header['CRPIX1'] = head_sci['STARCENX']
+                    hdul[0].header['CRPIX2'] = head_sci['STARCENY']
                     hdul[0].header['CRVAL1'] = head_sci['CRVAL1']
                     hdul[0].header['CRVAL2'] = head_sci['CRVAL2']
                     hdul[0].header['CTYPE1'] = head_sci['CTYPE1']
@@ -237,6 +229,8 @@ def run_obs(database,
                                 hdul[0].data = np.nanmedian(dataset.allints[:, :, ww, :, :], axis=2)
                             hdul[0].header['NINTS'] = database.obs[key]['NINTS'][j]
                             hdul[0].header['WCSAXES'] = head_sci['WCSAXES']
+                            hdul[0].header['CRPIX1'] = head_sci['STARCENX']
+                            hdul[0].header['CRPIX2'] = head_sci['STARCENY']
                             hdul[0].header['CRVAL1'] = head_sci['CRVAL1']
                             hdul[0].header['CRVAL2'] = head_sci['CRVAL2']
                             hdul[0].header['CTYPE1'] = head_sci['CTYPE1']
