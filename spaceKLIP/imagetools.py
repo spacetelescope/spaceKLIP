@@ -3275,6 +3275,7 @@ class ImageTools():
                     raise UserWarning('Please replace nan pixels before attempting to align frames')
                 shifts = []
                 maskcen = []
+                crpix = []
                 for k in range(data.shape[0]):
 
                     # Take the first science frame as reference frame.
@@ -3300,11 +3301,15 @@ class ImageTools():
                         ycurrent = self.database.obs[key]['STARCENY'][j] 
                         yshift = yfirst - ycurrent
 
-                        # Get mask center to also register the shift in its location
+                        # Get mask center and crpix to also register the shift in their locations
                         maskcenx = self.database.obs[key]['MASKCENX'][j] #pixels
                         maskceny = self.database.obs[key]['MASKCENY'][j] #pixels
+                        crpix1 = self.database.obs[key]['CRPIX1'][j] #pixels
+                        crpix2 = self.database.obs[key]['CRPIX2'][j] #pixels
+
 
                         maskcen += [np.array([maskcenx, maskceny])]
+                        crpix += [np.array([crpix1, crpix2])]
 
                         if scale_prior:
                             ww = mask < 0.5
@@ -3348,6 +3353,7 @@ class ImageTools():
                         erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                 shifts = np.array(shifts)
                 maskcen = np.array(maskcen)
+                crpix = np.array(crpix)
                 if mask is not None:
                     if align_to_file is not None or j != ww_sci[0]:
                         temp = np.median(shifts, axis=0)
@@ -3387,13 +3393,21 @@ class ImageTools():
                 # Change mask location too: take first values of the shifts of the current fits file for now
                 maskcenx = maskcen[0,0] + shifts[0,0]
                 maskceny = maskcen[0,1] + shifts[0,1]
+                crpix1 = crpix[0,0] + shifts[0,0]
+                crpix2 = crpix[0,1] + shifts[0,1]
                 head_sci['MASKCENX'] = maskcenx
                 head_sci['MASKCENY'] = maskceny
+                head_sci['CRPIX1'] = crpix1
+                head_sci['CRPIX2'] = crpix2
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, starcenx=starcenx, starceny=starceny,maskcenx=maskcenx, maskceny=maskceny)
+                self.database.update_obs(key, j, fitsfile, maskfile, 
+                                         xoffset=xoffset, yoffset=yoffset, 
+                                         starcenx=starcenx, starceny=starceny,
+                                         maskcenx=maskcenx, maskceny=maskceny,
+                                         crpix1=crpix1, crpix2=crpix2,)
 
             # Plot science frame alignment.
             colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
