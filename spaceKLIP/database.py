@@ -294,8 +294,8 @@ class Database():
 
             MASKCENX += [head.get('MASKCENX', float(CRPIX1[i]))]
             MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
-            STARCENX += [head.get('STARCENX', np.nan)]
-            STARCENY += [head.get('STARCENY', np.nan)]
+            STARCENX += [head.get('STARCENX', MASKCENX[-1])]
+            STARCENY += [head.get('STARCENY', MASKCENY[-1])]
             VPARITY += [head.get('VPARITY', -1)]
             V3I_YANG += [head.get('V3I_YANG', 0.)]
             RA_REF += [head.get('RA_REF', np.nan)]
@@ -1200,10 +1200,22 @@ class Database():
             New PSF y-offset (mas) for the observation to be updated. The
             default is None.
         crpix1 : float, optional
-            New PSF x-position (pix, 1-indexed) for the observation to be
+            New WCS reference x-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
         crpix2 : float, optional
-            New PSF y-position (pix, 1-indexed) for the observation to be
+            New WCS reference y-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        maskcenx : float, optional
+            New mask x-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        maskceny : float, optional
+            New mask y-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        starcenx : float, optional
+            New star x-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        starceny : float, optional
+            New star y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
         blurfwhm : float, optional
             New FWHM for the Gaussian filter blurring (pix) for the observation
