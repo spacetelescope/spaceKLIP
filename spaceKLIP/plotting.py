@@ -10,6 +10,7 @@ from itertools import chain
 
 import numpy as np
 import math
+import warnings
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -265,7 +266,11 @@ def display_coron_image(filename,
         image = fits.getdata(filename)
         header = fits.getheader(filename)
         #display(header)
-        center_x, center_y = header['CRPIX1'], header['CRPIX2']
+        try:
+            center_x, center_y = header['STARCENX'], header['STARCENY']
+        except:
+            warnings.warn(f'Keyword STARCENX/Y missing from fits header. Falling back to CRPIX1/2')
+            center_x, center_y = header['CRPIX1'], header['CRPIX2']
         bunit = header['BUNIT']
         wcs = astropy.wcs.WCS(header)
         if image.ndim == 3:
@@ -284,7 +289,11 @@ def display_coron_image(filename,
         dq = model.dq[0] if cube_ints else model.dq
         nints = model.meta.exposure.nints if cube_ints else None
         #center_x, center_y = model.meta.wcsinfo.crpix1, model.meta.wcsinfo.crpix2
-        center_x, center_y = header['STARCENX'], header['STARCENY']
+        try:
+            center_x, center_y = header['STARCENX'], header['STARCENY']
+        except:
+            warnings.warn(f'Keyword STARCENX/Y missing from fits header. Falling back to CRPIX1/2')
+            center_x, center_y = header['CRPIX1'], header['CRPIX2']
         
         bunit = model.meta.bunit_data
         is_psf = model.meta.exposure.psf_reference
@@ -1053,17 +1062,13 @@ def plot_subimages(imgdirs, subdirs, filts, submodes, numKL,
 
         # get center information
         if instrument == 'NIRCAM':
-            center_pix = (int(np.rint(hdr.get('STARCENY', hdr['MASKCENY'])-1)),
-                          int(np.rint(hdr.get('STARCENX', hdr['MASKCENX'])-1)),
+            center_pix = (int(np.rint(hdr.get('STARCENY', hdr.get('MASKCENY', hdr['CRPIX2']))-1)),
+                          int(np.rint(hdr.get('STARCENX', hdr.get('MASKCENX', hdr['CRPIX1']))-1)),
                           )
-            # center_pix = (int(np.rint(hdr['STARCENY']-1)), 
-            #              int(np.rint(hdr['STARCENX']-1)))
             window_pix = int(np.rint(window_size / pltscale['NIRCAM'] / 2))
             offset = (window_pix - window_size / 0.063 / 2) *0.063
         else:
-            # center_pix = (int(np.rint(hdr.get('STARCENY', hdr['MASKCENY'])-1)),
-            #               int(np.rint(hdr.get('STARCENX', hdr['MASKCENX'])-1)),
-            #               ) # potential replacement!
+            # Potentially use same center_pix code as for NIRCAM case above
             center_pix = miri_img_centers[flt]
             window_pix = int(np.rint(window_size / pltscale['MIRI'] / 2))
             offset = (window_pix - window_size / 0.11 / 2) *0.11
