@@ -2404,7 +2404,8 @@ class ImageTools():
             log.info('--> Concatenation ' + key)
             #######################################################################################################################
             filepaths, psflib_filepaths = get_pyklip_filepaths(self.database, key)
-            raw_dataset = JWSTData(filepaths, psflib_filepaths)
+            raw_dataset = JWSTData(filepaths, psflib_filepaths,
+                                   center_keywords=['STARCENX','STARCENY'])
 
             for ww in range(len(ww_type)):
                 # Read input files and store values that we just want to save in the output_dir
