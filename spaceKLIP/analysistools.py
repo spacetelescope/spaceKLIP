@@ -558,7 +558,8 @@ class AnalysisTools():
                 # Read Stage 2 files and make pyKLIP dataset
                 filepaths, psflib_filepaths = get_pyklip_filepaths(self.database, key)
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                pyklip_dataset = JWSTData(filepaths, psflib_filepaths)
+                pyklip_dataset = JWSTData(filepaths, psflib_filepaths,
+                                          center_keywords=['STARCENX','STARCENY'])
 
                 # Compute the resolution element. Account for possible blurring.
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
@@ -1008,7 +1009,8 @@ class AnalysisTools():
                 
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass)
+                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass,
+                                          center_keywords=['STARCENX','STARCENY'])
                 kwargs_temp['dataset'] = dataset
                 kwargs_temp['aligned_center'] = dataset._centers[0]
                 kwargs_temp['psf_library'] = dataset.psflib
@@ -1737,14 +1739,14 @@ class AnalysisTools():
                             
                             # Plot the pymultinest fit results.
                             fit.fit_plots()
-                            if save_figres:
+                            if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
                             plt.close(fig)
 
                             fit.fm_residuals()
-                            if save_figres:
+                            if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
