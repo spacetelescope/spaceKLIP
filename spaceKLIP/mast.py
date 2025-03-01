@@ -10,6 +10,8 @@ import astropy, astropy.table
 from astroquery.mast import Mast
 import requests
 
+from tqdm import tqdm
+
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
