@@ -602,6 +602,8 @@ class JWST_PSF():
 def _sp_to_spext(sp, **kwargs):
     """Check if input spectrum is a synphot spectrum and convert to webbpsf_ext spectrum"""
 
+    from webbpsf_ext import synphot_ext as S
+
     try:
         wave = sp.waveset
         flux = sp.flux
