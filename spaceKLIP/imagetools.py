@@ -283,6 +283,10 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
                 crpix2 = self.database.obs[key]['CRPIX2'][j]
+                starcenx = self.database.obs[key]['STARCENX'][j]
+                starceny = self.database.obs[key]['STARCENY'][j]
+                maskcenx = self.database.obs[key]['MASKCENX'][j]
+                maskceny = self.database.obs[key]['MASKCENY'][j]
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -298,16 +302,24 @@ class ImageTools():
                         mask = mask[npix[2]:-npix[3], npix[0]:-npix[1]]
                     crpix1 -= npix[0]
                     crpix2 -= npix[2]
+                    starcenx -= npix[0]
+                    starceny -= npix[2]
+                    maskcenx -= npix[0]
+                    maskceny -= npix[2]
                     log.info('  --> Frame cropping: old shape = ' + str(sh[1:]) + ', new shape = ' + str(data.shape[1:]))
 
                 # Write FITS file and PSF mask.
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
+                head_sci['STARCENX'] = starcenx
+                head_sci['STARCENY'] = starceny
+                head_sci['MASKCENX'] = maskcenx
+                head_sci['MASKCENY'] = maskceny
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2,starcenx=starcenx, starceny=starceny,maskcenx=maskcenx, maskceny=maskceny)
 
         pass
 
@@ -367,6 +379,10 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
                 crpix2 = self.database.obs[key]['CRPIX2'][j]
+                starcenx = self.database.obs[key]['STARCENX'][j]
+                starceny = self.database.obs[key]['STARCENY'][j]
+                maskcenx = self.database.obs[key]['MASKCENX'][j]
+                maskceny = self.database.obs[key]['MASKCENY'][j]
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -382,16 +398,24 @@ class ImageTools():
                         mask = np.pad(mask, ((npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=np.nan)
                     crpix1 += npix[0]
                     crpix2 += npix[2]
+                    starcenx += npix[0]
+                    starceny += npix[2]
+                    maskcenx += npix[0]
+                    maskceny += npix[2]
                     log.info('  --> Frame padding: old shape = ' + str(sh[1:]) + ', new shape = ' + str(data.shape[1:]) + ', fill value = %.2f' % cval)
 
                 # Write FITS file and PSF mask.
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
+                head_sci['STARCENX'] = starcenx
+                head_sci['STARCENY'] = starceny
+                head_sci['MASKCENX'] = maskcenx
+                head_sci['MASKCENY'] = maskceny
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2,starcenx=starcenx, starceny=starceny,maskcenx=maskcenx, maskceny=maskceny)
 
         pass
 
@@ -2380,7 +2404,8 @@ class ImageTools():
             log.info('--> Concatenation ' + key)
             #######################################################################################################################
             filepaths, psflib_filepaths = get_pyklip_filepaths(self.database, key)
-            raw_dataset = JWSTData(filepaths, psflib_filepaths)
+            raw_dataset = JWSTData(filepaths, psflib_filepaths,
+                                   center_keywords=['STARCENX','STARCENY'])
 
             for ww in range(len(ww_type)):
                 # Read input files and store values that we just want to save in the output_dir
@@ -2390,11 +2415,19 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
                 crpix1 = self.database.obs[key]['CRPIX1'][ww]
                 crpix2 = self.database.obs[key]['CRPIX2'][ww]
+                maskcenx = self.database.obs[key]['MASKCENX'][ww]
+                maskceny = self.database.obs[key]['MASKCENY'][ww]
+                starcenx = self.database.obs[key]['STARCENX'][ww]
+                starceny = self.database.obs[key]['STARCENY'][ww]
                 head, tail = os.path.split(fitsfile)
 
                 # Write FITS file and PSF mask.
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
+                head_sci['MASKCENX'] = maskcenx
+                head_sci['MASKCENY'] = maskceny
+                head_sci['STARCENX'] = starcenx
+                head_sci['STARCENY'] = starceny
 
                 # Inject only into SCI type data
                 if ww_type[ww] == 'SCI':
@@ -2559,7 +2592,7 @@ class ImageTools():
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key,ww, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key,ww, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2,starcenx=starcenx, starceny=starceny,maskcenx=maskcenx, maskceny=maskceny)
 
     def update_nircam_centers(self,
                               force_siaf_center=False, 
@@ -2626,14 +2659,14 @@ class ImageTools():
                     # newer or if force_siaf_center unless force_db_center.
                     if (not force_db_center) and ((np.searchsorted(prds, file_prd_ver) < np.searchsorted(prds, pysiaf.JWST_PRD_VERSION)) 
                         or force_siaf_center):
-                        log.info('  --> Update NIRCam coronagraphy centers: using CRPIX from pysiaf')
+                        log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from pysiaf')
                         apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
-                        crpix1 = apsiaf.XSciRef
-                        crpix2 = apsiaf.YSciRef
+                        maskcenx = apsiaf.XSciRef
+                        maskceny = apsiaf.YSciRef
                     else:
-                        log.info('  --> Update NIRCam coronagraphy centers: using CRPIX from database')
-                        crpix1 = self.database.obs[key]['CRPIX1'][j]
-                        crpix2 = self.database.obs[key]['CRPIX2'][j]
+                        log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from database')
+                        maskcenx = self.database.obs[key]['MASKCENX'][j]
+                        maskceny = self.database.obs[key]['MASKCENY'][j]
 
                     # Get filter shift from Jarron.
                     try:
@@ -2643,12 +2676,13 @@ class ImageTools():
                         xshift_jarron, yshift_jarron = 0., 0.
 
                     xoff, yoff = xshift_jarron, yshift_jarron
-                    log.info('  --> Update NIRCam coronagraphy centers: old = (%.2f, %.2f), new = (%.2f, %.2f)' % (crpix1, crpix2, crpix1 + xoff, crpix2 + yoff))
-                    crpix1 += xoff
-                    crpix2 += yoff
+                    log.info('  --> Update NIRCam coronagraphy centers: old = (%.2f, %.2f), new = (%.2f, %.2f)' % (maskcenx, maskceny, maskcenx + xoff, maskceny + yoff))
+                    maskcenx += xoff
+                    maskceny += yoff
 
                     # Update spaceKLIP database.
-                    self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
+                    # Change also CRPIX to be the same as maskcen
+                    self.database.update_obs(key, j, fitsfile, maskfile, crpix1=maskcenx, crpix2=maskceny, maskcenx=maskcenx, maskceny=maskceny)
 
         pass
 
@@ -2704,7 +2738,7 @@ class ImageTools():
         """
 
         # Update NIRCam coronagraphy centers, i.e., change SIAF CRPIX position
-        # to true mask center determined by Jarron.
+        # to true mask center determined by Jarron 
         # self.update_nircam_centers()  # shall be run purposely by the user
 
         # Set output directory.
@@ -2774,8 +2808,13 @@ class ImageTools():
                             mask = spline_shift(mask, [shifts[k][1], shifts[k][0]], order=0, mode='constant', cval=np.nanmedian(mask))
                         xoffset = self.database.obs[key]['XOFFSET'][j] - self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
                         yoffset = self.database.obs[key]['YOFFSET'][j] - self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
-                        crpix1 = (data.shape[-1] - 1.) / 2. + 1.  # 1-indexed
-                        crpix2 = (data.shape[-2] - 1.) / 2. + 1.  # 1-indexed
+                        # Update star center
+                        starcenx = (data.shape[-1] - 1.) / 2. + 1.  # 1-indexed
+                        starceny = (data.shape[-2] - 1.) / 2. + 1.  # 1-indexed
+
+                        # Update mask center (using the shift of the first frame)
+                        maskcenx = starcenx -xshift  # 1-indexed
+                        maskceny = starceny -yshift  # 1-indexed
                     
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
@@ -2787,8 +2826,13 @@ class ImageTools():
                             maskoffs_temp += [np.array([0., 0.])]
                         xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
                         yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
-                        crpix1 = self.database.obs[key]['CRPIX1'][j]  # 1-indexed
-                        crpix2 = self.database.obs[key]['CRPIX2'][j]  # 1-indexed
+
+                        # Star center and mask center stay the same
+                        starcenx = self.database.obs[key]['STARCENX'][j]  # 1-indexed
+                        starceny = self.database.obs[key]['STARCENY'][j]  # 1-indexed
+
+                        maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1-indexed
+                        maskceny = self.database.obs[key]['MASKCENY'][j]  # 1-indexed
 
                     # Other data types.
                     else:
@@ -2818,8 +2862,13 @@ class ImageTools():
                                 erro[k] = np.roll(np.roll(erro[k], dx, axis=1), dy, axis=0)
                         xoffset = 0.  # arcsec
                         yoffset = 0.  # arcsec
-                        crpix1 = data.shape[-1]//2 + 1  # 1-indexed
-                        crpix2 = data.shape[-2]//2 + 1  # 1-indexed
+
+                        # Update star center
+                        starcenx = data.shape[-1]//2 + 1  # 1-indexed
+                        starceny = data.shape[-2]//2 + 1  # 1-indexed
+
+                        maskcenx = None
+                        maskceny = None
 
                 # TA data.
                 if j in ww_sci_ta or j in ww_ref_ta:
@@ -2849,8 +2898,13 @@ class ImageTools():
                             erro[k] = np.roll(np.roll(erro[k], dx, axis=1), dy, axis=0)
                     xoffset = 0.  # arcsec
                     yoffset = 0.  # arcsec
-                    crpix1 = data.shape[-1]//2 + 1  # 1-indexed
-                    crpix2 = data.shape[-2]//2 + 1  # 1-indexed
+                    
+                    starcenx = data.shape[-1]//2 + 1  # 1-indexed
+                    starceny = data.shape[-2]//2 + 1  # 1-indexed
+
+                    maskcenx = None
+                    maskceny = None
+
                 shifts = np.array(shifts)
                 shifts_all += [shifts]
                 maskoffs_temp = np.array(maskoffs_temp)
@@ -2873,13 +2927,16 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 head_pri['XOFFSET'] = xoffset #arcsec
                 head_pri['YOFFSET'] = yoffset #arcsec
-                head_sci['CRPIX1'] = crpix1
-                head_sci['CRPIX2'] = crpix2
+                head_sci['STARCENX'] = starcenx
+                head_sci['STARCENY'] = starceny
+                if maskcenx is not None:
+                    head_sci['MASKCENX'] = maskcenx
+                    head_sci['MASKCENY'] = maskceny
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, starcenx=starcenx, starceny=starceny,maskcenx=maskcenx, maskceny=maskceny)
 
         pass
 
@@ -2946,8 +3003,8 @@ class ImageTools():
         spectrum = webbpsf_ext.stellar_spectrum(spectral_type)
 
         # Get true mask center.
-        crpix1 = self.database.obs[key]['CRPIX1'][j] - 1  # 0-indexed
-        crpix2 = self.database.obs[key]['CRPIX2'][j] - 1  # 0-indexed
+        maskcenx = self.database.obs[key]['MASKCENX'][j] - 1  # 0-indexed
+        maskceny = self.database.obs[key]['MASKCENY'][j] - 1  # 0-indexed
 
         # Initialize JWST_PSF object. Use odd image size so that PSF is
         # centered in pixel center.
@@ -2969,8 +3026,8 @@ class ImageTools():
 
         # Generate model PSF. Apply offset between SIAF reference pixel
         # position and true mask center.
-        xoff = (crpix1 + 1) - xsciref
-        yoff = (crpix2 + 1) - ysciref
+        xoff = (maskcenx + 1) - xsciref
+        yoff = (maskceny + 1) - ysciref
         model_psf = psf.gen_psf_idl((0, 0), coord_frame='idl', return_oversample=False, quick=True)
         if not isinstance(highpass, bool):
             highpass = float(highpass)
@@ -2994,7 +3051,7 @@ class ImageTools():
 
             # Determine relative shift between data and model PSF. Iterate 3 times
             # to improve precision.
-            xc, yc = (crpix1, crpix2)
+            xc, yc = (maskcenx, maskceny) # start assuming that star is exactly at the center of the coronagraph
             for i in range(3):
 
                 # Crop data and transmission mask.
@@ -3023,7 +3080,7 @@ class ImageTools():
                 # Update star position.
                 xc = np.mean(xsub_indarr) + xshift
                 yc = np.mean(ysub_indarr) + yshift
-            xshift, yshift = (xc - crpix1, yc - crpix2)
+            xshift, yshift = (xc - maskcenx, yc - maskceny)
             shift_list.append([xshift, yshift])
             log.info('  --> Recenter frames: star offset between frame %i and coronagraph center (dx, dy) = (%.3f, %.3f) pix' % (count,xshift, yshift))
             count+=1
@@ -3043,7 +3100,7 @@ class ImageTools():
             ax[1].contourf(masksub, levels=[0.00, 0.25, 0.50, 0.75], cmap='Greys_r', vmin=0., vmax=2., alpha=0.5)
             ax[1].set_title('Model PSF & transmission mask')
             ax[2].scatter((xsciref), (ysciref), marker='+', color='black', label='SIAF reference point')
-            ax[2].scatter((crpix1 + 1), (crpix2 + 1), marker='x', color='skyblue', label='True mask center')
+            ax[2].scatter((maskcenx + 1), (maskceny + 1), marker='x', color='skyblue', label='True mask center')
             ax[2].scatter((xc + 1), (yc + 1), marker='*', color='red', label='Computed star position')
             ax[2].set_aspect('equal')
             xlim = ax[2].get_xlim()
@@ -3218,6 +3275,8 @@ class ImageTools():
                 if np.sum(np.isnan(data)) != 0:
                     raise UserWarning('Please replace nan pixels before attempting to align frames')
                 shifts = []
+                maskcen = []
+                crpix = []
                 for k in range(data.shape[0]):
 
                     # Take the first science frame as reference frame.
@@ -3227,23 +3286,31 @@ class ImageTools():
                         pp = np.array([0., 0., 1.])
                         xoffset = self.database.obs[key]['XOFFSET'][j] #arcsec
                         yoffset = self.database.obs[key]['YOFFSET'][j] #arcsec
-                        crpix1 = self.database.obs[key]['CRPIX1'][j] #pixels
-                        crpix2 = self.database.obs[key]['CRPIX2'][j] #pixels
+                        starcenx = self.database.obs[key]['STARCENX'][j] #pixels
+                        starceny = self.database.obs[key]['STARCENY'][j] #pixels
                         pxsc = self.database.obs[key]['PIXSCALE'][j] #arcsec
 
                     # Align all other SCI and REF frames to the first science
                     # frame.
                     if align_to_file is not None or j != ww_sci[0] or k != 0:
                         # Calculate shifts relative to first frame, work in pixels
-                        xfirst = crpix1 + (xoffset/pxsc)
-                        xoff_curr_pix = self.database.obs[key]['XOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
-                        xcurrent = self.database.obs[key]['CRPIX1'][j] + xoff_curr_pix
+                        xfirst = starcenx
+                        xcurrent = self.database.obs[key]['STARCENX'][j]
                         xshift = xfirst - xcurrent
 
-                        yfirst = crpix2 + (yoffset/pxsc)
-                        yoff_curr_pix = self.database.obs[key]['YOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
-                        ycurrent = self.database.obs[key]['CRPIX2'][j] + yoff_curr_pix
+                        yfirst = starceny
+                        ycurrent = self.database.obs[key]['STARCENY'][j] 
                         yshift = yfirst - ycurrent
+
+                        # Get mask center and crpix to also register the shift in their locations
+                        maskcenx = self.database.obs[key]['MASKCENX'][j] #pixels
+                        maskceny = self.database.obs[key]['MASKCENY'][j] #pixels
+                        crpix1 = self.database.obs[key]['CRPIX1'][j] #pixels
+                        crpix2 = self.database.obs[key]['CRPIX2'][j] #pixels
+
+
+                        maskcen += [np.array([maskcenx, maskceny])]
+                        crpix += [np.array([crpix1, crpix2])]
 
                         if scale_prior:
                             ww = mask < 0.5
@@ -3286,6 +3353,8 @@ class ImageTools():
                         data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                         erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                 shifts = np.array(shifts)
+                maskcen = np.array(maskcen)
+                crpix = np.array(crpix)
                 if mask is not None:
                     if align_to_file is not None or j != ww_sci[0]:
                         temp = np.median(shifts, axis=0)
@@ -3320,13 +3389,26 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 head_pri['XOFFSET'] = xoffset #arcseconds
                 head_pri['YOFFSET'] = yoffset #arcseconds
+                head_sci['STARCENX'] = starcenx
+                head_sci['STARCENY'] = starceny
+                # Change mask location too: take first values of the shifts of the current fits file for now
+                maskcenx = maskcen[0,0] + shifts[0,0]
+                maskceny = maskcen[0,1] + shifts[0,1]
+                crpix1 = crpix[0,0] + shifts[0,0]
+                crpix2 = crpix[0,1] + shifts[0,1]
+                head_sci['MASKCENX'] = maskcenx
+                head_sci['MASKCENY'] = maskceny
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile, 
+                                         xoffset=xoffset, yoffset=yoffset, 
+                                         starcenx=starcenx, starceny=starceny,
+                                         maskcenx=maskcenx, maskceny=maskceny,
+                                         crpix1=crpix1, crpix2=crpix2,)
 
             # Plot science frame alignment.
             colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -3625,7 +3707,7 @@ class ImageTools():
 
             files = db_tab['FITSFILE']
 
-            c_star = np.array([db_tab['CRPIX1'][0], db_tab['CRPIX2'][0]])-1
+            c_star = np.array([db_tab['STARCENX'][0], db_tab['STARCENY'][0]])-1
 
             h1 = fits.getheader(files[0], ext=1)
             ny, nx = h1['NAXIS2'], h1['NAXIS1']

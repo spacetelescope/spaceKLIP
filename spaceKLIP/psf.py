@@ -863,7 +863,7 @@ def get_transmission(obs):
         mask = hdul['SCI'].data
         hdul.close()
         totint = obs['NINTS'][j] * obs['EFFINTTM'][j]  # s
-        center = [obs['CRPIX1'][j] - 1., obs['CRPIX2'][j] - 1.]  # pix (0-indexed)
+        center = [obs['MASKCENX'][j] - 1., obs['MASKCENY'][j] - 1.]  # pix (0-indexed)
         new_center = [mask.shape[1] // 2, mask.shape[0] // 2]  # pix (0-indexed)
         totmsk += [totint * nanrotate(mask.copy(), obs['ROLL_REF'][j], center=center, new_center=new_center)]
         totexp += totint  # s

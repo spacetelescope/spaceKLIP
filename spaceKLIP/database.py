@@ -196,6 +196,10 @@ class Database():
         BUNIT = []
         CRPIX1 = []  # pix
         CRPIX2 = []  # pix
+        MASKCENX = [] # pix
+        MASKCENY = [] # pix
+        STARCENX = [] # pix
+        STARCENY = [] # pix
         VPARITY = []
         V3I_YANG = []  # deg
         RA_REF = []  # deg
@@ -287,6 +291,11 @@ class Database():
             else:
                 CRPIX1 += [head.get('CRPIX1', np.nan)]
                 CRPIX2 += [head.get('CRPIX2', np.nan)]
+
+            MASKCENX += [head.get('MASKCENX', float(CRPIX1[i]))]
+            MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
+            STARCENX += [head.get('STARCENX', MASKCENX[-1])]
+            STARCENY += [head.get('STARCENY', MASKCENY[-1])]
             VPARITY += [head.get('VPARITY', -1)]
             V3I_YANG += [head.get('V3I_YANG', 0.)]
             RA_REF += [head.get('RA_REF', np.nan)]
@@ -323,6 +332,10 @@ class Database():
         BUNIT = np.array(BUNIT)
         CRPIX1 = np.array(CRPIX1)
         CRPIX2 = np.array(CRPIX2)
+        MASKCENX = np.array(MASKCENX)
+        MASKCENY = np.array(MASKCENY)
+        STARCENX = np.array(STARCENX)
+        STARCENY = np.array(STARCENY)
         VPARITY = np.array(VPARITY)
         V3I_YANG = np.array(V3I_YANG)
         RA_REF = np.array(RA_REF)
@@ -421,6 +434,10 @@ class Database():
                                'BUNIT',
                                'CRPIX1',
                                'CRPIX2',
+                               'MASKCENX',
+                               'MASKCENY',
+                               'STARCENX',
+                               'STARCENY',
                                'RA_REF',
                                'DEC_REF',
                                'ROLL_REF',
@@ -453,6 +470,10 @@ class Database():
                                'float',
                                'float',
                                'object',
+                               'float',
+                               'float',
+                               'float',
+                               'float',
                                'float',
                                'float',
                                'float',
@@ -538,6 +559,10 @@ class Database():
                              BUNIT[ww][j],
                              CRPIX1[ww][j],
                              CRPIX2[ww][j],
+                             MASKCENX[ww][j],
+                             MASKCENY[ww][j],
+                             STARCENX[ww][j],
+                             STARCENY[ww][j],
                              RA_REF[ww][j],
                              DEC_REF[ww][j],
                              ROLL_REF[ww][j] - V3I_YANG[ww][j] * VPARITY[ww][j],
@@ -649,6 +674,10 @@ class Database():
         BUNIT = []
         CRPIX1 = []  # pix
         CRPIX2 = []  # pix
+        MASKCENX = [] # pix
+        MASKCENY = [] # pix
+        STARCENX = [] # pix
+        STARCENY = [] # pix
         BLURFWHM = []  # pix
         HASH = []
         Ndatapaths = len(datapaths)
@@ -746,6 +775,10 @@ class Database():
             else:
                 CRPIX1 += [head.get('CRPIX1', np.nan)]
                 CRPIX2 += [head.get('CRPIX2', np.nan)]
+            MASKCENX += [head.get('MASKCENX', CRPIX1[i])]
+            MASKCENY += [head.get('MASKCENY', CRPIX2[i])]
+            STARCENX += [head.get('STARCENX', np.nan)]
+            STARCENY += [head.get('STARCENY', np.nan)]
             HASH += [TELESCOP[-1] + '_' + INSTRUME[-1] + '_' + DETECTOR[-1] + '_' + FILTER[-1] + '_' + PUPIL[-1] + '_' + CORONMSK[-1] + '_' + SUBARRAY[-1]]
             hdul.close()
         TYPE = np.array(TYPE)
@@ -777,6 +810,10 @@ class Database():
         BUNIT = np.array(BUNIT)
         CRPIX1 = np.array(CRPIX1)
         CRPIX2 = np.array(CRPIX2)
+        MASKCENX = np.array(MASKCENX)
+        MASKCENY = np.array(MASKCENY)
+        STARCENX = np.array(STARCENX)
+        STARCENY = np.array(STARCENY)
         BLURFWHM = np.array(BLURFWHM)
         HASH = np.array(HASH)
         
@@ -812,6 +849,8 @@ class Database():
                                    'PPS_APER',
                                    'PIXSCALE',
                                    'PIXAR_SR',
+                                   'STARCENX',
+                                   'STARCENY',
                                    'MODE',
                                    'ANNULI',
                                    'SUBSECTS',
@@ -840,6 +879,8 @@ class Database():
                                    'object',
                                    'object',
                                    'object',
+                                   'float',
+                                   'float',
                                    'float',
                                    'float',
                                    'object',
@@ -878,6 +919,8 @@ class Database():
                              PPS_APER[ww[j]],
                              PIXSCALE[ww[j]],
                              PIXAR_SR[ww[j]],
+                             STARCENX[ww[j]],
+                             STARCENY[ww[j]],
                              MODE[ww[j]],
                              ANNULI[ww[j]],
                              SUBSECTS[ww[j]],
@@ -1037,10 +1080,10 @@ class Database():
             print_tab = copy.deepcopy(self.obs[key])
             if include_fitsfiles:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER', 
-                                          'CRPIX1', 'CRPIX2', 'RA_REF', 'DEC_REF'])
+                                          'CRPIX1', 'CRPIX2','MASKCENX','MASKCENY','STARCENX','STARCENY', 'RA_REF', 'DEC_REF'])
             else:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER', 
-                                          'CRPIX1', 'CRPIX2', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
+                                          'CRPIX1', 'CRPIX2','MASKCENX','MASKCENY','STARCENX','STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
             print_tab['XOFFSET'] *= 1e3
             print_tab['XOFFSET'] = np.round(print_tab['XOFFSET'])
             print_tab['XOFFSET'][print_tab['XOFFSET'] == 0.] = 0.
@@ -1124,6 +1167,10 @@ class Database():
                    yoffset=None,
                    crpix1=None,
                    crpix2=None,
+                   maskcenx=None,
+                   maskceny=None,
+                   starcenx=None,
+                   starceny=None,
                    blurfwhm=None,
                    update_pxar=False):
         """
@@ -1153,10 +1200,22 @@ class Database():
             New PSF y-offset (mas) for the observation to be updated. The
             default is None.
         crpix1 : float, optional
-            New PSF x-position (pix, 1-indexed) for the observation to be
+            New WCS reference x-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
         crpix2 : float, optional
-            New PSF y-position (pix, 1-indexed) for the observation to be
+            New WCS reference y-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        maskcenx : float, optional
+            New mask x-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        maskceny : float, optional
+            New mask y-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        starcenx : float, optional
+            New star x-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        starceny : float, optional
+            New star y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
         blurfwhm : float, optional
             New FWHM for the Gaussian filter blurring (pix) for the observation
@@ -1195,6 +1254,14 @@ class Database():
             self.obs[key]['CRPIX1'][index] = crpix1
         if crpix2 is not None:
             self.obs[key]['CRPIX2'][index] = crpix2
+        if maskcenx is not None:
+            self.obs[key]['MASKCENX'][index] = maskcenx
+        if maskceny is not None:
+            self.obs[key]['MASKCENY'][index] = maskceny
+        if starcenx is not None:
+            self.obs[key]['STARCENX'][index] = starcenx
+        if starceny is not None:
+            self.obs[key]['STARCENY'][index] = starceny
         if blurfwhm is not None:
             self.obs[key]['BLURFWHM'][index] = blurfwhm
         self.obs[key]['FITSFILE'][index] = fitsfile

@@ -89,7 +89,7 @@ class AnalysisTools():
                      starfile,
                      spectral_type='G2V',
                      companions=None,
-                     overwrite_crpix=None,
+                     overwrite_starcen=None,
                      subdir='rawcon',
                      output_filetype='npy',
                      plot_xlim=(0,10),
@@ -111,8 +111,8 @@ class AnalysisTools():
             For each companion, there should be a three element list containing
             [RA offset (arcsec), Dec offset (arcsec), mask radius (lambda/D)].
             The default is None.
-        overwrite_crpix : tuple of two float, optional
-            Overwrite the PSF center with the (CRPIX1, CRPIX2) values provided
+        overwrite_starcen : tuple of two float, optional
+            Overwrite the PSF center with the (STARCENX, STARCENY) values provided
             here (in 1-indexed coordinates). This is required for Coron3 data!
             The default is None.
         subdir : str, optional
@@ -219,10 +219,10 @@ class AnalysisTools():
                     resolution = np.hypot(resolution, self.database.obs[key]['BLURFWHM'][j])
                 
                 # Get the star position.
-                if overwrite_crpix is None:
-                    center = (head_pri['CRPIX1'] - 1., head_pri['CRPIX2'] - 1.)  # pix (0-indexed)
+                if overwrite_starcen is None:
+                    center = (head_pri['STARCENX'] - 1., head_pri['STARCENY'] - 1.)  # pix (0-indexed)
                 else:
-                    center = (overwrite_crpix[0] - 1., overwrite_crpix[1] - 1.)  # pix (0-indexed)
+                    center = (overwrite_starcen[0] - 1., overwrite_starcen[1] - 1.)  # pix (0-indexed)
                 
                 # Mask coronagraph spiders, 4QPM edges, etc. 
                 if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON']:
@@ -558,7 +558,8 @@ class AnalysisTools():
                 # Read Stage 2 files and make pyKLIP dataset
                 filepaths, psflib_filepaths = get_pyklip_filepaths(self.database, key)
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                pyklip_dataset = JWSTData(filepaths, psflib_filepaths)
+                pyklip_dataset = JWSTData(filepaths, psflib_filepaths,
+                                          center_keywords=['STARCENX','STARCENY'])
 
                 # Compute the resolution element. Account for possible blurring.
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
@@ -1008,7 +1009,8 @@ class AnalysisTools():
                 
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass)
+                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass,
+                                          center_keywords=['STARCENX','STARCENY'])
                 kwargs_temp['dataset'] = dataset
                 kwargs_temp['aligned_center'] = dataset._centers[0]
                 kwargs_temp['psf_library'] = dataset.psflib
@@ -1737,14 +1739,14 @@ class AnalysisTools():
                             
                             # Plot the pymultinest fit results.
                             fit.fit_plots()
-                            if save_figres:
+                            if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
                             plt.close(fig)
 
                             fit.fm_residuals()
-                            if save_figres:
+                            if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
