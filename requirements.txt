@@ -12,4 +12,5 @@ webbpsf_ext>=1.2.0
 pyklip>=2.7.1
 ipywidgets>=8.1.5
 lmfit>1.2.2
-
+tqdm
+mocapy @ git+https://github.com/jgagneastro/mocapy.git
