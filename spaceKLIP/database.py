@@ -389,8 +389,13 @@ class Database():
                         ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
                         ww_ref = np.where(numdthpt == numdthpt_unique[1])[0]
                     else:
-                        log.warning('  --> Could not identify science and reference files based on dither pattern')
-                        raise UserWarning('Please use psflibpaths to specify reference files')
+                        ww_sci = []
+                        ww_ref = np.array([], dtype='int')
+                        for j in range(len(allpaths[ww])):
+                            ww_sci.append(int(j))
+                        ww_sci = np.array(ww_sci, dtype='int')
+                        log.warning('  --> Could not identify science and reference files based on dither pattern.'
+                                    'Please use psflibpaths to specify reference files before running klip subtraction step')
             
             # Make Astropy tables for concatenations.
             tab = Table(names=('TYPE',
@@ -510,6 +515,13 @@ class Database():
                         maskfile = os.path.join(maskbase, maskpath)
                     else:
                         maskfile = 'NONE'
+                        # from astropy.io import fits
+                        #make a fake transmission mask of ones
+                        # pipeline = Detector1Pipeline()
+                        # input = datamodels.open(
+                        #     '/Users/gstrampelli/PycharmProjects/JWST_planet_hunting/coronograph/Survey_4050/TWA10/data/aligned/jw04050034001_03106_00001_nrca2_calints.fits')
+                        # maskfile = pipeline.get_reference_file(input, 'psfmask')
+
                 tab.add_row((tt,
                              EXP_TYPE[ww][j],
                              DATAMODL[ww][j],
