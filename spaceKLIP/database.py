@@ -515,12 +515,6 @@ class Database():
                         maskfile = os.path.join(maskbase, maskpath)
                     else:
                         maskfile = 'NONE'
-                        # from astropy.io import fits
-                        #make a fake transmission mask of ones
-                        # pipeline = Detector1Pipeline()
-                        # input = datamodels.open(
-                        #     '/Users/gstrampelli/PycharmProjects/JWST_planet_hunting/coronograph/Survey_4050/TWA10/data/aligned/jw04050034001_03106_00001_nrca2_calints.fits')
-                        # maskfile = pipeline.get_reference_file(input, 'psfmask')
 
                 tab.add_row((tt,
                              EXP_TYPE[ww][j],
