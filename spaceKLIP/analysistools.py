@@ -1035,6 +1035,9 @@ class AnalysisTools():
                 
                 # Find science and reference files.
                 filepaths, psflib_filepaths, maxnumbasis = get_pyklip_filepaths(self.database, key, return_maxbasis=True)
+                if 'maxnumbasis' in kwargs.keys():
+                    maxnumbasis = kwargs['maxnumbasis']
+
                 if 'maxnumbasis' not in kwargs_temp.keys() or kwargs_temp['maxnumbasis'] is None:
                     kwargs_temp['maxnumbasis'] = maxnumbasis
                 
@@ -1294,28 +1297,53 @@ class AnalysisTools():
                             sim_sep = np.sqrt(guess_dx**2 + guess_dy**2) * pxsc_arcsec  # arcsec
                             sim_pa = np.rad2deg(np.arctan2(guess_dx, guess_dy))  # deg
 
-                        # Generate offset PSF for this roll angle. Do not add
-                        # the V3Yidl angle as it has already been added to the
-                        # roll angle by spaceKLIP. This is only for estimating
-                        # the coronagraphic mask throughput!
-                        offsetpsf_coronmsk = offsetpsf_func.gen_psf([sim_sep, sim_pa],
-                                                                    mode='rth',
-                                                                    PA_V3=roll_ref,
-                                                                    do_shift=False,
-                                                                    quick=True,
-                                                                    addV3Yidl=False)
-                        
-                        # Coronagraphic mask throughput is not incorporated
-                        # into the flux calibration of the JWST pipeline so
-                        # that the companion flux from the detector pixels will
-                        # be underestimated. Therefore, we need to scale the
-                        # model offset PSF to account for the coronagraphic
-                        # mask throughput (it becomes fainter). Compute scale
-                        # factor by comparing a model PSF with and without
-                        # coronagraphic mask.
-                        scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
+                        # # Generate offset PSF for this roll angle. Do not add
+                        # # the V3Yidl angle as it has already been added to the
+                        # # roll angle by spaceKLIP. This is only for estimating
+                        # # the coronagraphic mask throughput!
+                        # offsetpsf_coronmsk = offsetpsf_func.gen_psf([sim_sep, sim_pa],
+                        #                                             mode='rth',
+                        #                                             PA_V3=roll_ref,
+                        #                                             do_shift=False,
+                        #                                             quick=True,
+                        #                                             addV3Yidl=False)
+                        #
+                        # # Coronagraphic mask throughput is not incorporated
+                        # # into the flux calibration of the JWST pipeline so
+                        # # that the companion flux from the detector pixels will
+                        # # be underestimated. Therefore, we need to scale the
+                        # # model offset PSF to account for the coronagraphic
+                        # # mask throughput (it becomes fainter). Compute scale
+                        # # factor by comparing a model PSF with and without
+                        # # coronagraphic mask.
+                        # scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
+                        # # scale_factor_avg += [scale_factor]
+
+                        if  offsetpsf_func.image_mask is not None:
+                            # Generate offset PSF for this roll angle. Do not add
+                            # the V3Yidl angle as it has already been added to the
+                            # roll angle by spaceKLIP. This is only for estimating
+                            # the coronagraphic mask throughput!
+                            offsetpsf_coronmsk = offsetpsf_func.gen_psf([sim_sep, sim_pa],
+                                                                        mode='rth',
+                                                                        PA_V3=roll_ref,
+                                                                        do_shift=False,
+                                                                        quick=True,
+                                                                        addV3Yidl=False)
+
+                            # Coronagraphic mask throughput is not incorporated
+                            # into the flux calibration of the JWST pipeline so
+                            # that the companion flux from the detector pixels will
+                            # be underestimated. Therefore, we need to scale the
+                            # model offset PSF to account for the coronagraphic
+                            # mask throughput (it becomes fainter). Compute scale
+                            # factor by comparing a model PSF with and without
+                            # coronagraphic mask.
+                            scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
+                            # scale_factor_avg += [scale_factor]
+                        else:
+                            scale_factor = 1 / np.sum(psf_no_coronmsk)
                         scale_factor_avg += [scale_factor]
-                        
                         # Normalize model offset PSF to a total integrated flux
                         # of 1 at infinity. Generates a new webbpsf model with
                         # PSF normalization set to 'exit_pupil'.
@@ -1383,6 +1411,8 @@ class AnalysisTools():
                         input_wvs = np.unique(dataset.wvs)
                         if len(input_wvs) != 1:
                             raise NotImplementedError('Only implemented for broadband photometry')
+                        import pyklip
+                        pyklip.fm.debug = True
                         fm_class = fmpsf.FMPlanetPSF(inputs_shape=dataset.input.shape,
                                                      numbasis=klmodes,
                                                      sep=guess_sep,
