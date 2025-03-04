@@ -108,9 +108,6 @@ class MCMCTools():
         else:
             self.flux_limits = [self.flux_guess * 1e-1, self.flux_guess * 1e1]
         if 'contrast_limits' in kwargs['MCMC'].keys():
-            # self.contrast_limits = [self.contrast_guess * 10 ** (-kwargs['MCMC']['contrast_limits']),
-            #                    self.contrast_guess * 10 ** (kwargs['MCMC']['contrast_limits'])]# if self.contrast_guess * 10 ** (
-                                   # kwargs['MCMC'].keys()) <= 1 else 1]
             self.contrast_limits = [kwargs['MCMC']['contrast_limits'][0], kwargs['MCMC']['contrast_limits'][1]]
         else:
             self.contrast_limits = [self.contrast_guess * 1e-1, self.contrast_guess * 1e1] # if self.contrast_guess * 1e1 <= 1 else 1]
@@ -419,7 +416,6 @@ class MCMCTools():
                 float: Log-prior value (log(1) for uniform priors, or -inf if out of bounds).
             """
             if binarity:
-                # x_shift, y_shift, flux1, flux2, sep, theta = params
                 x_shift, y_shift, flux, contrast, sep, theta = params
 
                 # Define uniform priors
@@ -499,7 +495,6 @@ class MCMCTools():
             thin = self.thin
 
         flat_samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
-        # filtered_flat_sample=sigma_clip(flat_samples.copy(), sigma=5, maxiters=5,axis=0)
         pranges=[]
         for i in range(flat_samples.shape[1]):
             pranges.append((np.nanmin(flat_samples[:, i][np.isfinite(flat_samples[:, i])]),
@@ -510,7 +505,7 @@ class MCMCTools():
             labels = ["x", "y", "flux"]
 
         with plt.style.context('spaceKLIP.sk_style'):
-            samples = sampler.get_chain()  # Shape: (n_steps, n_walkers, n_dim)
+            samples = sampler.get_chain()
             n_walkers = samples.shape[1]
             fig, ax = plt.subplots(len(labels), 1, figsize=(20, 20), sharex=True)
             for elno in range(len(labels)):
