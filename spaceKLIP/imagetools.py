@@ -2650,7 +2650,7 @@ class ImageTools():
                         shft_exp=1,
                         kwargs={},
                         highpass=False,
-                        fit_NICAM_with_MCMC=False,
+                        recenter_NICAM_with_MCMC=False,
                         subdir='recentered'):
         """
         Recenter frames so that the host star position is data.shape // 2. For
@@ -2684,7 +2684,7 @@ class ImageTools():
         kwargs : dict, optional
             Keyword arguments for the scipy.ndimage.shift routine. The default
             is {}.
-        fit_NICAM_with_MCMC: bool, optional
+        recenter_NICAM_with_MCMC: bool, optional
             Use MCMC Bayesian algorithm to find the shift for NIRCAM data. The default is False.
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
@@ -2699,6 +2699,8 @@ class ImageTools():
         # Update NIRCam coronagraphy centers, i.e., change SIAF CRPIX position
         # to true mask center determined by Jarron.
         # self.update_nircam_centers()  # shall be run purposely by the user
+        if 'MCMC' in kwargs.keys():
+            kwargs_mcmc = kwargs.pop('MCMC')
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -2773,8 +2775,8 @@ class ImageTools():
                         crpix2 = (data.shape[-2] - 1.) / 2. + 1.  # 1-indexed
 
                     # NIRCam imaging.
-                    elif self.database.obs[key]['EXP_TYPE'][j] in ['NRC_IMAGE'] and fit_NICAM_with_MCMC:
-                        MCMCTools = mcmc_tools.MCMCTools(data, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs)
+                    elif self.database.obs[key]['EXP_TYPE'][j] in ['NRC_IMAGE'] and recenter_NICAM_with_MCMC:
+                        MCMCTools = mcmc_tools.MCMCTools(data, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs_mcmc)
                         for k in range(data.shape[0]):
                             crpix1 = (data.shape[-1] - 1.) / 2.+1#(data.shape[-1]) // 2. + 1.  # 1-indexed
                             crpix2 = (data.shape[-1] - 1.) / 2.+1#(data.shape[-2]) // 2. + 1.  # 1-indexed
@@ -2922,7 +2924,7 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
 
-                if fit_NICAM_with_MCMC:
+                if recenter_NICAM_with_MCMC:
                     MCMCTools.plot_data_model_residual(data, apername=apername, filt=filt, date=date,
                                                   offsetpsf_func=None, vmin=0, vmax=5000,
                                                   vminres=None, vmaxres=None, mask=True, binarity=MCMCTools.binarity,
