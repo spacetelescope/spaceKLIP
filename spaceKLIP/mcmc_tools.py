@@ -42,33 +42,33 @@ class MCMCTools():
         # self.database = database
         self.crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
         self.crpix2 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
-        if 'r' in kwargs['MCMC'].keys():
-            self.r = kwargs['MCMC']['r']
+        if 'r' in kwargs.keys():
+            self.r = kwargs['r']
         else:
             self.r = 0
-        if 'nsteps' in kwargs['MCMC'].keys():
-            self.nsteps = kwargs['MCMC']['nsteps']
+        if 'nsteps' in kwargs.keys():
+            self.nsteps = kwargs['nsteps']
         else:
             self.nsteps = 5000
-        if 'nwalkers' in kwargs['MCMC'].keys():
-            self.nwalkers = kwargs['MCMC']['nwalkers']
+        if 'nwalkers' in kwargs.keys():
+            self.nwalkers = kwargs['nwalkers']
         else:
             self.nwalkers = 30
-        if 'verbose' in kwargs['MCMC'].keys():
-            self.verbose = kwargs['MCMC']['verbose']
+        if 'verbose' in kwargs.keys():
+            self.verbose = kwargs['verbose']
         else:
             self.verbose = False
-        if 'size' in kwargs['MCMC'].keys():
-            self.size = kwargs['MCMC']['size'] + 1 if kwargs['MCMC']['size'] % 2 == 0 else kwargs['MCMC']['size']
+        if 'size' in kwargs.keys():
+            self.size = kwargs['size'] + 1 if kwargs['size'] % 2 == 0 else kwargs['size']
         else:
             self.size = np.median(data, axis=0).shape[-1]
-        if 'oversample' in kwargs['MCMC'].keys():
-            self.oversample = kwargs['MCMC']['oversample']
+        if 'oversample' in kwargs.keys():
+            self.oversample = kwargs['oversample']
         else:
             self.oversample = 1
-        if 'x_guess' in kwargs['MCMC'].keys() and 'y_guess' in kwargs['MCMC'].keys():
-            self.x_guess = kwargs['MCMC']['x_guess']
-            self.y_guess = kwargs['MCMC']['y_guess']
+        if 'x_guess' in kwargs.keys() and 'y_guess' in kwargs.keys():
+            self.x_guess = kwargs['x_guess']
+            self.y_guess = kwargs['y_guess']
             self.dx_guess = x_guess - (self.crpix1 - 1)
             self.dy_guess = y_guess - (self.crpix2 - 1)
         else:
@@ -78,55 +78,55 @@ class MCMCTools():
             self.y_guess = self.max_index[0][0]
             self. dx_guess = self.x_guess - (self.crpix1 - 1)
             self.dy_guess = self.y_guess - (self.crpix2 - 1)
-        if 'flux_guess' in kwargs['MCMC'].keys():
-            self.flux_guess = kwargs['MCMC']['flux_guess']
+        if 'flux_guess' in kwargs.keys():
+            self.flux_guess = kwargs['flux_guess']
         else:
             self.flux_guess = np.nanmax(data)
-        if 'contrast_guess' in kwargs['MCMC'].keys():
-            self.contrast_guess = kwargs['MCMC']['contrast_guess']
+        if 'contrast_guess' in kwargs.keys():
+            self.contrast_guess = kwargs['contrast_guess']
         else:
             self.contrast_guess = 1e-1
-        if 'sep_guess' in kwargs['MCMC'].keys():
-            self.sep_guess = kwargs['MCMC']['sep_guess']
+        if 'sep_guess' in kwargs.keys():
+            self.sep_guess = kwargs['sep_guess']
         else:
             self.sep_guess = 1
-        if 'theta_guess' in kwargs['MCMC'].keys():
-            self.theta_guess = kwargs['MCMC']['theta_guess']
+        if 'theta_guess' in kwargs.keys():
+            self.theta_guess = kwargs['theta_guess']
         else:
             self.theta_guess = 0
-        if 'x_limits' in kwargs['MCMC'].keys():
-            self.dx_limits = [-kwargs['MCMC']['x_limits'], kwargs['MCMC']['x_limits']]
+        if 'x_limits' in kwargs.keys():
+            self.dx_limits = [-kwargs['x_limits'], kwargs['x_limits']]
         else:
             self.dx_limits = [- 5, + 5]
-        if 'y_limits' in kwargs['MCMC'].keys():
-            self.dy_limits = [-kwargs['MCMC']['y_limits'], kwargs['MCMC']['y_limits']]
+        if 'y_limits' in kwargs.keys():
+            self.dy_limits = [-kwargs['y_limits'], kwargs['y_limits']]
         else:
             self.dy_limits = [- 5, + 5]
-        if 'flux_limits' in kwargs['MCMC'].keys():
-            self.flux_limits = [self.flux_guess * 10 ** (-kwargs['MCMC']['flux_limits']),
-                           self.flux_guess * 10 ** (kwargs['MCMC']['flux_limits'])]
+        if 'flux_limits' in kwargs.keys():
+            self.flux_limits = [self.flux_guess * 10 ** (-kwargs['flux_limits']),
+                           self.flux_guess * 10 ** (kwargs['flux_limits'])]
         else:
             self.flux_limits = [self.flux_guess * 1e-1, self.flux_guess * 1e1]
-        if 'contrast_limits' in kwargs['MCMC'].keys():
-            self.contrast_limits = [kwargs['MCMC']['contrast_limits'][0], kwargs['MCMC']['contrast_limits'][1]]
+        if 'contrast_limits' in kwargs.keys():
+            self.contrast_limits = [kwargs['contrast_limits'][0], kwargs['contrast_limits'][1]]
         else:
             self.contrast_limits = [self.contrast_guess * 1e-1, self.contrast_guess * 1e1] # if self.contrast_guess * 1e1 <= 1 else 1]
-        if 'sep_limits' in kwargs['MCMC'].keys():
-            self.sep_limits = kwargs['MCMC']['sep_limits']
+        if 'sep_limits' in kwargs.keys():
+            self.sep_limits = kwargs['sep_limits']
         else:
             self.sep_limits = [1, 10]
-        if 'theta_limits' in kwargs['MCMC'].keys():
-            self.theta_limits = kwargs['MCMC']['theta_limits']
+        if 'theta_limits' in kwargs.keys():
+            self.theta_limits = kwargs['theta_limits']
         else:
             self.theta_limits = [0, 360]
-        if 'binarity' in kwargs['MCMC'].keys():
+        if 'binarity' in kwargs.keys():
             if type is not None:
-                if type == 'SCI' and kwargs['MCMC']['binarity']:
+                if type == 'SCI' and kwargs['binarity']:
                     self.binarity = True
                 else:
                     self.binarity = False
             else:
-                self.binarity = kwargs['MCMC']['binarity']
+                self.binarity = kwargs['binarity']
             if self.binarity:
                 self.initial_guess = [0, 0, self.flux_guess, self.contrast_guess, self.sep_guess,
                                  self.theta_guess]  # x, y, flux, contrast, sep, theta
@@ -144,12 +144,12 @@ class MCMCTools():
             self.debug = kwargs['debug']
         else:
             self.debug = False
-        if 'burnin' in kwargs['MCMC'].keys():
-            self.burnin = kwargs['MCMC']['burnin']
+        if 'burnin' in kwargs.keys():
+            self.burnin = kwargs['burnin']
         else:
             self.burnin = None
-        if 'thin' in kwargs['MCMC'].keys():
-            self.thin = kwargs['MCMC']['thin']
+        if 'thin' in kwargs.keys():
+            self.thin = kwargs['thin']
         else:
             self.thin = None
         pass
