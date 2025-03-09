@@ -2800,8 +2800,8 @@ class ImageTools():
                             # Apply the same shift to all SCI and REF frames.
                             shifts += [np.array([-(xc - (data.shape[-1] - 1.) / 2.), -(yc - (data.shape[-2] - 1.) / 2.)])]
                             maskoffs_temp += [np.array([xshift, yshift])]
-                            data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                            erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            #data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            #erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                         if mask is not None:
                             # mask = ut.imshift(mask, [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                             mask = spline_shift(mask, [shifts[k][1], shifts[k][0]], order=0, mode='constant', cval=np.nanmedian(mask))
@@ -2844,8 +2844,8 @@ class ImageTools():
                                 pp = core.determine_origin(data[k], algo='BCEN')
                                 shifts += [np.array([-(pp[0] - data.shape[-1]//2), -(pp[1] - data.shape[-2]//2)])]
                                 maskoffs_temp += [np.array([0., 0.])]
-                                data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                                erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                                #data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                                #erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
                             else:
                                 shifts += [np.array([0., 0.])]
                                 maskoffs_temp += [np.array([0., 0.])]
@@ -2883,8 +2883,8 @@ class ImageTools():
                                       args=(data[k], method, kwargs))['x']
                         shifts += [np.array([pp[0], pp[1]])]
                         maskoffs_temp += [np.array([0., 0.])]
-                        data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                        erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        #data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        #erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
 
                         # Recenter TA frames to integer pixel precision by
                         # rolling the image.
@@ -3276,7 +3276,7 @@ class ImageTools():
                 shifts = []
                 maskcen = []
                 for k in range(data.shape[0]):
-
+                    print(k)
                     # Take the first science frame as reference frame.
                     if j == ww_sci[0] and k == 0:
                         if align_to_file is None:
@@ -3327,31 +3327,44 @@ class ImageTools():
                         # but not exactly zero.
                         if (np.abs(xshift) < 1e-3) and (np.abs(yshift) < 1e-3):
                             p0 = np.array([0., 0., p0[-1]])
+                            print('a')
                         if align_algo == 'leastsq':
                             if shft_exp != 1:
                                 args = (np.power(np.abs(data[k]), shft_exp), np.power(np.abs(ref_image), shft_exp), mask_temp, method, kwargs)
+                                print('b')
                             else:
                                 args = (data[k], ref_image, mask_temp, method, kwargs)
+                                print('c')
                             # Use header values to initiate least squares fit
                             pp = leastsq(ut.alignlsq,
                                          p0,
                                          args=args)[0]
+                            print(pp)
                         elif align_algo == 'header':
                             # Just assume the header values are correct
                             pp = p0
+                            print('d')
 
                     # Append shifts to array and apply shift to image
                     # using defined method.
-                    shifts += [np.array([pp[0], pp[1], pp[2]])]
+                    temp = np.array([pp[0], pp[1], pp[2]])
+                    temp = np.nan_to_num(temp)
+                    shifts += [temp]
+
+
+                    print(temp)
+
+
                     if align_to_file is not None or j != ww_sci[0] or k != 0:
-                        data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                        erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        #data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        #erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        pass
                 shifts = np.array(shifts)
                 maskcen = np.array(maskcen)
                 if mask is not None:
                     if align_to_file is not None or j != ww_sci[0]:
                         temp = np.median(shifts, axis=0)
-                        mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
+                        #mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
                 shifts_all += [shifts]
                 if imshifts is not None:
                     imshifts += shifts[:, :-1]
@@ -3379,11 +3392,18 @@ class ImageTools():
                     if align_algo != 'header':
                         log.warning('  --> The following frames might not be properly aligned: '+str(ww))
 
+
+                #print('test')
+                #print('k:', k)
+                #print('shifts: ', shifts)
+
+
                 # Write FITS file and PSF mask.
                 head_pri['XOFFSET'] = xoffset #arcseconds
                 head_pri['YOFFSET'] = yoffset #arcseconds
-                head_sci['STARCENX'] = starcenx
-                head_sci['STARCENY'] = starceny
+                #head_sci['STARCENX'] = starcenx
+                #head_sci['STARCENY'] = starceny
+                head_sci['ALIGNSHIFT'] = shifts #track shift values to implement later
                 # Change mask location too: take first values of the shifts of the current fits file for now
                 maskcenx = maskcen[0,0] + shifts[0,0]
                 maskceny = maskcen[0,1] + shifts[0,1]
@@ -3393,9 +3413,9 @@ class ImageTools():
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, starcenx=starcenx, starceny=starceny,maskcenx=maskcenx, maskceny=maskceny)
+                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, starcenx=starcenx, starceny=starceny,maskcenx=maskcenx, maskceny=maskceny)#, alignshift=imshift)
 
-            # Plot science frame alignment.
+            '''# Plot science frame alignment.
             colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
             fig = plt.figure(figsize=(6.4, 4.8))
             ax = plt.gca()
@@ -3481,7 +3501,7 @@ class ImageTools():
                     plt.savefig(output_file)
                     log.info(f" Plot saved in {output_file}")
                 plt.show()
-                plt.close(fig)
+                plt.close(fig)'''
                 
     @plt.style.context('spaceKLIP.sk_style')
     def subtract_nircam_coron_background(self,
@@ -3844,3 +3864,171 @@ class ImageTools():
                 mask = ut.read_msk(mask_in)
                 mask_out = ut.write_msk(mask_in, mask, f_out)
                 self.database.update_obs(key, j, f_out, mask_out)
+
+    def shift_frames(self,
+                     method='fourier',
+                     kwargs={},
+                     subdir='shifted',
+                     save_figures=True):
+        # if nircam,
+        # imagecen = find_nircam_centers
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        database_temp = deepcopy(self.database.obs)
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Find science and reference files.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+            if len(ww_sci) == 0:
+                raise UserWarning('Could not find any science files')
+            ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
+            ww_all = np.append(ww_sci, ww_ref)
+
+            # Loop through FITS files.
+            shifts_all = []
+            for j in ww_all:
+
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+
+                starcenx = self.database.obs[key]['STARCENX'][j]  # pixels
+                starceny = self.database.obs[key]['STARCENY'][j]  # pixels
+                imagecenx = data.shape[-1]//2
+                imageceny = data.shape[-2]//2
+
+                # shift frames.
+                head, tail = os.path.split(fitsfile)
+                log.info('  --> Shift frames: ' + tail)
+                if np.sum(np.isnan(data)) != 0:
+                    raise UserWarning('Please replace nan pixels before attempting to shift frames')
+                shifts = []
+                for k in range(data.shape[0]):
+
+                    # Apply the same shift to all SCI and REF frames.
+
+                    # shift = (star center) - (image center) - (imshift)
+                    xshift = starcenx - imagecenx
+                    yshift = starceny - imageceny
+                    shifts += [np.array([xshift, yshift])]
+                    print(starcenx, imagecenx)
+                    # data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                    # erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+
+                #print(shifts)
+                # Get mask center to also register the shift in its location
+                #maskcenx = self.database.obs[key]['MASKCENX'][j]  # pixels
+                #maskceny = self.database.obs[key]['MASKCENY'][j]  # pixels
+
+                '''for k in range(data.shape[0]):
+                    # Take the first science frame as reference frame.
+                    if j == ww_sci[0] and k == 0:
+                        if align_to_file is None:
+                            ref_image = data[k].copy()
+                        pp = np.array([0., 0., 1.])
+                        xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
+                        yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
+                        starcenx = self.database.obs[key]['STARCENX'][j]  # pixels
+                        starceny = self.database.obs[key]['STARCENY'][j]  # pixels
+                        pxsc = self.database.obs[key]['PIXSCALE'][j]  # arcsec'''
+
+
+
+            '''# Plot science frame alignment.
+            colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+            fig = plt.figure(figsize=(6.4, 4.8))
+            ax = plt.gca()
+            for index, j in enumerate(ww_sci):
+                ax.scatter(shifts_all[index][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                           shifts_all[index][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                           s=5, color=colors[index % len(colors)], marker='o',
+                           label='PA = %.0f deg' % self.database.obs[key]['ROLL_REF'][j])
+            ax.axhline(0., color='gray', lw=1,
+                       zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
+            ax.axvline(0., color='gray', lw=1, zorder=-1)
+
+            ax.set_aspect('equal')
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            xrng = xlim[1] - xlim[0]
+            yrng = ylim[1] - ylim[0]
+            if xrng > yrng:
+                ax.set_xlim(np.mean(xlim) - xrng, np.mean(xlim) + xrng)
+                ax.set_ylim(np.mean(ylim) - xrng, np.mean(ylim) + xrng)
+            else:
+                ax.set_xlim(np.mean(xlim) - yrng, np.mean(xlim) + yrng)
+                ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
+            ax.set_xlabel('x-shift [mas]')
+            ax.set_ylabel('y-shift [mas]')
+            ax.legend(loc='upper right')
+            ax.set_title(
+                f'Science frame alignment\nfor {self.database.obs[key]["TARGPROP"][ww_sci[0]]}, {self.database.obs[key]["FILTER"][ww_sci[0]]}')
+            if save_figures:
+                output_file = os.path.join(output_dir, key + '_align_sci.pdf')
+                plt.savefig(output_file)
+                log.info(f" Plot saved in {output_file}")
+            plt.show()
+            plt.close(fig)
+
+            # Plot reference frame alignment.
+            if len(ww_ref) > 0:
+                colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                fig = plt.figure(figsize=(6.4, 4.8))
+                ax = plt.gca()
+                seen = []
+                reps = []
+                syms = ['o', 'v', '^', '<', '>'] * (1 + len(ww_ref) // 5)
+                add = len(ww_sci)
+                for index, j in enumerate(ww_ref):
+                    this = '%.3f_%.3f' % (database_temp[key]['XOFFSET'][j], database_temp[key]['YOFFSET'][j])
+                    if this not in seen:
+                        ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                   shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                   s=5, color=colors[len(seen) % len(colors)], marker=syms[0],
+                                   label='dither %.0f' % (len(seen) + 1))
+                        ax.hlines((-database_temp[key]['YOFFSET'][j] + yoffset) * 1000,
+                                  (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 - 4.,
+                                  (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 + 4.,
+                                  color=colors[len(seen) % len(colors)], lw=1)
+                        ax.vlines((-database_temp[key]['XOFFSET'][j] + xoffset) * 1000,
+                                  (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 - 4.,
+                                  (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 + 4.,
+                                  color=colors[len(seen) % len(colors)], lw=1)
+                        seen += [this]
+                        reps += [1]
+                    else:
+                        ww = np.where(np.array(seen) == this)[0][0]
+                        ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                   shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                   s=5, color=colors[ww % len(colors)], marker=syms[reps[ww]])
+                        reps[ww] += 1
+                ax.set_aspect('equal')
+                xlim = ax.get_xlim()
+                ylim = ax.get_ylim()
+                xrng = xlim[1] - xlim[0]
+                yrng = ylim[1] - ylim[0]
+                if xrng > yrng:
+                    ax.set_xlim(np.mean(xlim) - xrng, np.mean(xlim) + xrng)
+                    ax.set_ylim(np.mean(ylim) - xrng, np.mean(ylim) + xrng)
+                else:
+                    ax.set_xlim(np.mean(xlim) - yrng, np.mean(xlim) + yrng)
+                    ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
+                ax.set_xlabel('x-shift [mas]')
+                ax.set_ylabel('y-shift [mas]')
+                ax.legend(loc='upper right', fontsize='small')
+                ax.set_title(
+                    f'Reference frame alignment\n showing {len(ww_ref)} PSF refs for {self.database.obs[key]["FILTER"][ww_ref[0]]}')
+                if save_figures:
+                    output_file = os.path.join(output_dir, key + '_align_ref.pdf')
+                    plt.savefig(output_file)
+                    log.info(f" Plot saved in {output_file}")
+                plt.show()
+                plt.close(fig)'''
+
+
