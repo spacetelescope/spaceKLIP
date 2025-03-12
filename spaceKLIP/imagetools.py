@@ -153,15 +153,16 @@ class ImageTools():
 
         Parameters
         ----------
-        index : int or list of int or dict of list of list of int, optional
+        index : int or list of int or dict of dict of list of int or str, optional
             Indices (0-indexed) of the frames to be removed. If int, then only
             a single frame will be removed from each observation. If list of
             int, then multiple frames can be removed from each observation. If
-            dict of list of list of int, then the dictionary keys must match
-            the keys of the observations database, and the number of entries in
-            the lists must match the number of observations in the
-            corresponding concatenation. Then, a different list of int can be
-            used for each individual observation to remove different frames.
+            dict of dict of list of int or str, then the first dictionary keys must match
+            the keys of the observations database, the second dictionary key must matche the
+            fitsfile name (withut the .fits) from where you want to remove the frames.
+            Then, a different list of int can be
+            used for each individual observation to remove different frames, or a string of two numbers separated
+            by a - symbol can be parsed instead to generate a consecutive list of ints between those two numbers.
             The default is [0].
         types : list of str, optional
             List of data types from which the frames shall be removed. The
@@ -206,10 +207,28 @@ class ImageTools():
                     # Remove frames.
                     head, tail = os.path.split(fitsfile)
                     log.info('  --> Frame removal: ' + tail)
-                    try:
-                        index_temp = index[key][j]
-                    except:
+                    if isinstance(index, dict):
+                        if tail.split('.fits')[0] in index[key].keys():
+                            index_temp = index[key][tail.split('.fits')[0]]
+                            if isinstance(index_temp, str):
+                              index_temp = np.arange(int(index_temp.split('-')[0]),int(index_temp.split('-')[1]),1)
+                        else:
+                            log.info('  --> Frame removal: frames not in selected dataset to remove. Skipping.')
+                            nints = data.shape[0]
+
+                            # Write FITS file and PSF mask.
+                            head_pri['NINTS'] = nints
+                            fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                                    imshifts, maskoffs)
+                            maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                            # Update spaceKLIP database.
+                            self.database.update_obs(key, j, fitsfile, maskfile, nints=nints)
+                            continue
+
+                    elif isinstance(index, list):
                         index_temp = index.copy()
+
                     log.info('  --> Frame removal: removing frame(s) ' + str(index_temp))
                     data = np.delete(data, index_temp, axis=0)
                     erro = np.delete(erro, index_temp, axis=0)
