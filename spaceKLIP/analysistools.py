@@ -987,7 +987,22 @@ class AnalysisTools():
         None.
         
         """
-        
+
+        def plot_traces(fma, nburn=100, labels=[r"x", r"y", r"$\alpha$", "l"], path='/.traces.pdf'):
+            fig, ax = plt.subplots(len(labels), 1, figsize=(20, 20), sharex=True)
+            samples = fma.sampler.get_chain() # Shape: (n_steps, n_walkers, n_dim)
+            n_walkers = samples.shape[1]
+            for elno in range(len(labels)):
+                for i in range(n_walkers):
+                    ax[elno].plot(samples[:, i, elno], alpha=0.5)
+                    ax[elno].axvline(nburn, color='k', linestyle='--')
+                ax[elno].set_ylabel(f"{labels[elno]}")
+            ax[elno].set_xlabel("Step number")
+            plt.savefig(path)
+            plt.show()
+            plt.close()
+            return fig
+
         # Check input.
         kwargs_temp = {}
         
@@ -1111,124 +1126,124 @@ class AnalysisTools():
                 else:
                     split_fit = False
 
-                if split_fit:
-                    if not all(x in kwargs.keys() for x in ['sigma_xguess', 'sigma_yguess',  'scale_guess', 'theta_guess']):
-                        gauss_param_guesses = [0.3,0.3,0,0]
-                    else:
-                        gauss_param_guesses = [kwargs['sigma_xguess'], kwargs['sigma_yguess'], kwargs['scale_guess'], kwargs['theta_guess']]
-
-                    # Loop through companions.
-                    tab = Table(names=('ID',
-                                       'RA',
-                                       'RA_ERR',
-                                       'DEC',
-                                       'DEC_ERR',
-                                       'FLUX_JY',
-                                       'FLUX_JY_ERR',
-                                       'FLUX_SI',
-                                       'FLUX_SI_ERR',
-                                       'FLUX_SI_ALT',
-                                       'FLUX_SI_ALT_ERR',
-                                       'CON',
-                                       'CON_ERR',
-                                       'DELMAG',
-                                       'DELMAG_ERR',
-                                       'APPMAG',
-                                       'APPMAG_ERR',
-                                       'MSTAR',
-                                       'MSTAR_ERR',
-                                       'SNR',
-                                       'LN(Z/Z0)',
-                                       'TP_CORONMSK',
-                                       'TP_COMSUBST',
-                                       'FITSFILE',
-                                       'SIGMA_X',
-                                       'SIGMA_X_ERROR',
-                                       'SIGMA_Y',
-                                       'SIGMA_Y_ERROR',
-                                       'THETA',
-                                       'THETA_ERROR'),
-                                dtype=('int',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'object',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float'))
-                else:
-                    # Loop through companions.
-                    tab = Table(names=('ID',
-                                       'RA',
-                                       'RA_ERR',
-                                       'DEC',
-                                       'DEC_ERR',
-                                       'FLUX_JY',
-                                       'FLUX_JY_ERR',
-                                       'FLUX_SI',
-                                       'FLUX_SI_ERR',
-                                       'FLUX_SI_ALT',
-                                       'FLUX_SI_ALT_ERR',
-                                       'CON',
-                                       'CON_ERR',
-                                       'DELMAG',
-                                       'DELMAG_ERR',
-                                       'APPMAG',
-                                       'APPMAG_ERR',
-                                       'MSTAR',
-                                       'MSTAR_ERR',
-                                       'SNR',
-                                       'LN(Z/Z0)',
-                                       'TP_CORONMSK',
-                                       'TP_COMSUBST',
-                                       'FITSFILE'),
-                                dtype=('int',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'object'))
+                # Loop through companions.
                 for k in range(len(companions)):
+                    if split_fit:
+                        if not all(x in kwargs.keys() for x in ['sigma_xguess', 'sigma_yguess',  'scale_guess', 'theta_guess']):
+                            gauss_param_guesses = [0.3,0.3,0,0]
+                        else:
+                            gauss_param_guesses = [kwargs['sigma_xguess'], kwargs['sigma_yguess'], kwargs['scale_guess'], kwargs['theta_guess']]
+
+                        tab = Table(names=('ID',
+                                           'RA',
+                                           'RA_ERR',
+                                           'DEC',
+                                           'DEC_ERR',
+                                           'FLUX_JY',
+                                           'FLUX_JY_ERR',
+                                           'FLUX_SI',
+                                           'FLUX_SI_ERR',
+                                           'FLUX_SI_ALT',
+                                           'FLUX_SI_ALT_ERR',
+                                           'CON',
+                                           'CON_ERR',
+                                           'DELMAG',
+                                           'DELMAG_ERR',
+                                           'APPMAG',
+                                           'APPMAG_ERR',
+                                           'MSTAR',
+                                           'MSTAR_ERR',
+                                           'SNR',
+                                           'LN(Z/Z0)',
+                                           'TP_CORONMSK',
+                                           'TP_COMSUBST',
+                                           'FITSFILE',
+                                           'SIGMA_X',
+                                           'SIGMA_X_ERROR',
+                                           'SIGMA_Y',
+                                           'SIGMA_Y_ERROR',
+                                           'THETA',
+                                           'THETA_ERROR'),
+                                    dtype=('int',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'object',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float'))
+                    else:
+                        # Loop through companions.
+                        tab = Table(names=('ID',
+                                           'RA',
+                                           'RA_ERR',
+                                           'DEC',
+                                           'DEC_ERR',
+                                           'FLUX_JY',
+                                           'FLUX_JY_ERR',
+                                           'FLUX_SI',
+                                           'FLUX_SI_ERR',
+                                           'FLUX_SI_ALT',
+                                           'FLUX_SI_ALT_ERR',
+                                           'CON',
+                                           'CON_ERR',
+                                           'DELMAG',
+                                           'DELMAG_ERR',
+                                           'APPMAG',
+                                           'APPMAG_ERR',
+                                           'MSTAR',
+                                           'MSTAR_ERR',
+                                           'SNR',
+                                           'LN(Z/Z0)',
+                                           'TP_CORONMSK',
+                                           'TP_COMSUBST',
+                                           'FITSFILE'),
+                                    dtype=('int',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'float',
+                                           'object'))
                     output_dir_comp = os.path.join(output_dir_kl, 'C%.0f' % (k + 1))
                     if not os.path.exists(output_dir_comp):
                         os.makedirs(output_dir_comp)
@@ -1663,6 +1678,9 @@ class AnalysisTools():
                                 fig.savefig(path)
                             plt.show()
                             plt.close(fig)
+                            path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                                subsections) + '_' + key + '-traces_c%.0f' % (k + 1) + '.pdf')
+                            fig=plot_traces(fma,nburn=nburn, path=path)
 
                             # Write the MCMC fit results into a table.
                             flux_jy = fma.fit_flux.bestfit * guess_flux
@@ -1989,14 +2007,14 @@ class AnalysisTools():
                     if subtract:
                         dataset = dataset_orig
 
-                # Update source database.
-                self.database.update_src(key, j, tab)
+                    # Update source database.
+                    self.database.update_src(key, j, tab)
 
-                # Save the results table.
-                output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                    subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
-                tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
-                print(f'Table saved to {output_ecsv_path}')
+                    # Save the results table.
+                    output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                        subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                    tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
+                    log.info(f'Table saved to {output_ecsv_path}')
         pass
 
 def loss_function(params,
