@@ -17,7 +17,8 @@ import numpy as np
 import copy
 import json
 import pysiaf
-import webbpsf, webbpsf_ext
+import stpsf as webbpsf
+import webbpsf_ext
 
 from astropy.table import Table
 from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
