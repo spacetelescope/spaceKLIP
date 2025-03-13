@@ -208,14 +208,27 @@ class ImageTools():
                     head, tail = os.path.split(fitsfile)
                     log.info('  --> Frame removal: ' + tail)
                     if isinstance(index, dict):
-                        if tail.split('.fits')[0] in index[key].keys():
-                            index_temp = index[key][tail.split('.fits')[0]]
-                            if isinstance(index_temp, str):
-                              index_temp = np.arange(int(index_temp.split('-')[0]),int(index_temp.split('-')[1]),1)
+                        if key in index.keys():
+                            if tail.split('.fits')[0] in index[key].keys():
+                                index_temp = index[key][tail.split('.fits')[0]]
+                                if isinstance(index_temp, str):
+                                  index_temp = np.arange(int(index_temp.split('-')[0]),int(index_temp.split('-')[1]),1)
+                            else:
+                                log.info('  --> Frame removal: frames not in selected dataset to remove. Skipping.')
+                                nints = data.shape[0]
+
+                                # Write FITS file and PSF mask.
+                                head_pri['NINTS'] = nints
+                                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                                        imshifts, maskoffs)
+                                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                                # Update spaceKLIP database.
+                                self.database.update_obs(key, j, fitsfile, maskfile, nints=nints)
+                                continue
                         else:
                             log.info('  --> Frame removal: frames not in selected dataset to remove. Skipping.')
                             nints = data.shape[0]
-
                             # Write FITS file and PSF mask.
                             head_pri['NINTS'] = nints
                             fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
