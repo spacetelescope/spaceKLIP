@@ -26,7 +26,6 @@ import os
 import warnings
 import glob
 import re
-import mocapy
 import pandas as pd
 from astropy.io import fits
 from spaceKLIP import mast
@@ -236,6 +235,8 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     #       - slightly wrong SIMBAD names
     # - logic for if 'HAS_DISK','HAS_CANDS' have a mix of 'unknown' and bool values
     
+    import mocapy
+
     # Check that you won't accidentally overwrite an existing csv.
     outpath = os.path.join(odir,'ref_lib.csv')
     if os.path.exists(outpath):
