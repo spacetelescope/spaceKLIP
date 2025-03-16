@@ -2212,7 +2212,8 @@ class ImageTools():
                     except:
                         fact_temp = fact
                     if self.database.obs[key]['TELESCOP'][j] == 'JWST':
-                        if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                        # Anything with a Lyot mask shoudl have diam=5.2
+                        if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON', 'NRC_TACONFIRM', 'NRC_TACQ']:
                             diam = 5.2
                         else:
                             diam = JWST_CIRCUMSCRIBED_DIAMETER

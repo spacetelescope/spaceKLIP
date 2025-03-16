@@ -208,7 +208,7 @@ class AnalysisTools():
                 iwa = 1  # pix
                 owa = data.shape[1] // 2  # pix
                 if self.database.red[key]['TELESCOP'][j] == 'JWST':
-                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON', 'NRC_TACONFIRM', 'NRC_TACQ']:
                         diam = 5.2
                     else:
                         diam = JWST_CIRCUMSCRIBED_DIAMETER
@@ -564,7 +564,7 @@ class AnalysisTools():
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
                 pxsc_rad = pxsc_arcsec / 3600. / 180. * np.pi  # rad
                 if self.database.red[key]['TELESCOP'][j] == 'JWST':
-                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON', 'NRC_TACONFIRM', 'NRC_TACQ']:
                         diam = 5.2
                     else:
                         diam = JWST_CIRCUMSCRIBED_DIAMETER
