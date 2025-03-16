@@ -44,7 +44,7 @@ import pyklip.fakes as fakes
 from spaceKLIP.psf import get_offsetpsf
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
 from pyklip.instruments.JWST import JWSTData
-from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
+from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 from astropy.io import fits
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 import scipy.ndimage

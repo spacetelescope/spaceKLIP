@@ -14,7 +14,7 @@ import numpy as np
 
 import json
 import pysiaf
-import webbpsf
+import stpsf as webbpsf
 
 from scipy.ndimage import shift
 

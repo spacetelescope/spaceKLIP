@@ -13,7 +13,8 @@ import sys
 import astropy.io.fits as pyfits
 import numpy as np
 
-import webbpsf, webbpsf_ext
+import stpsf as webbpsf
+import webbpsf_ext
 from webbpsf_ext import synphot_ext as Sz
 
 from pyklip.klip import rotate as nanrotate
