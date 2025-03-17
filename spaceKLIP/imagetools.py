@@ -1274,6 +1274,7 @@ class ImageTools():
                        medfilt_kwargs={},
                        interp2d_kwargs={},
                        types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
+                       çƒ=True,
                        subdir='bpcleaned',
                        restrict_to=None):
         """
@@ -1328,7 +1329,8 @@ class ImageTools():
                 Kernel size of the median filter to be used. The default is 4.
 
             The default is {}.
-
+        fix_nans: bool, optional
+            add NaNs positions in the data frame to the list o bad pixels to fix. The default is True.
         types : list of str, optional
             List of data types for which bad pixels shall be identified and
             fixed. The default is ['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA',
@@ -1377,7 +1379,10 @@ class ImageTools():
                 pxdq_temp = pxdq.copy()
 
                 # Don't want to clean anything that isn't bad or is a non-science pixel
-                pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1)) & np.logical_not(pxdq_temp & 512 == 512)
+                if fix_nans:
+                    pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1)) & np.logical_not(pxdq_temp & 512 == 512)
+                else:
+                    pxdq_temp = (pxdq_temp & 1 == 1) & np.logical_not(pxdq_temp & 512 == 512)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -3386,7 +3391,7 @@ class ImageTools():
                 dist *= self.database.obs[key]['PIXSCALE'][j]*1000  # mas
                 if j == ww_sci[0]:
                     dist = dist[1:]
-                log.info('  --> Align frames: median required shift = %.2f mas' % np.median(dist))
+                log.info('  --> Align frames: median required shift = %.2f mas, std =  %.2f mas ' % (np.median(dist),np.std(dist)))
                 if self.database.obs[key]['TELESCOP'][j] == 'JWST':
                     ww = (dist < 1e-5) | (dist > 100.)
                 else:
