@@ -2688,6 +2688,7 @@ class ImageTools():
                         kwargs={},
                         highpass=False,
                         recenter_NICAM_with_MCMC=False,
+                        save_figures=True,
                         subdir='recentered'):
         """
         Recenter frames so that the host star position is data.shape // 2. For
@@ -2726,6 +2727,8 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'recentered'.
+        save_figures : bool, optional
+            Save the plots in a PDF?
 
         Returns
         -------
@@ -2745,6 +2748,7 @@ class ImageTools():
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
+        database_temp = deepcopy(self.database.obs)
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Concatenation ' + key)
@@ -2825,7 +2829,7 @@ class ImageTools():
                                 offsetpsf_func = JWST_PSF(apername,
                                                           filt,
                                                           date=date,
-                                                          fov_pix=65,
+                                                          fov_pix=data.shape[-1],
                                                           oversample=2,
                                                           sp=None,
                                                           use_coeff=False)
@@ -2966,6 +2970,99 @@ class ImageTools():
                                                   offsetpsf_func=None, vmin=0, vmax=5000,
                                                   vminres=None, vmaxres=None, mask=True, binarity=MCMCTools.binarity,
                                                   path2fitsfile=output_dir+'/'+self.database.obs[key]['FITSFILE'][j].split('/')[-1].split('.fits')[0])
+
+            if recenter_NICAM_with_MCMC:
+                # Plot science frame alignment.
+                colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                fig = plt.figure(figsize=(6.4, 4.8))
+                ax = plt.gca()
+                for index, j in enumerate(ww_sci):
+                    ax.scatter(shifts_all[index][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                               shifts_all[index][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                               s=5, color=colors[index % len(colors)], marker='o',
+                               label='PA = %.0f deg' % self.database.obs[key]['ROLL_REF'][j])
+                ax.axhline(0., color='gray', lw=1,
+                           zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
+                ax.axvline(0., color='gray', lw=1, zorder=-1)
+
+                ax.set_aspect('equal')
+                xlim = ax.get_xlim()
+                ylim = ax.get_ylim()
+                xrng = xlim[1] - xlim[0]
+                yrng = ylim[1] - ylim[0]
+                if xrng > yrng:
+                    ax.set_xlim(np.mean(xlim) - xrng, np.mean(xlim) + xrng)
+                    ax.set_ylim(np.mean(ylim) - xrng, np.mean(ylim) + xrng)
+                else:
+                    ax.set_xlim(np.mean(xlim) - yrng, np.mean(xlim) + yrng)
+                    ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
+                ax.set_xlabel('x-shift [mas]')
+                ax.set_ylabel('y-shift [mas]')
+                ax.legend(loc='upper right')
+                ax.set_title(
+                    f'Science frame alignment\nfor {self.database.obs[key]["TARGPROP"][ww_sci[0]]}, {self.database.obs[key]["FILTER"][ww_sci[0]]}')
+                if save_figures:
+                    output_file = os.path.join(output_dir, key + '_MCMC_aligned_sci.pdf')
+                    plt.savefig(output_file)
+                    log.info(f" Plot saved in {output_file}")
+                plt.show()
+                plt.close(fig)
+
+                # Plot reference frame alignment.
+                if len(ww_ref) > 0:
+                    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                    fig = plt.figure(figsize=(6.4, 4.8))
+                    ax = plt.gca()
+                    seen = []
+                    reps = []
+                    syms = ['o', 'v', '^', '<', '>'] * (1 + len(ww_ref) // 5)
+                    add = len(ww_sci)
+                    for index, j in enumerate(ww_ref):
+                        this = '%.3f_%.3f' % (database_temp[key]['XOFFSET'][j], database_temp[key]['YOFFSET'][j])
+                        if this not in seen:
+                            ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                       shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                       s=5, color=colors[len(seen) % len(colors)], marker=syms[0],
+                                       label='dither %.0f' % (len(seen) + 1))
+                            ax.hlines((-database_temp[key]['YOFFSET'][j] + yoffset) * 1000,
+                                      (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 - 4.,
+                                      (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 + 4.,
+                                      color=colors[len(seen) % len(colors)], lw=1)
+                            ax.vlines((-database_temp[key]['XOFFSET'][j] + xoffset) * 1000,
+                                      (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 - 4.,
+                                      (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 + 4.,
+                                      color=colors[len(seen) % len(colors)], lw=1)
+                            seen += [this]
+                            reps += [1]
+                        else:
+                            ww = np.where(np.array(seen) == this)[0][0]
+                            ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                       shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                       s=5, color=colors[ww % len(colors)], marker=syms[reps[ww]])
+                            reps[ww] += 1
+                    ax.set_aspect('equal')
+                    xlim = ax.get_xlim()
+                    ylim = ax.get_ylim()
+                    xrng = xlim[1] - xlim[0]
+                    yrng = ylim[1] - ylim[0]
+                    if xrng > yrng:
+                        ax.set_xlim(np.mean(xlim) - xrng, np.mean(xlim) + xrng)
+                        ax.set_ylim(np.mean(ylim) - xrng, np.mean(ylim) + xrng)
+                    else:
+                        ax.set_xlim(np.mean(xlim) - yrng, np.mean(xlim) + yrng)
+                        ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
+                    ax.set_xlabel('x-shift [mas]')
+                    ax.set_ylabel('y-shift [mas]')
+                    ax.legend(loc='upper right', fontsize='small')
+                    ax.set_title(
+                        f'Reference frame alignment\n showing {len(ww_ref)} PSF refs for {self.database.obs[key]["FILTER"][ww_ref[0]]}')
+                    if save_figures:
+                        output_file = os.path.join(output_dir, key + '_MCMC_aligned_ref.pdf')
+                        plt.savefig(output_file)
+                        log.info(f" Plot saved in {output_file}")
+                    plt.show()
+                    plt.close(fig)
+
 
         pass
 
