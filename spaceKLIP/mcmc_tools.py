@@ -152,6 +152,10 @@ class MCMCTools():
             self.thin = kwargs['thin']
         else:
             self.thin = None
+        if 'save_figures' in kwargs.keys():
+            self.save_figures = kwargs['save_figures']
+        else:
+            self.save_figures = True
         pass
 
     def extract_subarray(self, data, center_x, center_y, size=3, flat_and_skip_center=True):
@@ -235,7 +239,7 @@ class MCMCTools():
             divider2 = make_axes_locatable(ax[2])
             cax2 = divider2.append_axes('right', size='5%', pad=0.05)
             fig.colorbar(im2, cax=cax2, orientation='vertical')
-            if path2fitsfile is not None:
+            if self.save_figures:
                 plt.savefig(path2fitsfile+'_residuals.png', bbox_inches='tight')
                 plt.close()
             else:
@@ -398,7 +402,7 @@ class MCMCTools():
                     cax2 = divider2.append_axes('right', size='5%', pad=0.05)
                     fig.colorbar(im2, cax=cax2, orientation='vertical')
                     # plt.tight_layout()
-                    if path2fitsfile is not None:
+                    if self.save_figures:
                         plt.savefig(path2fitsfile, bbox_inches='tight')
                         plt.close()
                     else:
@@ -515,6 +519,7 @@ class MCMCTools():
                 ax[elno].set_ylabel(f"{labels[elno]}")
             ax[elno].set_xlabel("Step number")
             plt.savefig(filename + '_traces.png')
+            plt.close()
 
         for i in range(ndim):
             mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
