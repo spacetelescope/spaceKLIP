@@ -1274,7 +1274,7 @@ class ImageTools():
                        medfilt_kwargs={},
                        interp2d_kwargs={},
                        types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
-                       çƒ=True,
+                       fix_nans=True,
                        subdir='bpcleaned',
                        restrict_to=None):
         """
