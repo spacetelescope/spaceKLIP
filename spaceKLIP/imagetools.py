@@ -959,7 +959,8 @@ class ImageTools():
                         gradient_kwargs={},
                         types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                         subdir='bpfound',
-                        restrict_to=None):
+                        restrict_to=None,
+                        min_size = 5):
         """
         Identify bad pixels for cleaning
 
@@ -1011,12 +1012,46 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'bpfound'.
+        min_size: int, optional
+            minimum number of pixels required to flag cluster of NaNs pixels.
+            The default is 5.
 
         Returns
         -------
         None
 
         """
+
+        def nan_clusters_mask(image, min_size):
+            """
+            Create a 3D boolean mask where NaN clusters larger than min_size are marked as True,
+            but only checking within each 2D slice (ignoring connections along the Z-axis).
+
+            Parameters:
+            - image: 3D numpy array (with NaNs)
+            - min_size: int, minimum cluster size to consider
+
+            Returns:
+            - 3D boolean numpy array with the same shape as input
+            """
+            # Initialize the output mask (same shape as image)
+            output_mask = np.zeros_like(image, dtype=bool)
+
+            # Process each 2D slice independently
+            for z in range(image.shape[0]):  # Loop over the first axis (Z)
+                nan_mask = np.isnan(image[z])  # Extract NaN mask for this slice
+                labeled_array, num_features = scipy.ndimage.label(nan_mask)  # Label clusters
+
+                slices = scipy.ndimage.find_objects(labeled_array)  # Get bounding boxes for clusters
+
+                for i, sl in enumerate(slices):
+                    if sl is not None:
+                        cluster_mask = (labeled_array[sl] == (i + 1))  # Mask for this cluster
+                        if np.sum(cluster_mask) > min_size:  # Only keep clusters larger than min_size
+                            output_mask[z][sl][cluster_mask] = True
+
+            return output_mask
+
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
@@ -1040,6 +1075,7 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nan_mask = nan_clusters_mask(data, 5)
 
                 if set_dq_zero:  # set_dq_zero
                     # Make copy of DQ array filled with zeros, i.e. all good pixels
@@ -1092,6 +1128,12 @@ class ImageTools():
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts,
                                         maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                hdu = fits.PrimaryHDU(data=nan_mask.astype(int))
+                maskfile = fitsfile.replace('.fits', '_nanmask.fits')
+                hdul = fits.HDUList([hdu])
+                hdul.writeto(maskfile, output_verify='fix', overwrite=True)
+                hdul.close()
 
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
