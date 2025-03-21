@@ -431,7 +431,8 @@ class Database():
                                'ROLL_REF',
                                'BLURFWHM',
                                'FITSFILE',
-                               'MASKFILE'),
+                               'MASKFILE',
+                               'NANFILE'),
                         dtype=('object',
                                'object',
                                'object',
@@ -465,6 +466,7 @@ class Database():
                                'float',
                                'float',
                                'object',
+                               'object',
                                'object'))
             for j in np.append(ww_sci, ww_ref):
                 if j in ww_sci:
@@ -493,7 +495,7 @@ class Database():
                         else:
                             tt = 'REF_BG'
                 maskfile = allpaths[ww][j].replace('.fits', '_psfmask.fits')
-                if not os.path.exists(maskfile):    
+                if not os.path.exists(maskfile):
                     if EXP_TYPE[ww][j] == 'NRC_CORON':
                     
                         config_stpipe_log(suppress=True)  # Suppress logging.
@@ -515,6 +517,11 @@ class Database():
                         maskfile = os.path.join(maskbase, maskpath)
                     else:
                         maskfile = 'NONE'
+
+                nanfile = allpaths[ww][j].replace('.fits', '_nanmask.fits')
+                if not os.path.exists(nanfile):
+                    nanfile = 'NONE'
+
 
                 tab.add_row((tt,
                              EXP_TYPE[ww][j],
@@ -549,7 +556,8 @@ class Database():
                              ROLL_REF[ww][j] - V3I_YANG[ww][j] * VPARITY[ww][j],
                              BLURFWHM[ww][j],
                              allpaths[ww][j],
-                             maskfile))
+                             maskfile,
+                             nanfile))
             self.obs[HASH_unique[i]] = tab.copy()
             del tab
             
