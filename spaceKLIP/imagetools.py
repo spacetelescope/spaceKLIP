@@ -347,7 +347,7 @@ class ImageTools():
                 nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile nanmaskfile=nanmaskfile, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile, crpix1=crpix1, crpix2=crpix2)
 
         pass
 
