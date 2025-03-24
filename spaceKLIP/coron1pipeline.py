@@ -892,6 +892,7 @@ def run_obs(database,
         # Loop through FITS files.
         nfitsfiles = len(database.obs[key])
         jtervals = trange(nfitsfiles, desc='FITS files', leave=False) if quiet else range(nfitsfiles)
+        fitsout_path_list=[]
         for j in jtervals:
 
             # Skip non-stage 0 files.
@@ -930,8 +931,8 @@ def run_obs(database,
                 if not this_skip:
                     if steps['mask_groups']['mask_method'] == 'basic':
                         steps = prepare_group_masking_basic(steps, 
-                                                            database.obs[key], 
-                                                            quiet)
+                                                            database.obs[key],
+                                                            quiet=quiet)
                     elif steps['mask_groups']['mask_method'] == 'advanced':
                         fitstype = database.obs[key]['TYPE'][j]
                         steps = prepare_group_masking_advanced(steps, 
@@ -967,7 +968,7 @@ def run_obs(database,
                 steps['mask_groups']['skip'] = False
                 skip_revert = False
 
-            if (j == jtervals[-1]) and (groupmaskflag == 1):
+            if (j == jtervals[-1]) and (groupmaskflag == 1) and not this_skip:
                 '''This is the last file for this concatenation, and the groupmaskflag has been
                 set. This means we need to reset the mask_array back to original state, 
                 which was that it didn't exist, so that the routine is rerun. '''
@@ -979,11 +980,14 @@ def run_obs(database,
                     del steps['mask_groups']['maxgrps_faint']
                     del steps['mask_groups']['maxgrps_bright']
 
-            
+            fitsout_path_list.append(fitsout_path)
+            # # Update spaceKLIP database.
+            # database.update_obs(key, j, fitsout_path)
+        for j in jtervals:
             # Update spaceKLIP database.
-            database.update_obs(key, j, fitsout_path)
+            database.update_obs(key, j, fitsout_path_list[j])
 
-def prepare_group_masking_basic(steps, observations, quiet=False):
+def prepare_group_masking_basic(steps, observations, star_center=None, quiet=False):
 
     if 'mask_array' not in steps['mask_groups']:
         '''First time in the file loop, or groups_to_mask has been preset, 
@@ -1013,8 +1017,11 @@ def prepare_group_masking_basic(steps, observations, quiet=False):
                     # Subtract a median so we focus on brightest pixels
                     sci_frame -= np.nanmedian(sci_frame, axis=(1,2), keepdims=True)
 
-                    # Crop around CRPIX
-                    crpix_x, crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    if not steps['mask_groups']['star_center']:
+                        # Crop around CRPIX
+                        crpix_x, crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    else:
+                        crpix_x, crpix_y = steps['mask_groups']['star_center']
                     xlo = int(crpix_x) - crop
                     xhi = int(crpix_x) + crop
                     ylo = int(crpix_y) - crop
@@ -1034,8 +1041,11 @@ def prepare_group_masking_basic(steps, observations, quiet=False):
                     # Subtract a median so we focus on brightest pixels
                     ref_cube -= np.nanmedian(ref_cube, axis=(2,3), keepdims=True)
 
-                    # Crop around CRPIX
-                    crpix_x, crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    if not steps['mask_groups']['star_center']:
+                        # Crop around CRPIX
+                        crpix_x, crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    else:
+                        crpix_x, crpix_y = steps['mask_groups']['star_center']
                     xlo = int(crpix_x) - crop
                     xhi = int(crpix_x) + crop
                     ylo = int(crpix_y) - crop
@@ -1162,13 +1172,19 @@ def prepare_group_masking_advanced(steps, observations, refpath, reftype, quiet=
             if observations['TYPE'][j] == 'SCI':
                 with fits.open(os.path.abspath(observations['FITSFILE'][j])) as hdul:
                     sci_frame = hdul['SCI'].data[:, -1, :, :].astype(float)
-                    sci_crpix_x, sci_crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    if not steps['mask_groups']['star_center']:
+                        sci_crpix_x, sci_crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    else:
+                        sci_crpix_x, sci_crpix_y = steps['mask_groups']['star_center']
                     sci_frames.append(sci_frame)
                     sci_crpixs.append([sci_crpix_x, sci_crpix_y])
             elif observations['TYPE'][j] == 'REF':
                 with fits.open(os.path.abspath(observations['FITSFILE'][j])) as hdul:
                     ref_cube = hdul['SCI'].data.astype(float)
-                    ref_crpix_x, ref_crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    if not steps['mask_groups']['star_center']:
+                        ref_crpix_x, ref_crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    else:
+                        ref_crpix_x, ref_crpix_y = steps['mask_groups']['star_center']
                     ref_cubes.append(ref_cube)
                     ref_crpixs.append([ref_crpix_x, ref_crpix_y])
 
