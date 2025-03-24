@@ -1128,12 +1128,7 @@ class ImageTools():
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts,
                                         maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
-
-                hdu = fits.PrimaryHDU(data=nanmask.astype(int))
-                nanmaskfile = fitsfile.replace('.fits', '_nanmask.fits')
-                hdul = fits.HDUList([hdu])
-                hdul.writeto(nanmaskfile, output_verify='fix', overwrite=True)
-                hdul.close()
+                nanmaskfile = ut.write_msk(fitsfile, nanmask.astype(int), fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
@@ -1485,7 +1480,7 @@ class ImageTools():
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile)
 
         pass
 
