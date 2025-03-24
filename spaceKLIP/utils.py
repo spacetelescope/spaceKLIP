@@ -276,7 +276,8 @@ def read_msk(maskfile):
 
 def write_msk(maskfile,
               mask,
-              fitsfile):
+              fitsfile,
+              mask_ext = '_psfmask.fits'):
     """
     Write a PSF mask to a FITS file.
     
@@ -300,7 +301,7 @@ def write_msk(maskfile,
     if mask is not None:
         hdul = pyfits.open(maskfile)
         hdul['SCI'].data = mask
-        maskfile = fitsfile.replace('.fits', '_psfmask.fits')
+        maskfile = fitsfile.replace('.fits', mask_ext)
         hdul.writeto(maskfile, output_verify='fix', overwrite=True)
         hdul.close()
     else:
