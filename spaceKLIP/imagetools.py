@@ -199,6 +199,9 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
+
                 nints = self.database.obs[key]['NINTS'][j]
 
                 # Skip file types that are not in the list of types.
@@ -256,9 +259,10 @@ class ImageTools():
                 head_pri['NINTS'] = nints
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, nints=nints)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile, nints=nints)
 
         pass
 
@@ -313,6 +317,9 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
+
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
                 crpix2 = self.database.obs[key]['CRPIX2'][j]
 
@@ -337,9 +344,10 @@ class ImageTools():
                 head_sci['CRPIX2'] = crpix2
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile nanmaskfile=nanmaskfile, crpix1=crpix1, crpix2=crpix2)
 
         pass
 
@@ -399,6 +407,7 @@ class ImageTools():
                 nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 nanmask = ut.read_msk(nanmaskfile)
+
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
                 crpix2 = self.database.obs[key]['CRPIX2'][j]
 
@@ -475,9 +484,10 @@ class ImageTools():
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
-                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 nanmask = ut.read_msk(nanmaskfile)
+
                 nints = self.database.obs[key]['NINTS'][j]
                 effinttm = self.database.obs[key]['EFFINTTM'][j]
 
@@ -579,6 +589,8 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -638,10 +650,10 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile)
-
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
     def subtract_background_godoy(self,
                                   types=['SCI', 'REF'],
@@ -905,6 +917,8 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
 
                 wwtype = self.database.obs[key]['TYPE'][j]
                 if wwtype == 'SCI':
@@ -948,9 +962,10 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -1251,6 +1266,8 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -1303,9 +1320,10 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -1410,7 +1428,6 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
-
                 nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 nanmask = ut.read_msk(nanmaskfile)
 
@@ -1490,7 +1507,7 @@ class ImageTools():
                 nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -2264,6 +2281,8 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
 
                 # Skip file types that are not in the list of types.
                 fact_temp = None
@@ -2316,12 +2335,13 @@ class ImageTools():
                     head_pri['BLURFWHM'] = fact_temp * np.sqrt(8. * np.log(2.)) # Factor to convert from sigma to FWHM
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
                 if fact_temp is None:
-                    self.database.update_obs(key, j, fitsfile, maskfile, blurfwhm=np.nan)
+                    self.database.update_obs(key, j, fitsfile, maskfile,  nanmaskfile=nanmaskfile, blurfwhm=np.nan)
                 else:
-                    self.database.update_obs(key, j, fitsfile, maskfile, blurfwhm=fact_temp * np.sqrt(8. * np.log(2.)))
+                    self.database.update_obs(key, j, fitsfile, maskfile,  nanmaskfile=nanmaskfile, blurfwhm=fact_temp * np.sqrt(8. * np.log(2.)))
 
         pass
 
@@ -2375,6 +2395,8 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
 
                 # Skip file types that are not in the list of types.
                 size_temp = None
@@ -2402,9 +2424,10 @@ class ImageTools():
                     head_pri['HPFSIZE'] = size_temp
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -2821,6 +2844,8 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
 
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
@@ -3012,8 +3037,10 @@ class ImageTools():
                 head_sci['CRPIX2'] = crpix2
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
+
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
 
                 if recenter_NICAM_with_MCMC:
                     MCMCTools.plot_data_model_residual(data, apername=apername, filt=filt, date=date,
@@ -3428,6 +3455,9 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
+
                 if mask_override is not None:
                     if mask_override == 'ann':
                         mask_circ = create_annulus_mask(data[0].shape[0], data[0].shape[1], radius=msk_shp)
@@ -3557,9 +3587,10 @@ class ImageTools():
                 head_sci['CRPIX2'] = crpix2
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+                self.database.update_obs(key, j, fitsfile, maskfile,  nanmaskfile=nanmaskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
 
             # Plot science frame alignment.
             colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
