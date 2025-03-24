@@ -432,7 +432,7 @@ class Database():
                                'BLURFWHM',
                                'FITSFILE',
                                'MASKFILE',
-                               'NANFILE'),
+                               'NANMASKFILE'),
                         dtype=('object',
                                'object',
                                'object',
@@ -495,6 +495,7 @@ class Database():
                         else:
                             tt = 'REF_BG'
                 maskfile = allpaths[ww][j].replace('.fits', '_psfmask.fits')
+                nanmaskfile = allpaths[ww][j].replace('.fits', '_nanmask.fits')
                 if not os.path.exists(maskfile):
                     if EXP_TYPE[ww][j] == 'NRC_CORON':
                     
@@ -518,9 +519,9 @@ class Database():
                     else:
                         maskfile = 'NONE'
 
-                nanfile = allpaths[ww][j].replace('.fits', '_nanmask.fits')
-                if not os.path.exists(nanfile):
-                    nanfile = 'NONE'
+                nanmaskfile = allpaths[ww][j].replace('.fits', '_nanmask.fits')
+                if not os.path.exists(nanmaskfile):
+                    nanmaskfile = 'NONE'
 
 
                 tab.add_row((tt,
@@ -557,7 +558,7 @@ class Database():
                              BLURFWHM[ww][j],
                              allpaths[ww][j],
                              maskfile,
-                             nanfile))
+                             nanmaskfile))
             self.obs[HASH_unique[i]] = tab.copy()
             del tab
             
@@ -1132,7 +1133,7 @@ class Database():
                    index,
                    fitsfile,
                    maskfile=None,
-                   nanfile=None,
+                   nanmaskfile=None,
                    nints=None,
                    effinttm=None,
                    xoffset=None,
@@ -1155,7 +1156,7 @@ class Database():
         maskfile : path, optional
             New PSF mask path for the observation to be updated. The default is
             None.
-        nanfile : path, optional
+        nanmaskfile : path, optional
             New NaNs mask path for the observation to be updated. The default is
             None.
         nints : int, optional
@@ -1218,8 +1219,8 @@ class Database():
         self.obs[key]['FITSFILE'][index] = fitsfile
         if maskfile is not None:
             self.obs[key]['MASKFILE'][index] = maskfile
-        if nanfile is not None:
-            self.obs[key]['NANFILE'][index] = nanfile
+        if nanmaskfile is not None:
+            self.obs[key]['NANMASKFILE'][index] = nanmaskfile
         if update_pxar:
             try:
                 pxar = pyfits.getheader(self.obs[key]['FITSFILE'][index], 'SCI')['PIXAR_SR']
