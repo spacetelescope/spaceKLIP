@@ -3343,6 +3343,7 @@ class ImageTools():
                      shft_exp=1,
                      align_to_file=None,
                      scale_prior=False,
+                     threshold = 5,
                      kwargs={},
                      subdir='aligned',
                      save_figures=True):
@@ -3370,6 +3371,8 @@ class ImageTools():
         scale_prior : bool, optional
             If True, tries to find a better prior for the scale factor instead
             of simply using 1. The default is False.
+        threshold: float, optional
+            threshold for flagging outliers in distance distribution. The default is 5.
         kwargs : dict, optional
             Keyword arguments for the scipy.ndimage.shift routine. The default
             is {}.
@@ -3384,6 +3387,15 @@ class ImageTools():
         None.
 
         """
+        def find_outliers(data, sigma_threshold):
+            data = np.array(data)  # Convert to NumPy array
+            mean = np.mean(data)
+            std_dev = np.std(data)
+            # Compute Z-scores
+            z_scores = (data - mean) / std_dev
+            # Find indices where absolute Z-score exceeds the threshold
+            outlier_indices = np.where(np.abs(z_scores) > sigma_threshold)[0]
+            return outlier_indices
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -3569,6 +3581,11 @@ class ImageTools():
                 if j == ww_sci[0]:
                     dist = dist[1:]
                 log.info('  --> Align frames: median required shift = %.2f mas, std =  %.2f mas ' % (np.median(dist),np.std(dist)))
+
+                outliers_index = find_outliers(dist, threshold)
+                if len(outliers_index) > 0:
+                    log.warning(f'  --> Recenter frames: outliers at indices {outliers_index} in distance distribution of {tail} at {threshold} sigma ')
+
                 if self.database.obs[key]['TELESCOP'][j] == 'JWST':
                     ww = (dist < 1e-5) | (dist > 100.)
                 else:
