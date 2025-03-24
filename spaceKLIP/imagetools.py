@@ -1050,7 +1050,7 @@ class ImageTools():
                         if np.sum(cluster_mask) >= min_nancluster:  # Only keep clusters larger than min_nancluster
                             output_mask[z][sl][cluster_mask] = True
 
-            return output_mask
+            return np.nanmedian(output_mask.astype(int), axis=0)
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -1128,7 +1128,7 @@ class ImageTools():
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts,
                                         maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
-                nanmaskfile = ut.write_msk(fitsfile, nanmask.astype(int), fitsfile, '_nanmask.fits')
+                nanmaskfile = ut.write_msk(fitsfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
@@ -1405,6 +1405,9 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
 
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
+
                 fig = plt.figure()
                 ax = plt.gca()
                 ax.hist(data.flatten(),
@@ -1417,9 +1420,9 @@ class ImageTools():
 
                 # Don't want to clean anything that isn't bad or is a non-science pixel
                 if fix_nans:
-                    pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1)) & np.logical_not(pxdq_temp & 512 == 512)
+                    pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1) & (nanmask != 1)) & np.logical_not(pxdq_temp & 512 == 512)
                 else:
-                    pxdq_temp = (pxdq_temp & 1 == 1) & np.logical_not(pxdq_temp & 512 == 512)
+                    pxdq_temp = ((pxdq_temp & 1 == 1) & (nanmask != 1)) & np.logical_not(pxdq_temp & 512 == 512)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -1478,6 +1481,7 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile)
