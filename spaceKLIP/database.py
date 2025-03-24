@@ -495,7 +495,6 @@ class Database():
                         else:
                             tt = 'REF_BG'
                 maskfile = allpaths[ww][j].replace('.fits', '_psfmask.fits')
-                nanmaskfile = allpaths[ww][j].replace('.fits', '_nanmask.fits')
                 if not os.path.exists(maskfile):
                     if EXP_TYPE[ww][j] == 'NRC_CORON':
                     
