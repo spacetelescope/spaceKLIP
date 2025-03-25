@@ -259,7 +259,7 @@ class ImageTools():
                 head_pri['NINTS'] = nints
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
-                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile, nints=nints)
@@ -3585,7 +3585,7 @@ class ImageTools():
                 outliers_index = find_outliers(dist, threshold)
                 if len(outliers_index) > 0:
                     log.warning(f'  --> Recenter frames: outliers at indices {outliers_index} in distance distribution of {tail} at {threshold} sigma ')
-
+                    pass
                 if self.database.obs[key]['TELESCOP'][j] == 'JWST':
                     ww = (dist < 1e-5) | (dist > 100.)
                 else:
