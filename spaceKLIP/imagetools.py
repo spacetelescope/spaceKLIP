@@ -48,7 +48,7 @@ from astropy.io import fits
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 import scipy.ndimage
 import lmfit
-
+from astropy.table import Table
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -1096,7 +1096,7 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
-                nanmask = nan_clusters_mask(data, 5)
+                nanmask = nan_clusters_mask(data, min_nancluster)
 
                 if set_dq_zero:  # set_dq_zero
                     # Make copy of DQ array filled with zeros, i.e. all good pixels
@@ -3345,6 +3345,10 @@ class ImageTools():
                      scale_prior=False,
                      threshold = 5,
                      kwargs={},
+                     remove_frames = False,
+                     types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
+                     remove_frames_subdir='recenter',
+                     sci_ref_index = None,
                      subdir='aligned',
                      save_figures=True):
         """
@@ -3376,6 +3380,14 @@ class ImageTools():
         kwargs : dict, optional
             Keyword arguments for the scipy.ndimage.shift routine. The default
             is {}.
+        remove: bool, optional
+            Togler to automatically remove
+        types : list of str, optional
+            List of data types from which the frames shall be removed. The
+            default is ['SCI', 'SCI_BG', 'REF', 'REF_BG'].
+        remove_frames_subdir: str, optional
+            Name of the directory where the data products from remove_frame shall be saved. The
+                default is 'recenter'.
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'aligned'.
@@ -3395,7 +3407,7 @@ class ImageTools():
             z_scores = (data - mean) / std_dev
             # Find indices where absolute Z-score exceeds the threshold
             outlier_indices = np.where(np.abs(z_scores) > sigma_threshold)[0]
-            return outlier_indices
+            return list(outlier_indices)
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -3448,8 +3460,12 @@ class ImageTools():
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             if len(ww_sci) == 0:
                 raise UserWarning('Could not find any science files')
+
             ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
-            ww_all = np.append(ww_sci, ww_ref)
+            if sci_ref_index is None:
+                ww_all = np.append(ww_sci, ww_ref)
+            else:
+                ww_all = sci_ref_index
 
             # Loop through FITS files.
             if align_to_file is not None:
@@ -3459,7 +3475,8 @@ class ImageTools():
                     ref_image = pyfits.getdata(align_to_file, 0)
                 if ref_image.ndim == 3:
                     ref_image = np.nanmedian(ref_image, axis=0)
-            shifts_all = []
+            self.shifts_all = []
+            # shifts_all = []
             for j in ww_all:
 
                 # Read FITS file and PSF mask.
@@ -3565,7 +3582,8 @@ class ImageTools():
                     if align_to_file is not None or j != ww_sci[0]:
                         temp = np.median(shifts, axis=0)
                         mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
-                shifts_all += [shifts]
+                self.shifts_all += [shifts]
+                # shifts_all += [shifts]
                 if imshifts is not None:
                     imshifts += shifts[:, :-1]
                 else:
@@ -3580,12 +3598,36 @@ class ImageTools():
                 dist *= self.database.obs[key]['PIXSCALE'][j]*1000  # mas
                 if j == ww_sci[0]:
                     dist = dist[1:]
-                log.info('  --> Align frames: median required shift = %.2f mas, std =  %.2f mas ' % (np.median(dist),np.std(dist)))
+                log.info('  --> Align frames: median required shift = %.5f mas, std =  %.5f mas ' % (np.median(dist),np.std(dist)))
 
                 outliers_index = find_outliers(dist, threshold)
-                if len(outliers_index) > 0:
-                    log.warning(f'  --> Recenter frames: outliers at indices {outliers_index} in distance distribution of {tail} at {threshold} sigma ')
-                    pass
+                if remove_frames and len(outliers_index) > 0:
+                    # if there are outliers I want to remove I want to run the remove_frames on this specific fitsfile, and rerun the align_frames
+                    # just for this one once the outlier are removed.
+                    log.info(f'  --> Recenter frames: found outliers in distance distribution at indices {outliers_index} of {tail} at {threshold} sigma threshold. Removing them.')
+                    ImageTools_temp = copy.deepcopy(self)
+
+                    ImageTools_temp.database.obs = {key: Table(copy.deepcopy(self.database.obs[key][j]))}
+                    ImageTools_temp.database.obs[key]['TYPE'][0]='SCI'
+                    ImageTools_temp.remove_frames(index={key: {tail.split('.fits')[0]: outliers_index}},
+                                                     types=types,
+                                                     subdir=remove_frames_subdir)
+                    log.info(f'  --> Align frames again after removing outliers.')
+                    ImageTools_temp.align_frames(method=method,
+                                                  align_algo=align_algo,
+                                                  mask_override=mask_override,
+                                                  msk_shp=msk_shp,
+                                                  shft_exp=shft_exp,
+                                                  threshold=threshold,
+                                                  kwargs=kwargs,
+                                                  subdir=subdir,
+                                                  sci_ref_index = [0],
+                                                  save_figures=False)
+                    # append the new shifts without outliers to the shifts_all, overvriting the entry that previously had outliers
+                    self.shifts_all[j] = ImageTools_temp.shifts_all[-1]
+                    #continue with the normal beheviour for align_frames for the next fitsfile
+                    continue
+
                 if self.database.obs[key]['TELESCOP'][j] == 'JWST':
                     ww = (dist < 1e-5) | (dist > 100.)
                 else:
@@ -3609,72 +3651,20 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile,  nanmaskfile=nanmaskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
 
-            # Plot science frame alignment.
-            colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-            fig = plt.figure(figsize=(6.4, 4.8))
-            ax = plt.gca()
-            for index, j in enumerate(ww_sci):
-                ax.scatter(shifts_all[index][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
-                           shifts_all[index][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
-                           s=5, color=colors[index%len(colors)], marker='o',
-                           label='PA = %.0f deg' % self.database.obs[key]['ROLL_REF'][j])
-            ax.axhline(0., color='gray', lw=1, zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
-            ax.axvline(0., color='gray', lw=1, zorder=-1)
-
-            ax.set_aspect('equal')
-            xlim = ax.get_xlim()
-            ylim = ax.get_ylim()
-            xrng = xlim[1]-xlim[0]
-            yrng = ylim[1]-ylim[0]
-            if xrng > yrng:
-                ax.set_xlim(np.mean(xlim) - xrng, np.mean(xlim) + xrng)
-                ax.set_ylim(np.mean(ylim) - xrng, np.mean(ylim) + xrng)
-            else:
-                ax.set_xlim(np.mean(xlim) - yrng, np.mean(xlim) + yrng)
-                ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
-            ax.set_xlabel('x-shift [mas]')
-            ax.set_ylabel('y-shift [mas]')
-            ax.legend(loc='upper right')
-            ax.set_title(f'Science frame alignment\nfor {self.database.obs[key]["TARGPROP"][ww_sci[0]]}, {self.database.obs[key]["FILTER"][ww_sci[0]]}')
             if save_figures:
-                output_file = os.path.join(output_dir, key + '_align_sci.pdf')
-                plt.savefig(output_file)
-                log.info(f" Plot saved in {output_file}")
-            plt.show()
-            plt.close(fig)
-            
-            # Plot reference frame alignment.
-            if len(ww_ref) > 0:
+                # Plot science frame alignment.
                 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
                 fig = plt.figure(figsize=(6.4, 4.8))
                 ax = plt.gca()
-                seen = []
-                reps = []
-                syms = ['o', 'v', '^', '<', '>'] * (1 + len(ww_ref) // 5)
-                add = len(ww_sci)
-                for index, j in enumerate(ww_ref):
-                    this = '%.3f_%.3f' % (database_temp[key]['XOFFSET'][j], database_temp[key]['YOFFSET'][j])
-                    if this not in seen:
-                        ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
-                                   shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
-                                   s=5, color=colors[len(seen)%len(colors)], marker=syms[0], 
-                                   label='dither %.0f' % (len(seen) + 1))
-                        ax.hlines((-database_temp[key]['YOFFSET'][j] + yoffset) * 1000, 
-                                  (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 - 4., 
-                                  (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 + 4.,
-                                  color=colors[len(seen)%len(colors)], lw=1)
-                        ax.vlines((-database_temp[key]['XOFFSET'][j] + xoffset) * 1000, 
-                                  (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 - 4., 
-                                  (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 + 4., 
-                                  color=colors[len(seen)%len(colors)], lw=1)
-                        seen += [this]
-                        reps += [1]
-                    else:
-                        ww = np.where(np.array(seen) == this)[0][0]
-                        ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
-                                   shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
-                                   s=5, color=colors[ww%len(colors)], marker=syms[reps[ww]])
-                        reps[ww] += 1
+                for index, j in enumerate(ww_sci):
+                    ax.scatter(self.shifts_all[index][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                               self.shifts_all[index][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                               s=5, color=colors[index%len(colors)], marker='o',
+                               label='PA = %.0f deg' % self.database.obs[key]['ROLL_REF'][j])
+
+                ax.axhline(0., color='gray', lw=1, zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
+                ax.axvline(0., color='gray', lw=1, zorder=-1)
+
                 ax.set_aspect('equal')
                 xlim = ax.get_xlim()
                 ylim = ax.get_ylim()
@@ -3688,14 +3678,64 @@ class ImageTools():
                     ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
                 ax.set_xlabel('x-shift [mas]')
                 ax.set_ylabel('y-shift [mas]')
-                ax.legend(loc='upper right', fontsize='small')
-                ax.set_title(f'Reference frame alignment\n showing {len(ww_ref)} PSF refs for {self.database.obs[key]["FILTER"][ww_ref[0]]}')
-                if save_figures:
+                ax.legend(loc='upper right')
+                ax.set_title(f'Science frame alignment\nfor {self.database.obs[key]["TARGPROP"][ww_sci[0]]}, {self.database.obs[key]["FILTER"][ww_sci[0]]}')
+                output_file = os.path.join(output_dir, key + '_align_sci.pdf')
+                plt.savefig(output_file)
+                log.info(f" Plot saved in {output_file}")
+                plt.close(fig)
+            
+                # Plot reference frame alignment.
+                if len(ww_ref) > 0:
+                    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                    fig = plt.figure(figsize=(6.4, 4.8))
+                    ax = plt.gca()
+                    seen = []
+                    reps = []
+                    syms = ['o', 'v', '^', '<', '>'] * (1 + len(ww_ref) // 5)
+                    add = len(ww_sci)
+                    for index, j in enumerate(ww_ref):
+                        this = '%.3f_%.3f' % (database_temp[key]['XOFFSET'][j], database_temp[key]['YOFFSET'][j])
+                        if this not in seen:
+                            ax.scatter(self.shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                       self.shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                       s=5, color=colors[len(seen)%len(colors)], marker=syms[0],
+                                       label='dither %.0f' % (len(seen) + 1))
+                            ax.hlines((-database_temp[key]['YOFFSET'][j] + yoffset) * 1000,
+                                      (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 - 4.,
+                                      (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 + 4.,
+                                      color=colors[len(seen)%len(colors)], lw=1)
+                            ax.vlines((-database_temp[key]['XOFFSET'][j] + xoffset) * 1000,
+                                      (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 - 4.,
+                                      (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 + 4.,
+                                      color=colors[len(seen)%len(colors)], lw=1)
+                            seen += [this]
+                            reps += [1]
+                        else:
+                            ww = np.where(np.array(seen) == this)[0][0]
+                            ax.scatter(self.shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                       self.shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                                       s=5, color=colors[ww%len(colors)], marker=syms[reps[ww]])
+                            reps[ww] += 1
+                    ax.set_aspect('equal')
+                    xlim = ax.get_xlim()
+                    ylim = ax.get_ylim()
+                    xrng = xlim[1]-xlim[0]
+                    yrng = ylim[1]-ylim[0]
+                    if xrng > yrng:
+                        ax.set_xlim(np.mean(xlim) - xrng, np.mean(xlim) + xrng)
+                        ax.set_ylim(np.mean(ylim) - xrng, np.mean(ylim) + xrng)
+                    else:
+                        ax.set_xlim(np.mean(xlim) - yrng, np.mean(xlim) + yrng)
+                        ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
+                    ax.set_xlabel('x-shift [mas]')
+                    ax.set_ylabel('y-shift [mas]')
+                    ax.legend(loc='upper right', fontsize='small')
+                    ax.set_title(f'Reference frame alignment\n showing {len(ww_ref)} PSF refs for {self.database.obs[key]["FILTER"][ww_ref[0]]}')
                     output_file = os.path.join(output_dir, key + '_align_ref.pdf')
                     plt.savefig(output_file)
                     log.info(f" Plot saved in {output_file}")
-                plt.show()
-                plt.close(fig)
+                    plt.close(fig)
                 
     @plt.style.context('spaceKLIP.sk_style')
     def subtract_nircam_coron_background(self,
