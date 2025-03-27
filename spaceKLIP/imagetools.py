@@ -2231,6 +2231,71 @@ class ImageTools():
 
         pass
 
+    def update_frmaes_with_nans_from_nanmask(self,
+                                             cval=np.nan,
+                                             types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
+                                             subdir='nanreplaced'):
+        """
+        Replace values in data wiht NaNs from the nanmask.
+
+        Parameters
+        ----------
+        cval : float, optional
+            Fill value for the nan pixels. The default is 0.
+        types : list of str, optional
+            List of data types for which nans shall be replaced. The default is
+            ['SCI', 'SCI_BG', 'REF', 'REF_BG'].
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'nanreplaced'.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Loop through FITS files.
+            nfitsfiles = len(self.database.obs[key])
+            for j in range(nfitsfiles):
+
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+                nanmask = ut.read_msk(nanmaskfile)
+
+                # Skip file types that are not in the list of types.
+                if self.database.obs[key]['TYPE'][j] in types:
+
+                    # Replace nans.
+                    head, tail = os.path.split(fitsfile)
+                    log.info('  --> Value replacement: ' + tail)
+                    ww = (nanmask==1)
+                    data[np.tile(ww, (data.shape[0], 1, 1))] = cval
+                    log.info('  --> Value replacement: replaced %.0f pixel(s) with value ' % (np.sum(ww)) + str(cval) + ' -- %.2f%%' % (100. * np.sum(ww)/np.prod(ww.shape)))
+
+                # Write FITS file and PSF mask.
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
+
+        pass
+
     def blur_frames(self,
                     fact='auto',
                     types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
