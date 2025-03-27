@@ -423,6 +423,8 @@ class ImageTools():
                     pxdq = np.pad(pxdq, ((0, 0), (npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=0)
                     if mask is not None:
                         mask = np.pad(mask, ((npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=np.nan)
+                    if nanmask is not None:
+                        nanmask = np.pad(nanmask, ((npix[2], npix[3]), (npix[0], npix[1])), mode='constant',constant_values=cval)
                     crpix1 += npix[0]
                     crpix2 += npix[2]
                     log.info('  --> Frame padding: old shape = ' + str(sh[1:]) + ', new shape = ' + str(data.shape[1:]) + ', fill value = %.2f' % cval)
