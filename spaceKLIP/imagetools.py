@@ -1,5 +1,7 @@
 from __future__ import division
 
+from tabnanny import verbose
+
 import matplotlib
 
 # =============================================================================
@@ -49,6 +51,9 @@ from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 import scipy.ndimage
 import lmfit
 from astropy.table import Table
+import concurrent.futures
+from itertools import repeat
+
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -147,6 +152,7 @@ class ImageTools():
     def remove_frames(self,
                       index=[0],
                       types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
+                      verbose=True,
                       subdir='removed'):
         """
         Remove individual frames from the data.
@@ -167,6 +173,8 @@ class ImageTools():
         types : list of str, optional
             List of data types from which the frames shall be removed. The
             default is ['SCI', 'SCI_BG', 'REF', 'REF_BG'].
+        verbose: bool, optional
+            If true, print log to screen. Default is True.
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'removed'.
@@ -188,7 +196,8 @@ class ImageTools():
 
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
-            log.info('--> Concatenation ' + key)
+            if verbose:
+                log.info('--> Concatenation ' + key)
 
             # Loop through FITS files.
             nfitsfiles = len(self.database.obs[key])
@@ -209,7 +218,8 @@ class ImageTools():
 
                     # Remove frames.
                     head, tail = os.path.split(fitsfile)
-                    log.info('  --> Frame removal: ' + tail)
+                    if verbose:
+                        log.info('  --> Frame removal: ' + tail)
                     if isinstance(index, dict):
                         if key in index.keys():
                             if tail.split('.fits')[0] in index[key].keys():
@@ -217,7 +227,8 @@ class ImageTools():
                                 if isinstance(index_temp, str):
                                   index_temp = np.arange(int(index_temp.split('-')[0]),int(index_temp.split('-')[1]),1)
                             else:
-                                log.info('  --> Frame removal: frames not in selected dataset to remove. Skipping.')
+                                if verbose:
+                                    log.info('  --> Frame removal: frames not in selected dataset to remove. Skipping.')
                                 nints = data.shape[0]
 
                                 # Write FITS file and PSF mask.
@@ -230,7 +241,8 @@ class ImageTools():
                                 self.database.update_obs(key, j, fitsfile, maskfile, nints=nints)
                                 continue
                         else:
-                            log.info('  --> Frame removal: frames not in selected dataset to remove. Skipping.')
+                            if verbose:
+                                log.info('  --> Frame removal: frames not in selected dataset to remove. Skipping.')
                             nints = data.shape[0]
                             # Write FITS file and PSF mask.
                             head_pri['NINTS'] = nints
@@ -245,7 +257,8 @@ class ImageTools():
                     elif isinstance(index, list):
                         index_temp = index.copy()
 
-                    log.info('  --> Frame removal: removing frame(s) ' + str(index_temp))
+                    if verbose:
+                        log.info('  --> Frame removal: removing frame(s) ' + str(index_temp))
                     data = np.delete(data, index_temp, axis=0)
                     erro = np.delete(erro, index_temp, axis=0)
                     pxdq = np.delete(pxdq, index_temp, axis=0)
@@ -3433,11 +3446,14 @@ class ImageTools():
                      align_to_file=None,
                      scale_prior=False,
                      threshold = 5,
+                     parallelize = False,
+                     threads = None,
                      kwargs={},
                      remove_frames = False,
                      types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
                      remove_frames_subdir='recenter',
                      sci_ref_index = None,
+                     verbose=True,
                      subdir='aligned',
                      save_figures=True):
         """
@@ -3466,6 +3482,11 @@ class ImageTools():
             of simply using 1. The default is False.
         threshold: float, optional
             threshold for flagging outliers in distance distribution. The default is 5.
+        parallelize: bool, optional
+            If True, enabe parallel processing. Default is False.
+        threads: int, optional
+            Number of threads to use for parallel processing. With None, the parallel processing will automatically assing it.
+            The default is None.
         kwargs : dict, optional
             Keyword arguments for the scipy.ndimage.shift routine. The default
             is {}.
@@ -3477,6 +3498,8 @@ class ImageTools():
         remove_frames_subdir: str, optional
             Name of the directory where the data products from remove_frame shall be saved. The
                 default is 'recenter'.
+        verbose: bool, optional
+            If True, print log to screen. Default is True.
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'aligned'.
@@ -3517,8 +3540,8 @@ class ImageTools():
 
             # Align frames.
             head, tail = os.path.split(fitsfile)
-            if verbose:
-                log.info('  --> Align frames: ' + tail)
+            # if verbose:
+            #     log.info('  --> Align frames: ' + tail)
             if np.sum(np.isnan(data)) != 0:
                 raise UserWarning('Please replace nan pixels before attempting to align frames')
             shifts = []
@@ -3597,7 +3620,7 @@ class ImageTools():
                     temp = np.median(shifts, axis=0)
                     mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
             # self.shifts_all += [shifts]
-            self.shifts_all[j] = [shifts]
+            self.shifts_all[j] = shifts
             if imshifts is not None:
                 imshifts += shifts[:, :-1]
             else:
@@ -3612,9 +3635,6 @@ class ImageTools():
             dist *= self.database.obs[key]['PIXSCALE'][j] * 1000  # mas
             if j == l:
                 dist = dist[1:]
-            if verbose:
-                log.info('  --> Align frames: median required shift = %.5f mas, std =  %.5f mas ' % (
-            np.median(dist), np.std(dist)))
 
             outliers_index = find_outliers(dist, threshold)
             if remove_frames and len(outliers_index) > 0:
@@ -3632,7 +3652,8 @@ class ImageTools():
                 ImageTools_temp.database.obs[key]['TYPE'][0] = 'SCI'
                 ImageTools_temp.remove_frames(index={key: {tail.split('.fits')[0]: outliers_index}},
                                               types=types,
-                                              subdir=remove_frames_subdir)
+                                              subdir=remove_frames_subdir,
+                                              verbose=verbose)
                 if verbose:
                     log.info(f'  --> Align frames again after removing outliers.')
                 ImageTools_temp.align_frames(method=method,
@@ -3645,16 +3666,20 @@ class ImageTools():
                                              subdir=subdir,
                                              sci_ref_index=[0],
                                              remove_frames=False,
+                                             verbose=False,
                                              save_figures=False)
                 # overwrite the old shift with a the new one  without outliers
                 self.shifts_all[j] = ImageTools_temp.shifts_all[-1]
                 # overwrite the old entry for the database with the new one
-                self.database.obs[key][j] = ImageTools_temp.database.obs[key][j]
+                self.database.obs[key][j] = ImageTools_temp.database.obs[key][-1]
                 # continue with the normal beheviour for align_frames for the next fitsfile
                 skip = True
                 # return self
 
             if not skip:
+                log.info('  --> Align frames: %s, median required shift = %.5f mas, std =  %.5f mas ' % (tail,
+                    np.median(dist), np.std(dist)))
+
                 if self.database.obs[key]['TELESCOP'][j] == 'JWST':
                     ww = (dist < 1e-5) | (dist > 100.)
                 else:
@@ -3734,7 +3759,8 @@ class ImageTools():
         # Loop through concatenations.
         database_temp = deepcopy(self.database.obs)
         for i, key in enumerate(self.database.obs.keys()):
-            log.info('--> Concatenation ' + key)
+            if verbose:
+                log.info('--> Concatenation ' + key)
 
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
@@ -3759,11 +3785,14 @@ class ImageTools():
             # shifts_all = []
 
             fitsfile_ref = self.database.obs[key]['FITSFILE'][0]
-            for j in ww_all:
-                task(j,self,ww_sci[0],key,mask_override,msk_shp,scale_prior,align_algo,align_to_file,remove_frames,fitsfile_ref,verbose=True)
-            # with concurrent.futures.ThreadPoolExecutor() as executor:
-            #     self = executor.map(task, ww_all, self,  ww_sci[0], key, mask_override, msk_shp, scale_prior, align_algo, align_to_file,
-            #                 remove_frames, fitsfile_ref, True)
+            if parallelize:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                    executor.map(task, ww_all, repeat(self),  repeat(ww_sci[0]), repeat(key), repeat(mask_override),
+                                    repeat(msk_shp), repeat(scale_prior), repeat(align_algo), repeat(align_to_file),
+                                    repeat(remove_frames), repeat(fitsfile_ref), repeat(False))
+            else:
+                for j in ww_all:
+                    task(j,self,ww_sci[0],key,mask_override,msk_shp,scale_prior,align_algo,align_to_file,remove_frames,fitsfile_ref,True)
 
             # for j in ww_all:
 
@@ -3972,8 +4001,10 @@ class ImageTools():
                 plt.savefig(output_file)
                 log.info(f" Plot saved in {output_file}")
                 plt.close(fig)
-            
+
                 # Plot reference frame alignment.
+                xoffset = self.database.obs[key]['XOFFSET'][0]  # arcsec
+                yoffset = self.database.obs[key]['YOFFSET'][0]  # arcsec
                 if len(ww_ref) > 0:
                     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
                     fig = plt.figure(figsize=(6.4, 4.8))
