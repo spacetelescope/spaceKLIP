@@ -3488,6 +3488,197 @@ class ImageTools():
         None.
 
         """
+        def task(j,self,l,key,mask_override,msk_shp,scale_prior,align_algo,align_to_file,remove_frames,fitsfile_ref,verbose):
+            skip=False
+            # Read FITS file and PSF mask.
+            fitsfile = self.database.obs[key]['FITSFILE'][j]
+            data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+            maskfile = self.database.obs[key]['MASKFILE'][j]
+            mask = ut.read_msk(maskfile)
+            nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+            nanmask = ut.read_msk(nanmaskfile)
+
+            if mask_override is not None:
+                if mask_override == 'ann':
+                    mask_circ = create_annulus_mask(data[0].shape[0], data[0].shape[1], radius=msk_shp)
+                elif mask_override == 'circ':
+                    mask_circ = create_circular_mask(data[0].shape[0], data[0].shape[1], radius=msk_shp)
+                elif mask_override == 'rec':
+                    mask_circ = create_rec_mask(data[0].shape[0], data[0].shape[1], z=msk_shp)
+                else:
+                    raise ValueError('There are `circ` and `rec` custom masks available')
+                mask_temp = data[0].copy()
+                mask_temp[~mask_circ] = 1
+                mask_temp[mask_circ] = 0
+            elif mask is None:
+                mask_temp = np.ones_like(data[0])
+            else:
+                mask_temp = mask.copy()
+
+            # Align frames.
+            head, tail = os.path.split(fitsfile)
+            if verbose:
+                log.info('  --> Align frames: ' + tail)
+            if np.sum(np.isnan(data)) != 0:
+                raise UserWarning('Please replace nan pixels before attempting to align frames')
+            shifts = []
+
+            if align_to_file is None:
+                # fitsfile_ref = self.database.obs[key]['FITSFILE'][0]
+                data_ref, _, _, _, _, _, _, _ = ut.read_obs(fitsfile_ref)
+                ref_image = data_ref[0].copy()
+            pp = np.array([0., 0., 1.])
+            xoffset = self.database.obs[key]['XOFFSET'][l]  # arcsec
+            yoffset = self.database.obs[key]['YOFFSET'][l]  # arcsec
+            crpix1 = self.database.obs[key]['CRPIX1'][l]  # pixels
+            crpix2 = self.database.obs[key]['CRPIX2'][l]  # pixels
+            pxsc = self.database.obs[key]['PIXSCALE'][l]  # arcsec
+
+            for k in range(data.shape[0]):
+                # Align all other SCI and REF frames to the first science
+                # frame.
+                if align_to_file is not None or j != l or k != 0:
+                    # Calculate shifts relative to first frame, work in pixels
+                    xfirst = crpix1 + (xoffset / pxsc)
+                    xoff_curr_pix = self.database.obs[key]['XOFFSET'][j] / self.database.obs[key]['PIXSCALE'][j]
+                    xcurrent = self.database.obs[key]['CRPIX1'][j] + xoff_curr_pix
+                    xshift = xfirst - xcurrent
+
+                    yfirst = crpix2 + (yoffset / pxsc)
+                    yoff_curr_pix = self.database.obs[key]['YOFFSET'][j] / self.database.obs[key]['PIXSCALE'][j]
+                    ycurrent = self.database.obs[key]['CRPIX2'][j] + yoff_curr_pix
+                    yshift = yfirst - ycurrent
+
+                    if scale_prior:
+                        ww = mask < 0.5
+                        sh = mask.shape
+                        bw = 100
+                        ww[:bw, :] = 0.
+                        ww[:, :bw] = 0.
+                        ww[sh[0] - bw:, :] = 0.
+                        ww[:, sh[1] - bw:] = 0.
+                        # plt.imshow(ww, origin='lower')
+                        # plt.show()
+                        scale = np.nanmedian(np.true_divide(ref_image, data[k])[ww])
+                        if shft_exp != 1:
+                            scale = np.power(np.abs(scale), shft_exp)
+                        p0 = np.array([xshift, yshift, scale])
+                    else:
+                        p0 = np.array([xshift, yshift, 1.])
+
+                    # Fix for weird numerical behaviour if shifts are small
+                    # but not exactly zero.
+                    if (np.abs(xshift) < 1e-3) and (np.abs(yshift) < 1e-3):
+                        p0 = np.array([0., 0., p0[-1]])
+                    if align_algo == 'leastsq':
+                        if shft_exp != 1:
+                            args = (
+                            np.power(np.abs(data[k]), shft_exp), np.power(np.abs(ref_image), shft_exp), mask_temp,
+                            method, kwargs)
+                        else:
+                            args = (data[k], ref_image, mask_temp, method, kwargs)
+                        # Use header values to initiate least squares fit
+                        pp = leastsq(ut.alignlsq,
+                                     p0,
+                                     args=args)[0]
+                    elif align_algo == 'header':
+                        # Just assume the header values are correct
+                        pp = p0
+
+                # Append shifts to array and apply shift to image
+                # using defined method.
+                shifts += [np.array([pp[0], pp[1], pp[2]])]
+                if align_to_file is not None or j != l or k != 0:
+                    data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                    erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+            shifts = np.array(shifts)
+            if mask is not None:
+                if align_to_file is not None or j != l:
+                    temp = np.median(shifts, axis=0)
+                    mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
+            # self.shifts_all += [shifts]
+            self.shifts_all[j] = [shifts]
+            if imshifts is not None:
+                imshifts += shifts[:, :-1]
+            else:
+                imshifts = shifts[:, :-1]
+            if maskoffs is not None:
+                maskoffs -= shifts[:, :-1]
+            else:
+                maskoffs = -shifts[:, :-1]
+
+            # Compute shift distances.
+            dist = np.sqrt(np.sum(shifts[:, :2] ** 2, axis=1))  # pix
+            dist *= self.database.obs[key]['PIXSCALE'][j] * 1000  # mas
+            if j == l:
+                dist = dist[1:]
+            if verbose:
+                log.info('  --> Align frames: median required shift = %.5f mas, std =  %.5f mas ' % (
+            np.median(dist), np.std(dist)))
+
+            outliers_index = find_outliers(dist, threshold)
+            if remove_frames and len(outliers_index) > 0:
+                # if there are outliers I want to remove them with ImageTools.remove_frames on this specific fitsfile, and rerun the align_frames
+                # just for this one once the outlier are removed.
+                # For now I'm using remove_frames=False in sthis istance so that I find the outliers, remove them, then move to the next file.
+                # With remove_frames=True, there is a risk of a recursive process where is always finding outliers,
+                # in particular with low thresholds, leading to a very long process (need to invesitgste more this case).
+                if verbose:
+                    log.info(
+                        f'  --> Recenter frames: found outliers in distance distribution at indices {outliers_index} of {tail} at {threshold} sigma threshold. Removing them.')
+                ImageTools_temp = copy.deepcopy(self)
+
+                ImageTools_temp.database.obs = {key: Table(copy.deepcopy(self.database.obs[key][j]))}
+                ImageTools_temp.database.obs[key]['TYPE'][0] = 'SCI'
+                ImageTools_temp.remove_frames(index={key: {tail.split('.fits')[0]: outliers_index}},
+                                              types=types,
+                                              subdir=remove_frames_subdir)
+                if verbose:
+                    log.info(f'  --> Align frames again after removing outliers.')
+                ImageTools_temp.align_frames(method=method,
+                                             align_algo=align_algo,
+                                             mask_override=mask_override,
+                                             msk_shp=msk_shp,
+                                             shft_exp=shft_exp,
+                                             threshold=threshold,
+                                             kwargs=kwargs,
+                                             subdir=subdir,
+                                             sci_ref_index=[0],
+                                             remove_frames=False,
+                                             save_figures=False)
+                # overwrite the old shift with a the new one  without outliers
+                self.shifts_all[j] = ImageTools_temp.shifts_all[-1]
+                # overwrite the old entry for the database with the new one
+                self.database.obs[key][j] = ImageTools_temp.database.obs[key][j]
+                # continue with the normal beheviour for align_frames for the next fitsfile
+                skip = True
+                # return self
+
+            if not skip:
+                if self.database.obs[key]['TELESCOP'][j] == 'JWST':
+                    ww = (dist < 1e-5) | (dist > 100.)
+                else:
+                    ww = (dist < 1e-5)
+                if np.sum(ww) != 0:
+                    if j == l:
+                        ww = np.append(np.array([False]), ww)
+                    ww = np.where(ww == True)[0]
+                    if align_algo != 'header':
+                        log.warning('  --> The following frames might not be properly aligned: '+str(ww))
+
+                # Write FITS file and PSF mask.
+                head_pri['XOFFSET'] = xoffset #arcseconds
+                head_pri['YOFFSET'] = yoffset #arcseconds
+                head_sci['CRPIX1'] = crpix1
+                head_sci['CRPIX2'] = crpix2
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile,  nanmaskfile=nanmaskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+            # return self
+
         def find_outliers(data, sigma_threshold):
             data = np.array(data)  # Convert to NumPy array
             mean = np.mean(data)
@@ -3564,181 +3755,189 @@ class ImageTools():
                     ref_image = pyfits.getdata(align_to_file, 0)
                 if ref_image.ndim == 3:
                     ref_image = np.nanmedian(ref_image, axis=0)
-            self.shifts_all = []
+            self.shifts_all = [None] * len(ww_all)
             # shifts_all = []
+
+            fitsfile_ref = self.database.obs[key]['FITSFILE'][0]
             for j in ww_all:
+                task(j,self,ww_sci[0],key,mask_override,msk_shp,scale_prior,align_algo,align_to_file,remove_frames,fitsfile_ref,verbose=True)
+            # with concurrent.futures.ThreadPoolExecutor() as executor:
+            #     self = executor.map(task, ww_all, self,  ww_sci[0], key, mask_override, msk_shp, scale_prior, align_algo, align_to_file,
+            #                 remove_frames, fitsfile_ref, True)
 
-                # Read FITS file and PSF mask.
-                fitsfile = self.database.obs[key]['FITSFILE'][j]
-                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
-                maskfile = self.database.obs[key]['MASKFILE'][j]
-                mask = ut.read_msk(maskfile)
-                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
-                nanmask = ut.read_msk(nanmaskfile)
+            # for j in ww_all:
 
-                if mask_override is not None:
-                    if mask_override == 'ann':
-                        mask_circ = create_annulus_mask(data[0].shape[0], data[0].shape[1], radius=msk_shp)
-                    elif mask_override == 'circ':
-                        mask_circ = create_circular_mask(data[0].shape[0],data[0].shape[1], radius=msk_shp)
-                    elif mask_override == 'rec':
-                        mask_circ = create_rec_mask(data[0].shape[0],data[0].shape[1], z=msk_shp)
-                    else:
-                        raise ValueError('There are `circ` and `rec` custom masks available')
-                    mask_temp = data[0].copy()
-                    mask_temp[~mask_circ] = 1
-                    mask_temp[mask_circ] = 0
-                elif mask is None:
-                    mask_temp = np.ones_like(data[0])
-                else:
-                    mask_temp = mask.copy()
-                
-                # Align frames.
-                head, tail = os.path.split(fitsfile)
-                log.info('  --> Align frames: ' + tail)
-                if np.sum(np.isnan(data)) != 0:
-                    raise UserWarning('Please replace nan pixels before attempting to align frames')
-                shifts = []
-                for k in range(data.shape[0]):
+                # # Read FITS file and PSF mask.
+                # fitsfile = self.database.obs[key]['FITSFILE'][j]
+                # data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+                # maskfile = self.database.obs[key]['MASKFILE'][j]
+                # mask = ut.read_msk(maskfile)
+                # nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                # nanmask = ut.read_msk(nanmaskfile)
+                #
+                # if mask_override is not None:
+                #     if mask_override == 'ann':
+                #         mask_circ = create_annulus_mask(data[0].shape[0], data[0].shape[1], radius=msk_shp)
+                #     elif mask_override == 'circ':
+                #         mask_circ = create_circular_mask(data[0].shape[0],data[0].shape[1], radius=msk_shp)
+                #     elif mask_override == 'rec':
+                #         mask_circ = create_rec_mask(data[0].shape[0],data[0].shape[1], z=msk_shp)
+                #     else:
+                #         raise ValueError('There are `circ` and `rec` custom masks available')
+                #     mask_temp = data[0].copy()
+                #     mask_temp[~mask_circ] = 1
+                #     mask_temp[mask_circ] = 0
+                # elif mask is None:
+                #     mask_temp = np.ones_like(data[0])
+                # else:
+                #     mask_temp = mask.copy()
+                #
+                # # Align frames.
+                # head, tail = os.path.split(fitsfile)
+                # log.info('  --> Align frames: ' + tail)
+                # if np.sum(np.isnan(data)) != 0:
+                #     raise UserWarning('Please replace nan pixels before attempting to align frames')
+                # shifts = []
+                # for k in range(data.shape[0]):
+                #
+                #     # Take the first science frame as reference frame.
+                #     if j == ww_sci[0] and k == 0:
+                #         if align_to_file is None:
+                #             ref_image = data[k].copy()
+                #         pp = np.array([0., 0., 1.])
+                #         xoffset = self.database.obs[key]['XOFFSET'][j] #arcsec
+                #         yoffset = self.database.obs[key]['YOFFSET'][j] #arcsec
+                #         crpix1 = self.database.obs[key]['CRPIX1'][j] #pixels
+                #         crpix2 = self.database.obs[key]['CRPIX2'][j] #pixels
+                #         pxsc = self.database.obs[key]['PIXSCALE'][j] #arcsec
+                #
+                #     # Align all other SCI and REF frames to the first science
+                #     # frame.
+                #     if align_to_file is not None or j != ww_sci[0] or k != 0:
+                #         # Calculate shifts relative to first frame, work in pixels
+                #         xfirst = crpix1 + (xoffset/pxsc)
+                #         xoff_curr_pix = self.database.obs[key]['XOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
+                #         xcurrent = self.database.obs[key]['CRPIX1'][j] + xoff_curr_pix
+                #         xshift = xfirst - xcurrent
+                #
+                #         yfirst = crpix2 + (yoffset/pxsc)
+                #         yoff_curr_pix = self.database.obs[key]['YOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
+                #         ycurrent = self.database.obs[key]['CRPIX2'][j] + yoff_curr_pix
+                #         yshift = yfirst - ycurrent
+                #
+                #         if scale_prior:
+                #             ww = mask < 0.5
+                #             sh = mask.shape
+                #             bw = 100
+                #             ww[:bw, :] = 0.
+                #             ww[:, :bw] = 0.
+                #             ww[sh[0] - bw:, :] = 0.
+                #             ww[:, sh[1] - bw:] = 0.
+                #             # plt.imshow(ww, origin='lower')
+                #             # plt.show()
+                #             scale = np.nanmedian(np.true_divide(ref_image, data[k])[ww])
+                #             if shft_exp != 1:
+                #                 scale = np.power(np.abs(scale), shft_exp)
+                #             p0 = np.array([xshift, yshift, scale])
+                #         else:
+                #             p0 = np.array([xshift, yshift, 1.])
+                #
+                #         # Fix for weird numerical behaviour if shifts are small
+                #         # but not exactly zero.
+                #         if (np.abs(xshift) < 1e-3) and (np.abs(yshift) < 1e-3):
+                #             p0 = np.array([0., 0., p0[-1]])
+                #         if align_algo == 'leastsq':
+                #             if shft_exp != 1:
+                #                 args = (np.power(np.abs(data[k]), shft_exp), np.power(np.abs(ref_image), shft_exp), mask_temp, method, kwargs)
+                #             else:
+                #                 args = (data[k], ref_image, mask_temp, method, kwargs)
+                #             # Use header values to initiate least squares fit
+                #             pp = leastsq(ut.alignlsq,
+                #                          p0,
+                #                          args=args)[0]
+                #         elif align_algo == 'header':
+                #             # Just assume the header values are correct
+                #             pp = p0
+                #
+                #     # Append shifts to array and apply shift to image
+                #     # using defined method.
+                #     shifts += [np.array([pp[0], pp[1], pp[2]])]
+                #     if align_to_file is not None or j != ww_sci[0] or k != 0:
+                #         data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                #         erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                # shifts = np.array(shifts)
+                # if mask is not None:
+                #     if align_to_file is not None or j != ww_sci[0]:
+                #         temp = np.median(shifts, axis=0)
+                #         mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
+                # self.shifts_all += [shifts]
+                # # shifts_all += [shifts]
+                # if imshifts is not None:
+                #     imshifts += shifts[:, :-1]
+                # else:
+                #     imshifts = shifts[:, :-1]
+                # if maskoffs is not None:
+                #     maskoffs -= shifts[:, :-1]
+                # else:
+                #     maskoffs = -shifts[:, :-1]
+                #
+                # # Compute shift distances.
+                # dist = np.sqrt(np.sum(shifts[:, :2]**2, axis=1))  # pix
+                # dist *= self.database.obs[key]['PIXSCALE'][j]*1000  # mas
+                # if j == ww_sci[0]:
+                #     dist = dist[1:]
+                # log.info('  --> Align frames: median required shift = %.5f mas, std =  %.5f mas ' % (np.median(dist),np.std(dist)))
+                #
+                # outliers_index = find_outliers(dist, threshold)
+                # if remove_frames and len(outliers_index) > 0:
+                #     # if there are outliers I want to remove I want to run the remove_frames on this specific fitsfile, and rerun the align_frames
+                #     # just for this one once the outlier are removed.
+                #     log.info(f'  --> Recenter frames: found outliers in distance distribution at indices {outliers_index} of {tail} at {threshold} sigma threshold. Removing them.')
+                #     ImageTools_temp = copy.deepcopy(self)
+                #
+                #     ImageTools_temp.database.obs = {key: Table(copy.deepcopy(self.database.obs[key][j]))}
+                #     ImageTools_temp.database.obs[key]['TYPE'][0]='SCI'
+                #     ImageTools_temp.remove_frames(index={key: {tail.split('.fits')[0]: outliers_index}},
+                #                                      types=types,
+                #                                      subdir=remove_frames_subdir)
+                #     log.info(f'  --> Align frames again after removing outliers.')
+                #     ImageTools_temp.align_frames(method=method,
+                #                                   align_algo=align_algo,
+                #                                   mask_override=mask_override,
+                #                                   msk_shp=msk_shp,
+                #                                   shft_exp=shft_exp,
+                #                                   threshold=threshold,
+                #                                   kwargs=kwargs,
+                #                                   subdir=subdir,
+                #                                   sci_ref_index = [0],
+                #                                   save_figures=False)
+                #     # append the new shifts without outliers to the shifts_all, overvriting the entry that previously had outliers
+                #     self.shifts_all[j] = ImageTools_temp.shifts_all[-1]
+                #     #continue with the normal beheviour for align_frames for the next fitsfile
+                #     continue
 
-                    # Take the first science frame as reference frame.
-                    if j == ww_sci[0] and k == 0:
-                        if align_to_file is None:
-                            ref_image = data[k].copy()
-                        pp = np.array([0., 0., 1.])
-                        xoffset = self.database.obs[key]['XOFFSET'][j] #arcsec
-                        yoffset = self.database.obs[key]['YOFFSET'][j] #arcsec
-                        crpix1 = self.database.obs[key]['CRPIX1'][j] #pixels
-                        crpix2 = self.database.obs[key]['CRPIX2'][j] #pixels
-                        pxsc = self.database.obs[key]['PIXSCALE'][j] #arcsec
-
-                    # Align all other SCI and REF frames to the first science
-                    # frame.
-                    if align_to_file is not None or j != ww_sci[0] or k != 0:
-                        # Calculate shifts relative to first frame, work in pixels
-                        xfirst = crpix1 + (xoffset/pxsc)
-                        xoff_curr_pix = self.database.obs[key]['XOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
-                        xcurrent = self.database.obs[key]['CRPIX1'][j] + xoff_curr_pix
-                        xshift = xfirst - xcurrent
-
-                        yfirst = crpix2 + (yoffset/pxsc)
-                        yoff_curr_pix = self.database.obs[key]['YOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
-                        ycurrent = self.database.obs[key]['CRPIX2'][j] + yoff_curr_pix
-                        yshift = yfirst - ycurrent
-
-                        if scale_prior:
-                            ww = mask < 0.5
-                            sh = mask.shape
-                            bw = 100
-                            ww[:bw, :] = 0.
-                            ww[:, :bw] = 0.
-                            ww[sh[0] - bw:, :] = 0.
-                            ww[:, sh[1] - bw:] = 0.
-                            # plt.imshow(ww, origin='lower')
-                            # plt.show()
-                            scale = np.nanmedian(np.true_divide(ref_image, data[k])[ww])
-                            if shft_exp != 1:
-                                scale = np.power(np.abs(scale), shft_exp)
-                            p0 = np.array([xshift, yshift, scale])
-                        else:
-                            p0 = np.array([xshift, yshift, 1.])
-
-                        # Fix for weird numerical behaviour if shifts are small
-                        # but not exactly zero.
-                        if (np.abs(xshift) < 1e-3) and (np.abs(yshift) < 1e-3):
-                            p0 = np.array([0., 0., p0[-1]])
-                        if align_algo == 'leastsq':
-                            if shft_exp != 1:
-                                args = (np.power(np.abs(data[k]), shft_exp), np.power(np.abs(ref_image), shft_exp), mask_temp, method, kwargs)
-                            else:
-                                args = (data[k], ref_image, mask_temp, method, kwargs)
-                            # Use header values to initiate least squares fit
-                            pp = leastsq(ut.alignlsq,
-                                         p0,
-                                         args=args)[0]
-                        elif align_algo == 'header':
-                            # Just assume the header values are correct
-                            pp = p0
-
-                    # Append shifts to array and apply shift to image
-                    # using defined method.
-                    shifts += [np.array([pp[0], pp[1], pp[2]])]
-                    if align_to_file is not None or j != ww_sci[0] or k != 0:
-                        data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                        erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                shifts = np.array(shifts)
-                if mask is not None:
-                    if align_to_file is not None or j != ww_sci[0]:
-                        temp = np.median(shifts, axis=0)
-                        mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
-                self.shifts_all += [shifts]
-                # shifts_all += [shifts]
-                if imshifts is not None:
-                    imshifts += shifts[:, :-1]
-                else:
-                    imshifts = shifts[:, :-1]
-                if maskoffs is not None:
-                    maskoffs -= shifts[:, :-1]
-                else:
-                    maskoffs = -shifts[:, :-1]
-
-                # Compute shift distances.
-                dist = np.sqrt(np.sum(shifts[:, :2]**2, axis=1))  # pix
-                dist *= self.database.obs[key]['PIXSCALE'][j]*1000  # mas
-                if j == ww_sci[0]:
-                    dist = dist[1:]
-                log.info('  --> Align frames: median required shift = %.5f mas, std =  %.5f mas ' % (np.median(dist),np.std(dist)))
-
-                outliers_index = find_outliers(dist, threshold)
-                if remove_frames and len(outliers_index) > 0:
-                    # if there are outliers I want to remove I want to run the remove_frames on this specific fitsfile, and rerun the align_frames
-                    # just for this one once the outlier are removed.
-                    log.info(f'  --> Recenter frames: found outliers in distance distribution at indices {outliers_index} of {tail} at {threshold} sigma threshold. Removing them.')
-                    ImageTools_temp = copy.deepcopy(self)
-
-                    ImageTools_temp.database.obs = {key: Table(copy.deepcopy(self.database.obs[key][j]))}
-                    ImageTools_temp.database.obs[key]['TYPE'][0]='SCI'
-                    ImageTools_temp.remove_frames(index={key: {tail.split('.fits')[0]: outliers_index}},
-                                                     types=types,
-                                                     subdir=remove_frames_subdir)
-                    log.info(f'  --> Align frames again after removing outliers.')
-                    ImageTools_temp.align_frames(method=method,
-                                                  align_algo=align_algo,
-                                                  mask_override=mask_override,
-                                                  msk_shp=msk_shp,
-                                                  shft_exp=shft_exp,
-                                                  threshold=threshold,
-                                                  kwargs=kwargs,
-                                                  subdir=subdir,
-                                                  sci_ref_index = [0],
-                                                  save_figures=False)
-                    # append the new shifts without outliers to the shifts_all, overvriting the entry that previously had outliers
-                    self.shifts_all[j] = ImageTools_temp.shifts_all[-1]
-                    #continue with the normal beheviour for align_frames for the next fitsfile
-                    continue
-
-                if self.database.obs[key]['TELESCOP'][j] == 'JWST':
-                    ww = (dist < 1e-5) | (dist > 100.)
-                else:
-                    ww = (dist < 1e-5)
-                if np.sum(ww) != 0:
-                    if j == ww_sci[0]:
-                        ww = np.append(np.array([False]), ww)
-                    ww = np.where(ww == True)[0]
-                    if align_algo != 'header':
-                        log.warning('  --> The following frames might not be properly aligned: '+str(ww))
-
-                # Write FITS file and PSF mask.
-                head_pri['XOFFSET'] = xoffset #arcseconds
-                head_pri['YOFFSET'] = yoffset #arcseconds
-                head_sci['CRPIX1'] = crpix1
-                head_sci['CRPIX2'] = crpix2
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
-                maskfile = ut.write_msk(maskfile, mask, fitsfile)
-                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
-
-                # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile,  nanmaskfile=nanmaskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+                # if self.database.obs[key]['TELESCOP'][j] == 'JWST':
+                #     ww = (dist < 1e-5) | (dist > 100.)
+                # else:
+                #     ww = (dist < 1e-5)
+                # if np.sum(ww) != 0:
+                #     if j == ww_sci[0]:
+                #         ww = np.append(np.array([False]), ww)
+                #     ww = np.where(ww == True)[0]
+                #     if align_algo != 'header':
+                #         log.warning('  --> The following frames might not be properly aligned: '+str(ww))
+                #
+                # # Write FITS file and PSF mask.
+                # head_pri['XOFFSET'] = xoffset #arcseconds
+                # head_pri['YOFFSET'] = yoffset #arcseconds
+                # head_sci['CRPIX1'] = crpix1
+                # head_sci['CRPIX2'] = crpix2
+                # fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
+                # maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                # nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
+                #
+                # # Update spaceKLIP database.
+                # self.database.update_obs(key, j, fitsfile, maskfile,  nanmaskfile=nanmaskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
 
             if save_figures:
                 # Plot science frame alignment.
