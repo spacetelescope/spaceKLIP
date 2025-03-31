@@ -3669,6 +3669,7 @@ class ImageTools():
                 # overwrite the old shift with a the new one  without outliers
                 self.shifts_all[j] = ImageTools_temp.shifts_all[-1]
                 # overwrite the old entry for the database with the new one
+                ImageTools_temp.database.obs[key]['TYPE'][-1] = self.database.obs[key['TYPE']][j]
                 self.database.obs[key][j] = ImageTools_temp.database.obs[key][-1]
                 # continue with the normal beheviour for align_frames for the next fitsfile
                 skip = True
