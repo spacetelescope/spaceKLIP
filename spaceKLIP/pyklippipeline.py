@@ -36,7 +36,7 @@ log.setLevel(logging.INFO)
 
 def run_obs(database,
             restrict_to=None,
-            subtract_NIRCAM=False,
+            IWA=None,
             kwargs={},
             subdir='klipsub'):
     """
@@ -143,8 +143,8 @@ def run_obs(database,
             # Initialize pyKLIP dataset.
             pop_pxar_kw(np.append(filepaths, psflib_filepaths))
             dataset = JWSTData(filepaths, psflib_filepaths, highpass=kwargs_temp['highpass'])
-            if subtract_NIRCAM:
-                dataset.IWA=0
+            if IWA is not None:
+                dataset.IWA=IWA
             kwargs_temp['dataset'] = dataset
             kwargs_temp['aligned_center'] = dataset._centers[0]
             kwargs_temp['psf_library'] = dataset.psflib
