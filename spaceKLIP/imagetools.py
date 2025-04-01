@@ -3448,7 +3448,7 @@ class ImageTools():
                      scale_prior=False,
                      threshold = 5,
                      parallelize = False,
-                     threads = None,
+                     workers = None,
                      kwargs={},
                      remove_frames = False,
                      types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
@@ -3485,8 +3485,8 @@ class ImageTools():
             threshold for flagging outliers in distance distribution. The default is 5.
         parallelize: bool, optional
             If True, enabe parallel processing. Default is False.
-        threads: int, optional
-            Number of threads to use for parallel processing. With None, the parallel processing will automatically assing it.
+        workers: int, optional
+            Number of workers to use for parallel processing. With None, the parallel processing will automatically assing it.
             The default is None.
         kwargs : dict, optional
             Keyword arguments for the scipy.ndimage.shift routine. The default
@@ -3785,10 +3785,11 @@ class ImageTools():
 
             fitsfile_ref = self.database.obs[key]['FITSFILE'][0]
             if parallelize:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                     executor.map(task, ww_all, repeat(self),  repeat(ww_sci[0]), repeat(key), repeat(mask_override),
                                     repeat(msk_shp), repeat(scale_prior), repeat(align_algo), repeat(align_to_file),
                                     repeat(remove_frames), repeat(fitsfile_ref), repeat(False))
+                executor.shutdown(wait=True)
             else:
                 for j in ww_all:
                     task(j,self,ww_sci[0],key,mask_override,msk_shp,scale_prior,align_algo,align_to_file,remove_frames,fitsfile_ref,True)
