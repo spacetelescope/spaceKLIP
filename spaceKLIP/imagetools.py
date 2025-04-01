@@ -3790,7 +3790,6 @@ class ImageTools():
                     executor.map(task, ww_all, repeat(self),  repeat(ww_sci[0]), repeat(key), repeat(mask_override),
                                     repeat(msk_shp), repeat(scale_prior), repeat(align_algo), repeat(align_to_file),
                                     repeat(remove_frames), repeat(fitsfile_ref), repeat(False))
-                executor.shutdown(wait=True)
             else:
                 for j in ww_all:
                     task(j,self,ww_sci[0],key,mask_override,msk_shp,scale_prior,align_algo,align_to_file,remove_frames,fitsfile_ref,True)
