@@ -348,6 +348,8 @@ class ImageTools():
                     pxdq = pxdq[:, npix[2]:-npix[3], npix[0]:-npix[1]]
                     if mask is not None:
                         mask = mask[npix[2]:-npix[3], npix[0]:-npix[1]]
+                    if nanmask is not None:
+                        nanmask = nanmask[npix[2]:-npix[3], npix[0]:-npix[1]]
                     crpix1 -= npix[0]
                     crpix2 -= npix[2]
                     log.info('  --> Frame cropping: old shape = ' + str(sh[1:]) + ', new shape = ' + str(data.shape[1:]))
@@ -527,8 +529,7 @@ class ImageTools():
                         pxdq = np.bitwise_or(pxdq, pxdq_temp[k])
                     if imshifts is not None:
                         imshifts = np.mean(imshifts[:nframes * ncoadds].reshape((nframes, ncoadds, imshifts.shape[-1])), axis=0)
-                    if maskoffs is not None:
-                        maskoffs = np.mean(maskoffs[:nframes * ncoadds].reshape((nframes, ncoadds, maskoffs.shape[-1])), axis=0)
+
                     nints = data.shape[0]
                     effinttm *= nframes
                     log.info('  --> Frame coadding: %.0f coadd(s) of %.0f frame(s)' % (ncoadds, nframes))
