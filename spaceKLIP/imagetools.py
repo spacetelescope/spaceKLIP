@@ -3618,7 +3618,8 @@ class ImageTools():
                 if align_to_file is not None or j != l:
                     temp = np.median(shifts, axis=0)
                     mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
-            # self.shifts_all += [shifts]
+            if np.any(shifts == None):
+                log.warning('  --> Align frames: shifts None in %s')
             self.shifts_all[j] = shifts
             if imshifts is not None:
                 imshifts += shifts[:, :-1]
@@ -3668,10 +3669,10 @@ class ImageTools():
                                              verbose=False,
                                              save_figures=False)
                 # overwrite the old shift with a the new one  without outliers
-                self.shifts_all[j] = ImageTools_temp.shifts_all[-1]
+                self.shifts_all[j] = ImageTools_temp.shifts_all[0]
                 # overwrite the old entry for the database with the new one
-                ImageTools_temp.database.obs[key]['TYPE'][-1] = self.database.obs[key['TYPE']][j]
-                self.database.obs[key][j] = ImageTools_temp.database.obs[key][-1]
+                ImageTools_temp.database.obs[key]['TYPE'][-1] = self.database.obs[key]['TYPE'][j]
+                self.database.obs[key][j] = ImageTools_temp.database.obs[key][0]
                 # continue with the normal beheviour for align_frames for the next fitsfile
                 skip = True
                 # return self
