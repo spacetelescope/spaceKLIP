@@ -1017,9 +1017,11 @@ def prepare_group_masking_basic(steps, observations, star_center=None, quiet=Fal
                     # Subtract a median so we focus on brightest pixels
                     sci_frame -= np.nanmedian(sci_frame, axis=(1,2), keepdims=True)
 
-                    if not steps['mask_groups']['star_center']:
+                    if steps['mask_groups']['star_center'] is None:
                         # Crop around CRPIX
                         crpix_x, crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    elif steps['mask_groups']['star_center'] =='max':
+                        crpix_x, crpix_y = np.where(np.nanmedian(sci_frame,axis=[0])==np.nanmax(np.nanmedian(sci_frame,axis=[0])))[::-1]
                     else:
                         crpix_x, crpix_y = steps['mask_groups']['star_center']
                     xlo = int(crpix_x) - crop
@@ -1041,9 +1043,11 @@ def prepare_group_masking_basic(steps, observations, star_center=None, quiet=Fal
                     # Subtract a median so we focus on brightest pixels
                     ref_cube -= np.nanmedian(ref_cube, axis=(2,3), keepdims=True)
 
-                    if not steps['mask_groups']['star_center']:
+                    if steps['mask_groups']['star_center'] is None:
                         # Crop around CRPIX
                         crpix_x, crpix_y = hdul["SCI"].header["CRPIX1"], hdul["SCI"].header["CRPIX2"]
+                    elif steps['mask_groups']['star_center'] =='max':
+                        crpix_x, crpix_y = np.where(np.nanmedian(ref_cube,axis=[0,1])==np.nanmax(np.nanmedian(ref_cube,axis=[0,1])))[::-1]
                     else:
                         crpix_x, crpix_y = steps['mask_groups']['star_center']
                     xlo = int(crpix_x) - crop
