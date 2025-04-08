@@ -201,6 +201,9 @@ class Database():
         STARCENX = [] # pix
         STARCENY = [] # pix
         ALIGNSHIFT = [] # pix
+        CENTER_SHIFT = [] # pix
+        ALIGN_MASK = []  # pix
+        CENTER_MASK = []  # pix
         VPARITY = []
         V3I_YANG = []  # deg
         RA_REF = []  # deg
@@ -298,6 +301,9 @@ class Database():
             STARCENX += [head.get('STARCENX', MASKCENX[-1])]
             STARCENY += [head.get('STARCENY', MASKCENY[-1])]
             ALIGNSHIFT += [head.get('ALIGNSHIFT', np.zeros)]
+            CENTER_SHIFT += [head.get('CENTER_SHIFT', np.zeros)]
+            ALIGN_MASK += [head.get('ALIGN_MASK', np.zeros)]
+            CENTER_MASK += [head.get('CENTER_MASK', np.zeros)]
             VPARITY += [head.get('VPARITY', -1)]
             V3I_YANG += [head.get('V3I_YANG', 0.)]
             RA_REF += [head.get('RA_REF', np.nan)]
@@ -339,6 +345,9 @@ class Database():
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
         ALIGNSHIFT = np.array(ALIGNSHIFT)
+        CENTER_SHIFT = np.array(CENTER_SHIFT)
+        ALIGN_MASK = np.array(ALIGN_MASK)
+        CENTER_MASK = np.array(CENTER_MASK)
         VPARITY = np.array(VPARITY)
         V3I_YANG = np.array(V3I_YANG)
         RA_REF = np.array(RA_REF)
@@ -442,6 +451,9 @@ class Database():
                                'STARCENX',
                                'STARCENY',
                                'ALIGNSHIFT',
+                               'CENTER_SHIFT',
+                               'ALIGN_MASK',
+                               'CENTER_MASK',
                                'RA_REF',
                                'DEC_REF',
                                'ROLL_REF',
@@ -480,6 +492,9 @@ class Database():
                                'float',
                                'float',
                                'float',
+                               'object',
+                               'object',
+                               'object',
                                'object',
                                'float',
                                'float',
@@ -569,6 +584,9 @@ class Database():
                              STARCENX[ww][j],
                              STARCENY[ww][j],
                              ALIGNSHIFT[ww][j],
+                             CENTER_SHIFT[ww][j],
+                             ALIGN_MASK[ww][j],
+                             CENTER_MASK[ww][j],
                              RA_REF[ww][j],
                              DEC_REF[ww][j],
                              ROLL_REF[ww][j] - V3I_YANG[ww][j] * VPARITY[ww][j],
@@ -1178,6 +1196,9 @@ class Database():
                    starcenx=None,
                    starceny=None,
                    alignshift=None,
+                   center_shift=None,
+                   align_mask=None,
+                   center_mask=None,
                    blurfwhm=None,
                    update_pxar=False):
         """
@@ -1271,6 +1292,12 @@ class Database():
             self.obs[key]['STARCENY'][index] = starceny
         if alignshift is not None:
             self.obs[key]['ALIGNSHIFT'][index] = alignshift
+        if center_shift is not None:
+            self.obs[key]['CENTER_SHIFT'][index] = center_shift
+        if align_mask is not None:
+            self.obs[key]['ALIGN_MASK'][index] = align_mask
+        if center_mask is not None:
+            self.obs[key]['CENTER_MASK'][index] = center_mask
         if blurfwhm is not None:
             self.obs[key]['BLURFWHM'][index] = blurfwhm
         self.obs[key]['FITSFILE'][index] = fitsfile
