@@ -145,9 +145,21 @@ def read_obs(fitsfile,
     if data.ndim != 3:
         raise UserWarning('Requires 2D/3D data cube')
     try:
-        imshifts = hdul['IMSHIFTS'].data
+        alignshift = hdul['ALIGNSHIFT'].data
     except KeyError:
-        imshifts = None
+        alignshift = None
+    try:
+        center_shift = hdul['CENTER_SHIFT'].data
+    except KeyError:
+        center_shift = None
+    try:
+        align_mask = hdul['ALIGN_MASK'].data
+    except KeyError:
+        align_mask = None
+    try:
+        center_mask = hdul['CENTER_MASK'].data
+    except KeyError:
+        center_mask = None
     try:
         maskoffs = hdul['MASKOFFS'].data
     except KeyError:
@@ -158,9 +170,9 @@ def read_obs(fitsfile,
     hdul.close()
     
     if return_var:
-        return data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs, var_poisson, var_rnoise
+        return data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs, var_poisson, var_rnoise
     else:
-        return data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs
+        return data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs
 
 def write_obs(fitsfile,
               output_dir,
@@ -170,7 +182,10 @@ def write_obs(fitsfile,
               head_pri,
               head_sci,
               is2d,
-              imshifts=None,
+              alignshift=None,
+              center_shift=None,
+              align_mask=None,
+              center_mask=None,
               maskoffs=None,
               var_poisson=None,
               var_rnoise=None):
@@ -225,11 +240,29 @@ def write_obs(fitsfile,
         hdul['DQ'].data = pxdq
     hdul[0].header = head_pri
     hdul['SCI'].header = head_sci
-    if imshifts is not None:
+    if alignshift is not None:
         try:
-            hdul['IMSHIFTS'].data = imshifts
+            hdul['ALIGNSHIFT'].data = alignshift
         except KeyError:
-            hdu = pyfits.ImageHDU(imshifts, name='IMSHIFTS')
+            hdu = pyfits.ImageHDU(alignshift, name='ALIGNSHIFT')
+            hdul.append(hdu)
+    if center_shift is not None:
+        try:
+            hdul['CENTER_SHIFT'].data = center_shift
+        except KeyError:
+            hdu = pyfits.ImageHDU(center_shift, name='CENTER_SHIFT')
+            hdul.append(hdu)
+    if align_mask is not None:
+        try:
+            hdul['ALIGN_MASK'].data = align_mask
+        except KeyError:
+            hdu = pyfits.ImageHDU(align_mask, name='ALIGN_MASK')
+            hdul.append(hdu)
+    if center_mask is not None:
+        try:
+            hdul['CENTER_MASK'].data = center_mask
+        except KeyError:
+            hdu = pyfits.ImageHDU(center_mask, name='CENTER_MASK')
             hdul.append(hdu)
     if maskoffs is not None:
         try:
