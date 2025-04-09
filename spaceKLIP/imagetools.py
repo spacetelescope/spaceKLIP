@@ -2644,7 +2644,7 @@ class ImageTools():
 
                     # Read FITS file and PSF mask.
                     fitsfile = self.database.obs[key]['FITSFILE'][j]
-                    data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+                    data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                     maskfile = self.database.obs[key]['MASKFILE'][j]
                     mask = ut.read_msk(maskfile)
 
@@ -2813,13 +2813,14 @@ class ImageTools():
                             pass
                         xoffset = self.database.obs[key]['XOFFSET'][j] - self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
                         yoffset = self.database.obs[key]['YOFFSET'][j] - self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
+
                         # Update star center
                         starcenx = (data.shape[-1] - 1.) / 2. + 1.  # 1-indexed
                         starceny = (data.shape[-2] - 1.) / 2. + 1.  # 1-indexed
 
                         # Update mask center (using the shift of the first frame)
-                        maskcenx = starcenx -xshift  # 1-indexed
-                        maskceny = starceny -yshift  # 1-indexed
+                        #maskcenx = starcenx -xshift  # 1-indexed
+                        #maskceny = starceny -yshift  # 1-indexed
                     
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
@@ -2836,8 +2837,8 @@ class ImageTools():
                         starcenx = self.database.obs[key]['STARCENX'][j]  # 1-indexed
                         starceny = self.database.obs[key]['STARCENY'][j]  # 1-indexed
 
-                        maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1-indexed
-                        maskceny = self.database.obs[key]['MASKCENY'][j]  # 1-indexed
+                        #maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1-indexed
+                        #maskceny = self.database.obs[key]['MASKCENY'][j]  # 1-indexed
 
                     # Other data types.
                     else:
@@ -2872,8 +2873,8 @@ class ImageTools():
                         starcenx = data.shape[-1]//2 + 1  # 1-indexed
                         starceny = data.shape[-2]//2 + 1  # 1-indexed
 
-                        maskcenx = None
-                        maskceny = None
+                        #maskcenx = None
+                        #maskceny = None
 
                 # TA data.
                 if j in ww_sci_ta or j in ww_ref_ta:
@@ -2907,8 +2908,8 @@ class ImageTools():
                     starcenx = data.shape[-1]//2 + 1  # 1-indexed
                     starceny = data.shape[-2]//2 + 1  # 1-indexed
 
-                    maskcenx = None
-                    maskceny = None
+                    #maskcenx = None
+                    #maskceny = None
 
                 shifts = np.array(shifts)
                 shifts_all += [shifts]
@@ -2939,14 +2940,14 @@ class ImageTools():
                 head_pri['YOFFSET'] = yoffset #arcsec
                 head_sci['STARCENX'] = starcenx
                 head_sci['STARCENY'] = starceny
-                if maskcenx is not None:
-                    head_sci['MASKCENX'] = maskcenx
-                    head_sci['MASKCENY'] = maskceny
+                #if maskcenx is not None:
+                #    head_sci['MASKCENX'] = maskcenx
+                #    head_sci['MASKCENY'] = maskceny
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, starcenx=starcenx, starceny=starceny,maskcenx=maskcenx, maskceny=maskceny, center_shift=center_shift, center_mask=center_mask)
+                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, starcenx=starcenx, starceny=starceny, center_shift=center_shift, center_mask=center_mask)
 
         pass
 
@@ -3421,8 +3422,8 @@ class ImageTools():
                 maskceny = maskcen[0,1] + shifts[0,1]
                 crpix1 = crpix[0,0] + shifts[0,0]
                 crpix2 = crpix[0,1] + shifts[0,1]
-                head_sci['MASKCENX'] = maskcenx
-                head_sci['MASKCENY'] = maskceny
+                #head_sci['MASKCENX'] = maskcenx
+                #head_sci['MASKCENY'] = maskceny
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs)
