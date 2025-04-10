@@ -15,7 +15,7 @@ def test_utils_read_obs():
     fitsfiles.sort()
     fn = fitsfiles[0]
 
-    data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs =  spaceKLIP.utils.read_obs(fn)
+    data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs =  spaceKLIP.utils.read_obs(fn)
 
     assert isinstance(data, np.ndarray), "read_obs didn't return a numpy data array"
     assert isinstance(head_pri, astropy.io.fits.Header), "read_obs didn't return a FITS header"
