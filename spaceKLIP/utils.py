@@ -110,9 +110,18 @@ def read_obs(fitsfile,
         'SCI' extension FITS header.
     is2d : bool
         Is the original data 2D?
-    imshifts : 2D-array
-        Array of shape (nints, 2) containing the total shifts applied to the
+    alignshift : 2D-array
+        Array of shape (nints, 2) containing the alignment shifts applied to the
         frames. None if not available.
+    center_shift : 2D-array
+        Array of shape (nints, 2) containing the recentering shifts applied to the
+        frames. None if not available.
+    align_mask : 2D-array
+        Array of shape (nints, 2) containing the alignment shifts applied to the
+        masks. None if not available.
+    center_mask : 2D-array
+        Array of shape (nints, 2) containing the recentering shifts applied to the
+        masks. None if not available.
     maskoffs : 2D-array
         Array of shape (nints, 2) containing the offsets between the star and
         coronagraphic mask position. None if not available.
@@ -210,9 +219,18 @@ def write_obs(fitsfile,
         'SCI' extension FITS header.
     is2d : bool
         Is the original data 2D?
-    imshifts : 2D-array, optional
-        Array of shape (nints, 2) containing the total shifts applied to the
-        frames. The default is None.
+    alignshift : 2D-array
+        Array of shape (nints, 2) containing the alignment shifts applied to the
+        frames. None if not available.
+    center_shift : 2D-array
+        Array of shape (nints, 2) containing the recentering shifts applied to the
+        frames. None if not available.
+    align_mask : 2D-array
+        Array of shape (nints, 2) containing the alignment shifts applied to the
+        masks. None if not available.
+    center_mask : 2D-array
+        Array of shape (nints, 2) containing the recentering shifts applied to the
+        masks. None if not available.
     maskoffs : 2D-array, optional
         Array of shape (nints, 2) containing the offsets between the star and
         coronagraphic mask position. The default is None.
