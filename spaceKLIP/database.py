@@ -1245,6 +1245,14 @@ class Database():
         starceny : float, optional
             New star y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
+        alignshift: object
+            Array of shift values to recenter science frames. The default is None.
+        center_shift: object
+            Array of shift values to align science frames. The default is None.
+        align_mask: object
+            Array of shift values to align masks. The default is None.
+        center_mask: object
+            Array of shift values to recenter masks. The default is None.
         blurfwhm : float, optional
             New FWHM for the Gaussian filter blurring (pix) for the observation
             to be updated. The default is None.
