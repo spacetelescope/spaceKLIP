@@ -106,7 +106,7 @@ def run_obs(database,
             
             # Read reference file.
             fitsfile = database.obs[key]['FITSFILE'][j]
-            data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+            data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
             
             # For now this routine does not work with nans.
             # if np.sum(np.isnan(data)) != 0:
@@ -142,7 +142,7 @@ def run_obs(database,
                 
                 # Read science file.
                 fitsfile = database.obs[key]['FITSFILE'][j]
-                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+                data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 # pxdq = fits.getdata(fitsfile.replace('spaceklip_custom_flat', 'spaceklip'), 'DQ')
                 maskfile = database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
