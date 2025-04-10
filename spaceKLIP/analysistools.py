@@ -1165,124 +1165,124 @@ class AnalysisTools():
                 else:
                     split_fit = False
 
+                if split_fit:
+                    if not all(x in kwargs.keys() for x in ['sigma_xguess', 'sigma_yguess',  'scale_guess', 'theta_guess']):
+                        gauss_param_guesses = [0.3,0.3,0,0]
+                    else:
+                        gauss_param_guesses = [kwargs['sigma_xguess'], kwargs['sigma_yguess'], kwargs['scale_guess'], kwargs['theta_guess']]
+
+                    tab = Table(names=('ID',
+                                       'RA',
+                                       'RA_ERR',
+                                       'DEC',
+                                       'DEC_ERR',
+                                       'FLUX_JY',
+                                       'FLUX_JY_ERR',
+                                       'FLUX_SI',
+                                       'FLUX_SI_ERR',
+                                       'FLUX_SI_ALT',
+                                       'FLUX_SI_ALT_ERR',
+                                       'CON',
+                                       'CON_ERR',
+                                       'DELMAG',
+                                       'DELMAG_ERR',
+                                       'APPMAG',
+                                       'APPMAG_ERR',
+                                       'MSTAR',
+                                       'MSTAR_ERR',
+                                       'SNR',
+                                       'LN(Z/Z0)',
+                                       'TP_CORONMSK',
+                                       'TP_COMSUBST',
+                                       'FITSFILE',
+                                       'SIGMA_X',
+                                       'SIGMA_X_ERROR',
+                                       'SIGMA_Y',
+                                       'SIGMA_Y_ERROR',
+                                       'THETA',
+                                       'THETA_ERROR'),
+                                dtype=('int',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'object',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float'))
+                else:
+                    # Loop through companions.
+                    tab = Table(names=('ID',
+                                       'RA',
+                                       'RA_ERR',
+                                       'DEC',
+                                       'DEC_ERR',
+                                       'FLUX_JY',
+                                       'FLUX_JY_ERR',
+                                       'FLUX_SI',
+                                       'FLUX_SI_ERR',
+                                       'FLUX_SI_ALT',
+                                       'FLUX_SI_ALT_ERR',
+                                       'CON',
+                                       'CON_ERR',
+                                       'DELMAG',
+                                       'DELMAG_ERR',
+                                       'APPMAG',
+                                       'APPMAG_ERR',
+                                       'MSTAR',
+                                       'MSTAR_ERR',
+                                       'SNR',
+                                       'LN(Z/Z0)',
+                                       'TP_CORONMSK',
+                                       'TP_COMSUBST',
+                                       'FITSFILE'),
+                                dtype=('int',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'object'))
                 # Loop through companions.
                 for k in range(len(companions)):
-                    if split_fit:
-                        if not all(x in kwargs.keys() for x in ['sigma_xguess', 'sigma_yguess',  'scale_guess', 'theta_guess']):
-                            gauss_param_guesses = [0.3,0.3,0,0]
-                        else:
-                            gauss_param_guesses = [kwargs['sigma_xguess'], kwargs['sigma_yguess'], kwargs['scale_guess'], kwargs['theta_guess']]
-
-                        tab = Table(names=('ID',
-                                           'RA',
-                                           'RA_ERR',
-                                           'DEC',
-                                           'DEC_ERR',
-                                           'FLUX_JY',
-                                           'FLUX_JY_ERR',
-                                           'FLUX_SI',
-                                           'FLUX_SI_ERR',
-                                           'FLUX_SI_ALT',
-                                           'FLUX_SI_ALT_ERR',
-                                           'CON',
-                                           'CON_ERR',
-                                           'DELMAG',
-                                           'DELMAG_ERR',
-                                           'APPMAG',
-                                           'APPMAG_ERR',
-                                           'MSTAR',
-                                           'MSTAR_ERR',
-                                           'SNR',
-                                           'LN(Z/Z0)',
-                                           'TP_CORONMSK',
-                                           'TP_COMSUBST',
-                                           'FITSFILE',
-                                           'SIGMA_X',
-                                           'SIGMA_X_ERROR',
-                                           'SIGMA_Y',
-                                           'SIGMA_Y_ERROR',
-                                           'THETA',
-                                           'THETA_ERROR'),
-                                    dtype=('int',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'object',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float'))
-                    else:
-                        # Loop through companions.
-                        tab = Table(names=('ID',
-                                           'RA',
-                                           'RA_ERR',
-                                           'DEC',
-                                           'DEC_ERR',
-                                           'FLUX_JY',
-                                           'FLUX_JY_ERR',
-                                           'FLUX_SI',
-                                           'FLUX_SI_ERR',
-                                           'FLUX_SI_ALT',
-                                           'FLUX_SI_ALT_ERR',
-                                           'CON',
-                                           'CON_ERR',
-                                           'DELMAG',
-                                           'DELMAG_ERR',
-                                           'APPMAG',
-                                           'APPMAG_ERR',
-                                           'MSTAR',
-                                           'MSTAR_ERR',
-                                           'SNR',
-                                           'LN(Z/Z0)',
-                                           'TP_CORONMSK',
-                                           'TP_COMSUBST',
-                                           'FITSFILE'),
-                                    dtype=('int',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'float',
-                                           'object'))
                     output_dir_comp = os.path.join(output_dir_kl, 'C%.0f' % (k + 1))
                     if not os.path.exists(output_dir_comp):
                         os.makedirs(output_dir_comp)
@@ -1670,168 +1670,197 @@ class AnalysisTools():
 
                         # MCMC.
                         if fitmethod == 'mcmc':
+                            try:
+                                # Initialize pyKLIP FMAstrometry class.
+                                fma = fitpsf.FMAstrometry(guess_sep=guess_sep,
+                                                          guess_pa=guess_pa,
+                                                          fitboxsize=boxsize,
+                                                          )
+                                fma.generate_fm_stamp(fm_image=fm_frame,
+                                                      fm_center=[fm_centx, fm_centy],
+                                                      padding=5)
+                                fma.generate_data_stamp(data=data_frame,
+                                                        data_center=[data_centx, data_centy],
+                                                        dr=dr,
+                                                        exclusion_radius=exclr)
+                                corr_len_label = r'$l$'
+                                fma.set_kernel(fitkernel, [corr_len_guess], [corr_len_label])
+                                fma.set_bounds(xrange, yrange, frange, [corr_len_range])
 
-                            # Initialize pyKLIP FMAstrometry class.
-                            fma = fitpsf.FMAstrometry(guess_sep=guess_sep,
-                                                      guess_pa=guess_pa,
-                                                      fitboxsize=boxsize,
-                                                      )
-                            fma.generate_fm_stamp(fm_image=fm_frame,
-                                                  fm_center=[fm_centx, fm_centy],
-                                                  padding=5)
-                            fma.generate_data_stamp(data=data_frame,
-                                                    data_center=[data_centx, data_centy],
-                                                    dr=dr,
-                                                    exclusion_radius=exclr)
-                            corr_len_label = r'$l$'
-                            fma.set_kernel(fitkernel, [corr_len_guess], [corr_len_label])
-                            fma.set_bounds(xrange, yrange, frange, [corr_len_range])
-                            
-                            # Make sure that the noise map is invertible.
-                            noise_map_max = np.nanmax(fma.noise_map)
-                            fma.noise_map[np.isnan(fma.noise_map)] = noise_map_max
-                            fma.noise_map[fma.noise_map == 0.] = noise_map_max
-                            
-                            # Set MCMC parameters from kwargs.
-                            if 'nwalkers' not in kwargs.keys() or kwargs['nwalkers'] is None:
-                                nwalkers = 50
-                            else:
-                                nwalkers = kwargs['nwalkers']
-                            if 'nburn' not in kwargs.keys() or kwargs['nburn'] is None:
-                                nburn = 100
-                            else:
-                                nburn = kwargs['nburn']
-                            if 'nsteps' not in kwargs.keys() or kwargs['nsteps'] is None:
-                                nsteps = 100
-                            else:
-                                nsteps = kwargs['nsteps']
-                            if 'nthreads' not in kwargs.keys() or kwargs['nthreads'] is None:
-                                nthreads = 4
-                            else:
-                                nthreads = kwargs['nthreads']
+                                # Make sure that the noise map is invertible.
+                                noise_map_max = np.nanmax(fma.noise_map)
+                                fma.noise_map[np.isnan(fma.noise_map)] = noise_map_max
+                                fma.noise_map[fma.noise_map == 0.] = noise_map_max
 
-                            # Run the MCMC fit.
-                            chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-bka_chain_c%.0f' % (k + 1) + '.pkl')
-                            fma.fit_astrometry(nwalkers=nwalkers,
-                                               nburn=nburn,
-                                               nsteps=nsteps,
-                                               numthreads=nthreads,
-                                               chain_output=chain_output)
-                            
-                            # Plot the MCMC fit results.
-                            fig = fma.make_corner_plot()
-                            if save_figures:
-                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
-                                fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
-                                fig.savefig(path)
-                            plt.show()
-                            plt.close(fig)
-                            fig = fma.best_fit_and_residuals()
-                            if save_figures:
-                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
-                                fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
-                                fig.savefig(path)
-                            plt.show()
-                            plt.close(fig)
-                            path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                                subsections) + '_' + key + '-post_burnin_traces_c%.0f' % (k + 1) + '.pdf')
-                            fig=plot_traces(fma,nburn=nburn, path=path)
+                                # Set MCMC parameters from kwargs.
+                                if 'nwalkers' not in kwargs.keys() or kwargs['nwalkers'] is None:
+                                    nwalkers = 50
+                                else:
+                                    nwalkers = kwargs['nwalkers']
+                                if 'nburn' not in kwargs.keys() or kwargs['nburn'] is None:
+                                    nburn = 100
+                                else:
+                                    nburn = kwargs['nburn']
+                                if 'nsteps' not in kwargs.keys() or kwargs['nsteps'] is None:
+                                    nsteps = 100
+                                else:
+                                    nsteps = kwargs['nsteps']
+                                if 'nthreads' not in kwargs.keys() or kwargs['nthreads'] is None:
+                                    nthreads = 4
+                                else:
+                                    nthreads = kwargs['nthreads']
 
-                            # Write the MCMC fit results into a table.
-                            flux_jy = fma.fit_flux.bestfit * guess_flux
-                            flux_jy *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            flux_jy_err = fma.fit_flux.error * guess_flux
-                            flux_jy_err *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            flux_si = fma.fit_flux.bestfit * guess_flux
-                            flux_si *= fzero_si[filt] / 10**(mstar[filt] / 2.5)  # erg/cm^2/s/A
-                            flux_si *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                            flux_si_err = fma.fit_flux.error * guess_flux
-                            flux_si_err *= fzero_si[filt] / 10**(mstar[filt] / 2.5)  # erg/cm^2/s/A
-                            flux_si_err *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                            flux_si_alt = flux_jy * 1e-26 * 299792458. / (1e-6 * self.database.red[key]['CWAVEL'][j])**2 * 1e-6  # W/m^2/um
-                            flux_si_alt_err = flux_jy_err * 1e-26 * 299792458. / (1e-6 * self.database.red[key]['CWAVEL'][j])**2 * 1e-6  # W/m^2/um
-                            delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
-                            delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
-                            if isinstance(mstar_err, dict):
-                                mstar_err_temp = mstar_err[filt]
-                            else:
-                                mstar_err_temp = mstar_err
-                            appmag = mstar[filt] + delmag  # vegamag
-                            appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
-                            fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
+                                # Run the MCMC fit.
+                                chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-bka_chain_c%.0f' % (k + 1) + '.pkl')
+                                fma.fit_astrometry(nwalkers=nwalkers,
+                                                   nburn=nburn,
+                                                   nsteps=nsteps,
+                                                   numthreads=nthreads,
+                                                   chain_output=chain_output)
 
-                            if split_fit:
-                                # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
-                                fig, result = best_convfit_and_residuals(fma,
-                                                                         minmethod=minmethod,
-                                                                         initial_params=gauss_param_guesses)
-
+                                # Plot the MCMC fit results.
+                                fig = fma.make_corner_plot()
                                 if save_figures:
-                                    path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_conv_c%.0f' % (k + 1) + '.pdf')
+                                    path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
                                     fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
                                     fig.savefig(path)
                                 plt.show()
                                 plt.close(fig)
+                                fig = fma.best_fit_and_residuals()
+                                if save_figures:
+                                    path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
+                                    fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
+                                    fig.savefig(path)
+                                plt.show()
+                                plt.close(fig)
+                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                                    subsections) + '_' + key + '-post_burnin_traces_c%.0f' % (k + 1) + '.pdf')
+                                fig=plot_traces(fma,nburn=nburn, path=path)
 
+                                # Write the MCMC fit results into a table.
+                                flux_jy = fma.fit_flux.bestfit * guess_flux
+                                flux_jy *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
+                                flux_jy_err = fma.fit_flux.error * guess_flux
+                                flux_jy_err *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
+                                flux_si = fma.fit_flux.bestfit * guess_flux
+                                flux_si *= fzero_si[filt] / 10**(mstar[filt] / 2.5)  # erg/cm^2/s/A
+                                flux_si *= 1e-7 * 1e4 * 1e4  # W/m^2/um
+                                flux_si_err = fma.fit_flux.error * guess_flux
+                                flux_si_err *= fzero_si[filt] / 10**(mstar[filt] / 2.5)  # erg/cm^2/s/A
+                                flux_si_err *= 1e-7 * 1e4 * 1e4  # W/m^2/um
+                                flux_si_alt = flux_jy * 1e-26 * 299792458. / (1e-6 * self.database.red[key]['CWAVEL'][j])**2 * 1e-6  # W/m^2/um
+                                flux_si_alt_err = flux_jy_err * 1e-26 * 299792458. / (1e-6 * self.database.red[key]['CWAVEL'][j])**2 * 1e-6  # W/m^2/um
+                                delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
+                                delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
+                                if isinstance(mstar_err, dict):
+                                    mstar_err_temp = mstar_err[filt]
+                                else:
+                                    mstar_err_temp = mstar_err
+                                appmag = mstar[filt] + delmag  # vegamag
+                                appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
+                                fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
+
+                                if split_fit:
+                                    # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
+                                    fig, result = best_convfit_and_residuals(fma,
+                                                                             minmethod=minmethod,
+                                                                             initial_params=gauss_param_guesses)
+
+                                    if save_figures:
+                                        path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_conv_c%.0f' % (k + 1) + '.pdf')
+                                        fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
+                                        fig.savefig(path)
+                                    plt.show()
+                                    plt.close(fig)
+
+                                    tab.add_row((k + 1,
+                                                 fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
+                                                 fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
+                                                 fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
+                                                 fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
+                                                 flux_jy,
+                                                 flux_jy_err,
+                                                 flux_si,
+                                                 flux_si_err,
+                                                 flux_si_alt,
+                                                 flux_si_alt_err,
+                                                 fma.raw_flux.bestfit * guess_flux,
+                                                 fma.raw_flux.error * guess_flux,
+                                                 delmag,  # mag
+                                                 delmag_err,  # mag
+                                                 appmag,  # mag
+                                                 appmag_err,  # mag
+                                                 mstar[filt],  # mag
+                                                 mstar_err_temp,  # mag
+                                                 np.nan,
+                                                 np.nan,
+                                                 scale_factor_avg,
+                                                 tp_comsubst,
+                                                 fitsfile,
+                                                 result.x[0],
+                                                 np.nan,
+                                                 result.x[1],
+                                                 np.nan,
+                                                 result.x[2],
+                                                 np.nan,
+                                                 ))
+                                else:
+                                    tab.add_row((k + 1,
+                                                 fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
+                                                 fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
+                                                 fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
+                                                 fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
+                                                 flux_jy,
+                                                 flux_jy_err,
+                                                 flux_si,
+                                                 flux_si_err,
+                                                 flux_si_alt,
+                                                 flux_si_alt_err,
+                                                 fma.raw_flux.bestfit * guess_flux,
+                                                 fma.raw_flux.error * guess_flux,
+                                                 delmag,  # mag
+                                                 delmag_err,  # mag
+                                                 appmag,  # mag
+                                                 appmag_err,  # mag
+                                                 mstar[filt],  # mag
+                                                 mstar_err_temp,  # mag
+                                                 np.nan,
+                                                 np.nan,
+                                                 scale_factor_avg,
+                                                 tp_comsubst,
+                                                 fitsfile))
+                                    # Write the FM PSF to a file for future plotting.
+                                    ut.write_fitpsf_images(fma, fitsfile, tab[-1])
+
+                            except Exception as e:
+                                subtract = False
+                                inject = False
+                                remove_background = False
+                                log.warning(f'  --> {e.args}. Skipping.')
                                 tab.add_row((k + 1,
-                                             fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
-                                             flux_jy,
-                                             flux_jy_err,
-                                             flux_si,
-                                             flux_si_err,
-                                             flux_si_alt,
-                                             flux_si_alt_err,
-                                             fma.raw_flux.bestfit * guess_flux,
-                                             fma.raw_flux.error * guess_flux,
-                                             delmag,  # mag
-                                             delmag_err,  # mag
-                                             appmag,  # mag
-                                             appmag_err,  # mag
-                                             mstar[filt],  # mag
-                                             mstar_err_temp,  # mag
+                                             np.nan,  # arcsec
+                                             np.nan,  # arcsec
+                                             np.nan,  # arcsec
+                                             np.nan,  # arcsec
                                              np.nan,
                                              np.nan,
-                                             scale_factor_avg,
-                                             tp_comsubst,
-                                             fitsfile,
-                                             result.x[0],
-                                             np.nan,
-                                             result.x[1],
-                                             np.nan,
-                                             result.x[2],
-                                             np.nan,
-                                             ))
-                            else:
-                                tab.add_row((k + 1,
-                                             fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
-                                             flux_jy,
-                                             flux_jy_err,
-                                             flux_si,
-                                             flux_si_err,
-                                             flux_si_alt,
-                                             flux_si_alt_err,
-                                             fma.raw_flux.bestfit * guess_flux,
-                                             fma.raw_flux.error * guess_flux,
-                                             delmag,  # mag
-                                             delmag_err,  # mag
-                                             appmag,  # mag
-                                             appmag_err,  # mag
-                                             mstar[filt],  # mag
-                                             mstar_err_temp,  # mag
                                              np.nan,
                                              np.nan,
-                                             scale_factor_avg,
-                                             tp_comsubst,
-                                             fitsfile))
-                            
-                            # Write the FM PSF to a file for future plotting.
-                            ut.write_fitpsf_images(fma, fitsfile, tab[-1])
+                                             np.nan,
+                                             np.nan,
+                                             np.nan,
+                                             np.nan,
+                                             np.nan,  # mag
+                                             np.nan,  # mag
+                                             np.nan,  # mag
+                                             np.nan,  # mag
+                                             np.nan,  # mag
+                                             np.nan,  # mag
+                                             np.nan,
+                                             np.nan,
+                                             np.nan,
+                                             np.nan,
+                                             np.nan))
                         
                         # Nested sampling.
                         elif fitmethod == 'nested':
@@ -2062,15 +2091,24 @@ class AnalysisTools():
                     if subtract:
                         dataset = dataset_orig
 
-                    # Update source database.
-                    self.database.update_src(key, j, tab)
+                    # # Save the results table.
+                    # output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                    #     subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                    # tab[-1].write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
+                    # log.info(f'Table saved to {output_ecsv_path}')
 
-                    # Save the results table.
-                    output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                        subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
-                    tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
-                    log.info(f'Table saved to {output_ecsv_path}')
+                # Update source database.
+                self.database.update_src(key, j, tab)
+
+
+                # Save the results table.
+                output_ecsv_path = os.path.join(output_dir_kl, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                    subsections) + '_' + key + '-results.ecsv')
+                tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
+                log.info(f'Table saved to {output_ecsv_path}')
+
         pass
+
 
 def loss_function(params,
                   offset_psf,
