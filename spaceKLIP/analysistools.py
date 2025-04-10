@@ -1836,7 +1836,8 @@ class AnalysisTools():
                                 subtract = False
                                 inject = False
                                 remove_background = False
-                                log.warning(f'  --> {e.args}. Skipping.')
+                                log.warning(f'[{type(e).__name__}] --> {e.args}. Skipping.')
+
                                 tab.add_row((k + 1,
                                              np.nan,  # arcsec
                                              np.nan,  # arcsec
