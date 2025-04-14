@@ -2708,11 +2708,12 @@ class ImageTools():
                           highpass=False,
                           subdir='recentered'):
         """
-        Calculate shifts necessary to recenter frames so that the host star position is data.shape // 2. For
-        NIRCam coronagraphy, use a WebbPSF model to determine the star position
-        behind the coronagraphic mask for the first SCI frame. Then, shift all
-        other SCI and REF frames by the same amount. For MIRI coronagraphy, do
-        nothing. For all other data types, simply recenter the host star PSF.
+        Calculate shifts necessary to recenter frames so that the host star
+        position is data.shape // 2. For NIRCam coronagraphy, use a WebbPSF model
+        to determine the star position behind the coronagraphic mask for the
+        first SCI frame. Then, shift all other SCI and REF frames by the same amount.
+        For MIRI coronagraphy, do nothing. For all other data types, simply recenter
+        the host star PSF.
 
         Parameters
         ----------
@@ -2746,7 +2747,6 @@ class ImageTools():
         Returns
         -------
         None.
-
         """
 
         # Update NIRCam coronagraphy centers, i.e., change SIAF CRPIX position
@@ -2915,7 +2915,7 @@ class ImageTools():
                 head_pri['YOFFSET'] = yoffset #arcsec
                 head_sci['STARCENX'] = starcenx
                 head_sci['STARCENY'] = starceny
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
