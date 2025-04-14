@@ -2699,14 +2699,14 @@ class ImageTools():
         pass
 
     def calculate_centers(self,
-                        method='fourier',
-                        subpix_first_sci_only=False,
-                        first_sci_only=True,
-                        spectral_type='G2V',
-                        shft_exp=1,
-                        kwargs={},
-                        highpass=False,
-                        subdir='recentered'):
+                          method='fourier',
+                          subpix_first_sci_only=False,
+                          first_sci_only=True,
+                          spectral_type='G2V',
+                          shft_exp=1,
+                          kwargs={},
+                          highpass=False,
+                          subdir='recentered'):
         """
         Calculate shifts necessary to recenter frames so that the host star position is data.shape // 2. For
         NIRCam coronagraphy, use a WebbPSF model to determine the star position
@@ -3116,16 +3116,16 @@ class ImageTools():
 
     @plt.style.context('spaceKLIP.sk_style')
     def calculate_alignment(self,
-                     method='fourier',
-                     align_algo='leastsq',
-                     mask_override=None,
-                     msk_shp=8,
-                     shft_exp=1,
-                     align_to_file=None,
-                     scale_prior=False,
-                     kwargs={},
-                     subdir='aligned',
-                     save_figures=True):
+                            method='fourier',
+                            align_algo='leastsq',
+                            mask_override=None,
+                            msk_shp=8,
+                            shft_exp=1,
+                            align_to_file=None,
+                            scale_prior=False,
+                            kwargs={},
+                            subdir='aligned',
+                            save_figures=True):
         """
         Calculate shifts necessary to align all SCI and REF frames to the first SCI frame.
 
@@ -3671,19 +3671,19 @@ class ImageTools():
 
     @plt.style.context('spaceKLIP.sk_style')
     def subtract_nircam_coron_background(self,
-                                        subdir='bgsub',
-                                        mask_snr_threshold=2,
-                                        r_excl_nfwhm=40,
-                                        q_clip=5.,
-                                        align_wrapped=True,
-                                        include_global_offset=True,
-                                        include_stellar_psf_component=True,
-                                        generate_plot=True,
-                                        save_model=False,
-                                        use_jbt_background=False,
-                                        bgmodel_dir=None, 
-                                        background_sb={},
-                                        restrict_to=None):
+                                         subdir='bgsub',
+                                         mask_snr_threshold=2,
+                                         r_excl_nfwhm=40,
+                                         q_clip=5.,
+                                         align_wrapped=True,
+                                         include_global_offset=True,
+                                         include_stellar_psf_component=True,
+                                         generate_plot=True,
+                                         save_model=False,
+                                         use_jbt_background=False,
+                                         bgmodel_dir=None, 
+                                         background_sb={},
+                                         restrict_to=None):
         """
         Fits and subtracts the astrophysical background in NIRCam coronagraphic
         data following the procedure described in Lawson et al. (2024).
