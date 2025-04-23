@@ -3593,8 +3593,8 @@ class ImageTools():
                                                 cval=np.nanmedian(mask))
 
                             # Update mask center.
-                            maskcenx = self.database.obs[key]['MASKCENX'][j] + mask_shift[0]
-                            maskceny = self.database.obs[key]['MASKCENY'][j] + mask_shift[1]
+                            maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0]
+                            maskceny = self.database.obs[key]['MASKCENY'][j] + shifts[0][1]
 
                         # Update star center.
                         starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0]
