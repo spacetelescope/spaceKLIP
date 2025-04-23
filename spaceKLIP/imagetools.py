@@ -2824,9 +2824,6 @@ class ImageTools():
                         starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
                         starceny = (data.shape[-2] - 1) / 2. - shifts[0][1] + 1  # 1-indexed
                         
-                        # Update mask center (using the shift of the first frame).
-                        maskcenx = starcenx - xshift  # 1-indexed
-                        maskceny = starceny - yshift  # 1-indexed
 
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
@@ -2843,10 +2840,7 @@ class ImageTools():
 
                         # Star center and mask center stay the same.
                         starcenx = self.database.obs[key]['STARCENX'][j]  # 1-indexed
-                        starceny = self.database.obs[key]['STARCENY'][j]  # 1-indexed
-
-                        maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1-indexed
-                        maskceny = self.database.obs[key]['MASKCENY'][j]  # 1-indexed                        
+                        starceny = self.database.obs[key]['STARCENY'][j]  # 1-indexed                       
 
                     # Other data types.
                     else:
@@ -2871,9 +2865,6 @@ class ImageTools():
                         # Update star center (image center - shift).
                         starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
                         starceny = (data.shape[-2] - 1) / 2. - shifts[0][1] + 1  # 1-indexed
-
-                        maskcenx = None
-                        maskceny = None
                     
                 # TA data.
                 if j in ww_sci_ta or j in ww_ref_ta:
@@ -2897,9 +2888,6 @@ class ImageTools():
                     # Update star center (image center - shift).
                     starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
                     starceny = (data.shape[-2] - 1) / 2. - shifts[0][1] + 1  # 1-indexed
-                    
-                    maskcenx = None
-                    maskceny = None
 
                 shifts = np.array(shifts)
                 shifts_all += [shifts]
@@ -2929,9 +2917,6 @@ class ImageTools():
                 head_pri['YOFFSET'] = yoffset  # arcsec
                 head_sci['STARCENX'] = starcenx
                 head_sci['STARCENY'] = starceny
-                if maskcenx is not None:
-                    head_sci['MASKCENX'] = maskcenx
-                    head_sci['MASKCENY'] = maskceny
 
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
@@ -3384,6 +3369,7 @@ class ImageTools():
                         log.warning('  --> The following frames might not be properly aligned: '+str(ww))
 
                 # Write FITS file and PSF mask.
+                # update starcen for the j != ww_sci[0] then update by the measured shift. median for file.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
@@ -3565,8 +3551,8 @@ class ImageTools():
                                                 cval=np.nanmedian(mask))
 
                             # Update mask center.
-                            maskcenx = self.database.obs[key]['MASKCENX'][j] + mask_shift[0]
-                            maskceny = self.database.obs[key]['MASKCENY'][j] + mask_shift[1]
+                            maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0] #mask_shift[0]
+                            maskceny = self.database.obs[key]['MASKCENY'][j] + shifts[0][1] #mask_shift[1]
 
                         # Update star center.
                         starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0]
