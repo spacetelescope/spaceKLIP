@@ -3565,16 +3565,16 @@ class ImageTools():
                                                 cval=np.nanmedian(mask))
 
                             # Update mask center.
-                            maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0] #mask_shift[0]
-                            maskceny = self.database.obs[key]['MASKCENY'][j] + shifts[0][1] #mask_shift[1]
+                            maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0]
+                            maskceny = self.database.obs[key]['MASKCENY'][j] + shifts[0][1]
 
                         # Update star center.
                         starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0]
                         starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1]
 
                         # Update CRPIX values.
-                        crpix1 = self.database.obs[key]['CRPIX1'][j] + align_shift_star[j][k][0]
-                        crpix2 = self.database.obs[key]['CRPIX2'][j] + align_shift_star[j][k][1]
+                        crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0]
+                        crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1]
 
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
@@ -3601,8 +3601,8 @@ class ImageTools():
                         starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1]
 
                         # Update CRPIX values.
-                        crpix1 = self.database.obs[key]['CRPIX1'][j] + align_shift_star[j][k][0]
-                        crpix2 = self.database.obs[key]['CRPIX2'][j] + align_shift_star[j][k][1]
+                        crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0]
+                        crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1]
 
                     # Other data types.
                     else:
