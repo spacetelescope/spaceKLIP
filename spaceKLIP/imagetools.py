@@ -2922,7 +2922,10 @@ class ImageTools():
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, starcenx=starcenx, starceny=starceny, center_shift=center_shift, center_mask=center_mask)
+                self.database.update_obs(key, j, fitsfile, maskfile, 
+                                         xoffset=xoffset, yoffset=yoffset,
+                                         starcenx=starcenx, starceny=starceny,
+                                         center_shift=center_shift, center_mask=center_mask)
 
         pass
 
@@ -3369,13 +3372,24 @@ class ImageTools():
                         log.warning('  --> The following frames might not be properly aligned: '+str(ww))
 
                 # Write FITS file and PSF mask.
-                # update starcen for the j != ww_sci[0] then update by the measured shift. median for file.
+                # Update STARCENX and STARCENY of non first science image using median shift of frames (in pixels).
+                if not (j == ww_sci[0]):  # Skip the very first science frame.
+                    median_x_shift = np.nanmedian(shifts[:, 0])
+                    median_y_shift = np.nanmedian(shifts[:, 1])
+                    head_sci['STARCENX'] = self.database.obs[key]['STARCENX'][j] + median_x_shift
+                    head_sci['STARCENY'] = self.database.obs[key]['STARCENY'][j] + median_y_shift
+
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile,
-                                         align_shift=align_shift, align_mask=align_mask)
+                if not (j == ww_sci[0]):  # Skip updating the STARCENX/Y for very first science frame.
+                    self.database.update_obs(key, j, fitsfile, maskfile,
+                                            starcenx=starcenx, starceny=starceny,
+                                            align_shift=align_shift, align_mask=align_mask)
+                else:
+                    self.database.update_obs(key, j, fitsfile, maskfile,
+                                            align_shift=align_shift, align_mask=align_mask)
 
             # Plot science frame alignment.
             colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
