@@ -244,11 +244,18 @@ def run_obs(database,
                             hdul.writeto(datapath.replace('-KLmodes-all.fits', '-KLmodes-all_roll%.0f.fits' % n_roll), output_verify='fix', overwrite=True)
                             hdul.close()
                             n_roll += 1
-        
+
         # Save corresponding observations database.
         file = os.path.join(output_dir, key + '.dat')
+        for col in ['CENTER_MASK', 'ALIGN_MASK', 'CENTER_SHIFT', 'ALIGN_SHIFT']:
+            if col in database.obs[key].colnames:
+                # Turn each 2D list (per row) into a single string
+                database.obs[key][col] = [
+                    str([x.tolist() for x in row]) for row in database.obs[key][col]
+                ]
+
         database.obs[key].write(file, format='ascii', overwrite=True)
-        
+
         # Compute and save corresponding transmission mask.
         file = os.path.join(output_dir, key + '_psfmask.fits')
         mask = get_transmission(database.obs[key])
@@ -258,10 +265,10 @@ def run_obs(database,
             hdul[0].data = None
             hdul['SCI'].data = mask
             hdul.writeto(file, output_verify='fix', overwrite=True)
-    
+
     # Read reductions into database.
     database.read_jwst_s3_data(datapaths)
-    
+
     pass
 
 
