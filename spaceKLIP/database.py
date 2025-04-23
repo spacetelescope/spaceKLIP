@@ -200,7 +200,7 @@ class Database():
         MASKCENY = [] # pix
         STARCENX = [] # pix
         STARCENY = [] # pix
-        ALIGNSHIFT = [] # pix
+        ALIGN_SHIFT = [] # pix
         CENTER_SHIFT = [] # pix
         ALIGN_MASK = []  # pix
         CENTER_MASK = []  # pix
@@ -300,7 +300,7 @@ class Database():
             MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
             STARCENX += [head.get('STARCENX', MASKCENX[-1])]
             STARCENY += [head.get('STARCENY', MASKCENY[-1])]
-            ALIGNSHIFT += [head.get('ALIGNSHIFT', np.zeros)]
+            ALIGN_SHIFT += [head.get('ALIGN_SHIFT', np.zeros)]
             CENTER_SHIFT += [head.get('CENTER_SHIFT', np.zeros)]
             ALIGN_MASK += [head.get('ALIGN_MASK', np.zeros)]
             CENTER_MASK += [head.get('CENTER_MASK', np.zeros)]
@@ -344,7 +344,7 @@ class Database():
         MASKCENY = np.array(MASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
-        ALIGNSHIFT = np.array(ALIGNSHIFT)
+        ALIGN_SHIFT = np.array(ALIGN_SHIFT)
         CENTER_SHIFT = np.array(CENTER_SHIFT)
         ALIGN_MASK = np.array(ALIGN_MASK)
         CENTER_MASK = np.array(CENTER_MASK)
@@ -450,7 +450,7 @@ class Database():
                                'MASKCENY',
                                'STARCENX',
                                'STARCENY',
-                               'ALIGNSHIFT',
+                               'ALIGN_SHIFT',
                                'CENTER_SHIFT',
                                'ALIGN_MASK',
                                'CENTER_MASK',
@@ -583,7 +583,7 @@ class Database():
                              MASKCENY[ww][j],
                              STARCENX[ww][j],
                              STARCENY[ww][j],
-                             ALIGNSHIFT[ww][j],
+                             ALIGN_SHIFT[ww][j],
                              CENTER_SHIFT[ww][j],
                              ALIGN_MASK[ww][j],
                              CENTER_MASK[ww][j],
@@ -1195,7 +1195,7 @@ class Database():
                    maskceny=None,
                    starcenx=None,
                    starceny=None,
-                   alignshift=None,
+                   align_shift=None,
                    center_shift=None,
                    align_mask=None,
                    center_mask=None,
@@ -1245,7 +1245,7 @@ class Database():
         starceny : float, optional
             New star y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
-        alignshift: object
+        align_shift: object
             Array of shift values to recenter science frames. The default is None.
         center_shift: object
             Array of shift values to align science frames. The default is None.
@@ -1298,8 +1298,8 @@ class Database():
             self.obs[key]['STARCENX'][index] = starcenx
         if starceny is not None:
             self.obs[key]['STARCENY'][index] = starceny
-        if alignshift is not None:
-            self.obs[key]['ALIGNSHIFT'][index] = alignshift
+        if align_shift is not None:
+            self.obs[key]['ALIGN_SHIFT'][index] = align_shift
         if center_shift is not None:
             self.obs[key]['CENTER_SHIFT'][index] = center_shift
         if align_mask is not None:
