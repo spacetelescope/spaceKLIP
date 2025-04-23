@@ -1235,7 +1235,7 @@ class AnalysisTools():
                         # Get shift between star and coronagraphic mask
                         # position. If positive, the coronagraphic mask center
                         # is to the left/bottom of the star position.
-                        _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
+                        _, _, _, _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
                         
                         # NIRCam.
                         if maskoffs is not None:
