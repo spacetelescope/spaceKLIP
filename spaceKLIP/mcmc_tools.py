@@ -4,6 +4,7 @@ from spaceKLIP import utils as ut
 from spaceKLIP.psf import JWST_PSF
 from scipy.ndimage import median_filter
 from astropy.stats import sigma_clip
+from scipy.ndimage import rotate as rotate_image
 
 import emcee
 from scipy.ndimage import shift
@@ -37,11 +38,21 @@ class MCMCTools():
         None.
 
         """
+        if len(data.shape) == 3:
+            data = np.median(data, axis=0)
 
         # Make an internal alias of the spaceKLIP database class.
         # self.database = database
         self.crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
         self.crpix2 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
+        if 'rotate' not in kwargs.keys():
+            self.rotate = False
+        else:
+            self.rotate = kwargs['rotate']
+        if 'size' not in kwargs.keys():
+            self.size = 30
+        else:
+            self.size = kwargs['size']
         if 'r' in kwargs.keys():
             self.r = kwargs['r']
         else:
@@ -61,7 +72,7 @@ class MCMCTools():
         if 'size' in kwargs.keys():
             self.size = kwargs['size'] + 1 if kwargs['size'] % 2 == 0 else kwargs['size']
         else:
-            self.size = np.median(data, axis=0).shape[-1]
+            self.size = data.shape[-1]
         if 'oversample' in kwargs.keys():
             self.oversample = kwargs['oversample']
         else:
@@ -72,8 +83,12 @@ class MCMCTools():
             self.dx_guess = x_guess - (self.crpix1 - 1)
             self.dy_guess = y_guess - (self.crpix2 - 1)
         else:
-            self.max_value = np.nanmax(np.median(data, axis=0))
-            self.max_index = np.where(np.median(data, axis=0) == self.max_value)
+            if len(data.shape) == 3:
+                self.max_value = np.nanmax(data)
+                self.max_index = np.where(data == self.max_value)
+            else:
+                self.max_value = np.nanmax(data)
+                self.max_index = np.where(data == self.max_value)
             self.x_guess = self.max_index[1][0]
             self.y_guess = self.max_index[0][0]
             self. dx_guess = self.x_guess - (self.crpix1 - 1)
@@ -94,6 +109,10 @@ class MCMCTools():
             self.theta_guess = kwargs['theta_guess']
         else:
             self.theta_guess = 0
+        if 'psi_guess' in kwargs.keys():
+            self.psi_guess = kwargs['psi_guess']
+        else:
+            self.psi_guess = 0
         if 'x_limits' in kwargs.keys():
             self.dx_limits = [-kwargs['x_limits'], kwargs['x_limits']]
         else:
@@ -119,6 +138,10 @@ class MCMCTools():
             self.theta_limits = kwargs['theta_limits']
         else:
             self.theta_limits = [0, 360]
+        if 'psi_limits' in kwargs.keys():
+            self.psi_limits = kwargs['psi_limits']
+        else:
+            self.psi_limits = [0, 360]
         if 'binarity' in kwargs.keys():
             if type is not None:
                 if type == 'SCI' and kwargs['binarity']:
@@ -133,13 +156,21 @@ class MCMCTools():
                 self.limits = [self.dx_limits, self.dy_limits, self.flux_limits, self.contrast_limits, self.sep_limits,
                           self.theta_limits]  # x, y, flux, contrast, sep, theta
             else:
-                self.binarity = False
-                self.initial_guess = [0, 0, self.flux_guess]  # x, y, flux
-                self.limits = [self.dx_limits, self.dy_limits, self.flux_limits]
+                if self.rotate:
+                    self.initial_guess = [0, 0, self.flux_guess, self.psi_guess]  # x, y, flux, psi (rotation)
+                    self.limits = [self.dx_limits, self.dy_limits, self.flux_limits,
+                                   self.psi_limits]  # x, y, flux, psi (rotation)
+                else:
+                    self.initial_guess = [0, 0, self.flux_guess]  # x, y, flux
+                    self.limits = [self.dx_limits, self.dy_limits, self.flux_limits]  # x, y, flux
         else:
             self.binarity = False
-            self.initial_guess = [0, 0, self.flux_guess]  # x, y, flux
-            self.limits = [self.dx_limits, self.dy_limits, self.flux_limits]  # x, y, flux
+            if self.rotate:
+                self.initial_guess = [0, 0, self.flux_guess, self.psi_guess]  # x, y, flux, psi (rotation)
+                self.limits = [self.dx_limits, self.dy_limits, self.flux_limits, self.psi_limits]  # x, y, flux, psi (rotation)
+            else:
+                self.initial_guess = [0, 0, self.flux_guess]  # x, y, flux
+                self.limits = [self.dx_limits, self.dy_limits, self.flux_limits]  # x, y, flux
         if 'debug' in kwargs.keys():
             self.debug = kwargs['debug']
         else:
@@ -186,7 +217,7 @@ class MCMCTools():
 
     def plot_data_model_residual(self, data, psf_no_coronmsk=None, apername=None, filt=None, date=None,
                                  offsetpsf_func=None, vmin=None, vmax=None, vminres=None, vmaxres=None, mask=False,
-                                 binarity=False, path2fitsfile=None, return_residuals=False):
+                                 binarity=False, rotate=False, path2fitsfile=None, return_residuals=False):
 
         if psf_no_coronmsk is None:
             if offsetpsf_func is None:
@@ -199,17 +230,17 @@ class MCMCTools():
                                           use_coeff=False)
             psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
         psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
-        model = self.build_model_from_psf(self.best_fit_params, psf_no_coronmsk, binarity, shifted=False)
+        model = self.build_model_from_psf(self.best_fit_params, psf_no_coronmsk, binarity, rotate, shifted=False)
 
         if mask:
-            w = np.where(np.median(data, axis=0) == np.nanmax(np.median(data, axis=0)))
-            data_masked = self.extract_subarray(np.median(data, axis=0).copy(), w[1][0], w[0][0], size=30,
+            w = np.where(data == np.nanmax(data))
+            data_masked = self.extract_subarray(data.copy(), w[1][0], w[0][0], size=30,
                                                 flat_and_skip_center=False)
 
             ww = np.where(model == np.nanmax(model))
             model_masked = self.extract_subarray(model.copy(), ww[1][0], ww[0][0], size=30, flat_and_skip_center=False)
         else:
-            data_masked = np.median(data, axis=0).copy()
+            data_masked = data.copy()
             model_masked = model.copy()
 
         residual = data_masked - model_masked
@@ -239,7 +270,7 @@ class MCMCTools():
             divider2 = make_axes_locatable(ax[2])
             cax2 = divider2.append_axes('right', size='5%', pad=0.05)
             fig.colorbar(im2, cax=cax2, orientation='vertical')
-            if self.save_figures:
+            if self.save_figures and path2fitsfile is not None:
                 plt.savefig(path2fitsfile+'_residuals.png', bbox_inches='tight')
                 plt.close()
             else:
@@ -254,7 +285,7 @@ class MCMCTools():
         return image
 
 
-    def build_model_from_psf(self, params, psf, binarity, x_guess=0, y_guess=0, offsetpsf_func=None, shifted=True):
+    def build_model_from_psf(self, params, psf, binarity, rotate, x_guess=0, y_guess=0, offsetpsf_func=None, shifted=True):
         '''
         Routine to inject a companion PSF around a single PSF, with an counter clockwise sangle and separation. 0 degree is up.
         :param params:
@@ -289,19 +320,26 @@ class MCMCTools():
                 shifted_psf2 *= (flux * contrast)
             model = psf1 + shifted_psf2
         else:
-            # this step will not inject a companion PSF around the primary PSF, and consider the primary alone
-            x, y, flux = params
+            if rotate:
+                x, y, flux, psi = params
+            else:
+                # this step will not inject a companion PSF around the primary PSF, and consider the primary alone
+                x, y, flux = params
             model = psf * flux
+
         if shifted:
             # This step will shift the final model (single or binary PSF) by the current x_guess-x and y_guess-y shift values to center it somewhere in the tile
-            shifted_model = shift(model, shift=[y_guess - y, x_guess - x], mode='constant', cval=0.0)
-            return shifted_model
-        else:
-            return model
+            model = shift(model, shift=[y_guess - y, x_guess - x], mode='constant', cval=0.0)
+
+        if rotate:
+            model = rotate_image(model, angle=psi, reshape=False)
+
+
+        return model
 
     def run(self, data, psf, x_guess=0, y_guess=0, r=0, nsteps=5000, ndim=3, nwalkers=32,
                     initial_guess=[0.0, 0.0, 1], limits=[[-15, 15], [-15, 15], [1, 1e4]], verbose=False, size=61,
-                    binarity=False, filename='', pixelscale=1):
+                    binarity=False, rotate=False, filename=''):
         '''
         Set up and run the MCMC Bayesian fit to find the shift to apply to the data to recenter the star at the center of the frame.
         Parameters:
@@ -332,6 +370,8 @@ class MCMCTools():
         binarity: boolean, optional
             fit two PSF to the data, adding the flux of the second star, angle theta, and the distance between the two PSFs to the parameters to fit.
             Default is False.
+        rotate: boolean, optional
+            rotate single PSF through and angle psi along its central axis to better match the data. Default is False.
 
         Return:
         ----------
@@ -340,7 +380,7 @@ class MCMCTools():
         global MCMC_mask_r
         MCMC_mask_r = r
 
-        def log_likelihood(params, star_image, psf, centers, binarity, show_plots=False, vmin=None, vmax=None, vminres=None,
+        def log_likelihood(params, star_image, psf, centers, binarity, rotate, show_plots=False, vmin=None, vmax=None, vminres=None,
                            vmaxres=None, path2fitsfile=None):
             """Log-likelihood function for MCMC.
 
@@ -352,23 +392,26 @@ class MCMCTools():
             Returns:
                 float: Log-likelihood value.
             """
-            model = self.build_model_from_psf(params, psf, binarity)
+            model = self.build_model_from_psf(params, psf, binarity, rotate)
 
             ydat, xdat = np.indices(model.shape)
 
             if MCMC_mask_r > 0:
-                shifted_masked_psf = self.mask_within_radius(model, xdat, ydat, centers[0], centers[1], MCMC_mask_r,
+                masked_model_psf = self.mask_within_radius(model.copy(), xdat, ydat, centers[0], centers[1], MCMC_mask_r,
                                                              c=np.nan)
-                masked_star_image = self.mask_within_radius(star_image, xdat, ydat, centers[0], centers[1], MCMC_mask_r,
+                masked_star_image = self.mask_within_radius(star_image.copy(), xdat, ydat, centers[0], centers[1], MCMC_mask_r,
                                                             c=np.nan)
             else:
-                shifted_masked_psf = model
-                masked_star_image = star_image
+                masked_model_psf = model.copy()
+                masked_star_image = star_image.copy()
 
+            #remove negative values that can skew the fit and the median background from the image
+            masked_star_image[(masked_star_image<0)] = 0
+            masked_star_image -= np.nanmedian(masked_star_image)
             # # Scale the PSF by the flux value
 
             # Compute the residual between the star and the shifted, scaled PSF
-            residual = masked_star_image - shifted_masked_psf
+            residual = masked_star_image - masked_model_psf
 
             # Assuming Gaussian errors, the log-likelihood is proportional to the chi-squared
             log_likelihood = -0.5 * np.nansum(residual ** 2)
@@ -390,13 +433,13 @@ class MCMCTools():
                     cax0 = divider0.append_axes('right', size='5%', pad=0.05)
                     fig.colorbar(im0, cax=cax0, orientation='vertical')
 
-                    im1 = ax[1].imshow(shifted_masked_psf, origin='lower', vmin=vmin, vmax=vmax)
+                    im1 = ax[1].imshow(masked_model_psf, origin='lower', vmin=vmin, vmax=vmax)
                     ax[1].set_title('Model')
                     divider1 = make_axes_locatable(ax[1])
                     cax1 = divider1.append_axes('right', size='5%', pad=0.05)
                     fig.colorbar(im1, cax=cax1, orientation='vertical')
 
-                    im2 = ax[2].imshow(masked_star_image - shifted_masked_psf, origin='lower', vmin=vminres, vmax=vmaxres)
+                    im2 = ax[2].imshow(masked_star_image - masked_model_psf, origin='lower', vmin=vminres, vmax=vmaxres)
                     ax[2].set_title('Residual')
                     divider2 = make_axes_locatable(ax[2])
                     cax2 = divider2.append_axes('right', size='5%', pad=0.05)
@@ -409,7 +452,7 @@ class MCMCTools():
                         plt.show()
             return log_likelihood
 
-        def log_prior(params, limits, binarity, flux_limit):
+        def log_prior(params, limits, binarity, rotate):
             """Log-prior function for MCMC.
 
             Args:
@@ -430,16 +473,25 @@ class MCMCTools():
                 else:
                     return -np.inf
             else:
-                x_shift, y_shift, flux = params
+                if rotate:
+                    x_shift, y_shift, flux, psi = params
 
-                # Define uniform priors
-                if (limits[0][0] < x_shift < limits[0][1]) and (limits[1][0] < y_shift < limits[1][1]) and limits[2][
-                    0] < flux < limits[2][1]:
-                    return 0.0
+                    # Define uniform priors
+                    if (limits[0][0] < x_shift < limits[0][1]) and (limits[1][0] < y_shift < limits[1][1]) and  limits[2][0] < flux < limits[2][1] and limits[3][0] < psi < limits[3][1]:
+                        return 0.0
+                    else:
+                        return -np.inf
                 else:
-                    return -np.inf
+                    x_shift, y_shift, flux = params
 
-        def log_posterior(params, star_image, psf, limits, centers, binarity, show_plots=False, vmin=None, vmax=None,
+                    # Define uniform priors
+                    if (limits[0][0] < x_shift < limits[0][1]) and (limits[1][0] < y_shift < limits[1][1]) and limits[2][
+                        0] < flux < limits[2][1]:
+                        return 0.0
+                    else:
+                        return -np.inf
+
+        def log_posterior(params, star_image, psf, limits, centers, binarity, rotate, show_plots=False, vmin=None, vmax=None,
                           vminres=None, vmaxres=None, path2fitsfile=None):
             """Log-posterior function for MCMC.
 
@@ -453,21 +505,20 @@ class MCMCTools():
                 float: Log-posterior value (log-likelihood + log-prior).
             """
 
-            lp = log_prior(params, limits, binarity, flux_limit=math.ceil(np.nanmax(star_image)))
+            lp = log_prior(params, limits, binarity, rotate)
             if not np.isfinite(lp):
                 return -np.inf
-            return lp + log_likelihood(params, star_image, psf, centers, binarity, show_plots=show_plots, vmin=vmin,
+            return lp + log_likelihood(params, star_image, psf, centers, binarity, rotate, show_plots=show_plots, vmin=vmin,
                                        vmax=vmax, vminres=vminres, vmaxres=vmaxres, path2fitsfile=path2fitsfile)
 
         log.info('--> Running MCMC fit')
-        data_masked = self.extract_subarray(data.copy(), x_guess, y_guess, size=30,
+        data_masked = self.extract_subarray(data.copy(), x_guess, y_guess, size=self.size,
                                             flat_and_skip_center=False)
 
         psf_masked = self.extract_subarray(psf.copy(), np.where(psf == np.nanmax(psf))[1][0],
-                                           np.where(psf == np.nanmax(psf))[0][0], size=30,
+                                           np.where(psf == np.nanmax(psf))[0][0], size=self.size,
                                            flat_and_skip_center=False)
 
-        # centers=[(data_masked.shape[0]) // 2, (data_masked.shape[1]) // 2]
         centers = [(data_masked.shape[-1] - 1.) / 2., (data_masked.shape[-1] - 1.) / 2.]
 
         # psf_masked = psf.copy()
@@ -478,7 +529,7 @@ class MCMCTools():
         moves = [(emcee.moves.DEMove(), 0.7), (emcee.moves.DESnookerMove(), 0.3), ]
         # Create the MCMC sampler object
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, moves=moves,
-                                        args=(data_masked, psf_masked, limits, centers, binarity))
+                                        args=(data_masked, psf_masked, limits, centers, binarity, rotate))
 
         # Run the MCMC sampler for a number of steps
 
@@ -506,7 +557,10 @@ class MCMCTools():
         if binarity:
             labels = ["x", "y", "flux", "contrast", "sep", "theta"]
         else:
-            labels = ["x", "y", "flux"]
+            if rotate:
+                labels = ["x", "y", "flux", "psi"]
+            else:
+                labels = ["x", "y", "flux"]
 
         with plt.style.context('spaceKLIP.sk_style'):
             samples = sampler.get_chain()
