@@ -377,10 +377,8 @@ class MCMCTools():
         ----------
         best_fit_params: best fit parameters for x, y and flux
         '''
-        global MCMC_mask_r
-        MCMC_mask_r = r
 
-        def log_likelihood(params, star_image, psf, centers, binarity, rotate, show_plots=False, vmin=None, vmax=None, vminres=None,
+        def log_likelihood(params, star_image, psf, centers, binarity, rotate, r, show_plots=False, vmin=None, vmax=None, vminres=None,
                            vmaxres=None, path2fitsfile=None):
             """Log-likelihood function for MCMC.
 
@@ -396,10 +394,10 @@ class MCMCTools():
 
             ydat, xdat = np.indices(model.shape)
 
-            if MCMC_mask_r > 0:
-                masked_model_psf = self.mask_within_radius(model.copy(), xdat, ydat, centers[0], centers[1], MCMC_mask_r,
+            if r > 0:
+                masked_model_psf = self.mask_within_radius(model.copy(), xdat, ydat, centers[0], centers[1], r,
                                                              c=np.nan)
-                masked_star_image = self.mask_within_radius(star_image.copy(), xdat, ydat, centers[0], centers[1], MCMC_mask_r,
+                masked_star_image = self.mask_within_radius(star_image.copy(), xdat, ydat, centers[0], centers[1], r,
                                                             c=np.nan)
             else:
                 masked_model_psf = model.copy()
@@ -491,7 +489,7 @@ class MCMCTools():
                     else:
                         return -np.inf
 
-        def log_posterior(params, star_image, psf, limits, centers, binarity, rotate, show_plots=False, vmin=None, vmax=None,
+        def log_posterior(params, star_image, psf, limits, centers, binarity, rotate, r, show_plots=False, vmin=None, vmax=None,
                           vminres=None, vmaxres=None, path2fitsfile=None):
             """Log-posterior function for MCMC.
 
@@ -508,7 +506,7 @@ class MCMCTools():
             lp = log_prior(params, limits, binarity, rotate)
             if not np.isfinite(lp):
                 return -np.inf
-            return lp + log_likelihood(params, star_image, psf, centers, binarity, rotate, show_plots=show_plots, vmin=vmin,
+            return lp + log_likelihood(params, star_image, psf, centers, binarity, rotate, r, show_plots=show_plots, vmin=vmin,
                                        vmax=vmax, vminres=vminres, vmaxres=vmaxres, path2fitsfile=path2fitsfile)
 
         log.info('--> Running MCMC fit')
@@ -529,7 +527,7 @@ class MCMCTools():
         moves = [(emcee.moves.DEMove(), 0.7), (emcee.moves.DESnookerMove(), 0.3), ]
         # Create the MCMC sampler object
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, moves=moves,
-                                        args=(data_masked, psf_masked, limits, centers, binarity, rotate))
+                                        args=(data_masked, psf_masked, limits, centers, binarity, rotate, r))
 
         # Run the MCMC sampler for a number of steps
 
