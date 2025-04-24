@@ -915,6 +915,7 @@ class AnalysisTools():
                            subdir='companions',
                            save_figures=True,
                            use_epsf=False,
+                           fov_pix=65,
                            **kwargs):
         """
         Extract the best fit parameters of a number of companions from each
@@ -985,6 +986,9 @@ class AnalysisTools():
             default is 'companions'.
         save_figures : bool, optional
             Save the plots in a PDF?
+        fov_pix : int
+            PSF pixel size. Suggest odd values for centering PSF in middle of a pixel
+            rather than pixel corner / boundaries. The default is 65.
         
         Returns
         -------
@@ -1115,12 +1119,10 @@ class AnalysisTools():
                     if date == 'auto':
                         date = fits.getheader(self.database.obs[key]['FITSFILE'][ww_sci[0]], 0)['DATE-BEG']
 
-                fov_pix=131
                 if not use_epsf:
                     offsetpsf_func = JWST_PSF(apername,
                                               filt,
                                               date=date,
-                                              # fov_pix=65,
                                               fov_pix=fov_pix,
                                               oversample=3,
                                               sp=sed,
@@ -1142,7 +1144,7 @@ class AnalysisTools():
                         hdulist = fits.open(filepath)
                         data = hdulist['SCI'].data[0]
                         data[np.isnan(data)] = 0
-                        weights = 1/hdulist['ERR'].data[0]
+                        weights = np.ones(data.shape)#/hdulist['ERR'].data[0]
                         weights[np.isnan(weights) | ~np.isfinite(weights)] = 0
                         wcs = WCS(hdulist['SCI'].header,naxis=2)
                         list_of_references.append(star2epsf(data,weights=weights,wcs_large=wcs, center=dataset.centers[0]))
@@ -1151,7 +1153,6 @@ class AnalysisTools():
                     epsf_builder = pupsf.EPSFBuilder(
                         oversampling=3,
                         maxiters=50,
-                        # shape=dataset.input.shape[-1] * 3,
                         progress_bar=True
                     )
                     offsetpsf_func = epsf_builder(epsfs)[0]
