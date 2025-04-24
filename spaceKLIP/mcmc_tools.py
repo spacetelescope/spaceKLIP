@@ -391,6 +391,10 @@ class MCMCTools():
                 float: Log-likelihood value.
             """
             model = self.build_model_from_psf(params, psf, binarity, rotate)
+            if rotate:
+                model = self.extract_subarray(model.copy(), np.where(model == np.nanmax(model))[1][0],
+                                                   np.where(model == np.nanmax(model))[0][0], size=self.size,
+                                                   flat_and_skip_center=False)
 
             ydat, xdat = np.indices(model.shape)
 
@@ -512,9 +516,9 @@ class MCMCTools():
         log.info('--> Running MCMC fit')
         data_masked = self.extract_subarray(data.copy(), x_guess, y_guess, size=self.size,
                                             flat_and_skip_center=False)
-
+        #
         psf_masked = self.extract_subarray(psf.copy(), np.where(psf == np.nanmax(psf))[1][0],
-                                           np.where(psf == np.nanmax(psf))[0][0], size=self.size,
+                                           np.where(psf == np.nanmax(psf))[0][0], size=self.size+10 if self.rotate else self.size,
                                            flat_and_skip_center=False)
 
         centers = [(data_masked.shape[-1] - 1.) / 2., (data_masked.shape[-1] - 1.) / 2.]
@@ -526,9 +530,7 @@ class MCMCTools():
 
         moves = [(emcee.moves.DEMove(), 0.7), (emcee.moves.DESnookerMove(), 0.3), ]
         # Create the MCMC sampler object
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, moves=moves,
-                                        args=(data_masked, psf_masked, limits, centers, binarity, rotate, r))
-
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=(data_masked, psf_masked, limits, centers, binarity, rotate, r)) #, moves=moves,
         # Run the MCMC sampler for a number of steps
 
         sampler.run_mcmc(pos, nsteps, progress=verbose)
