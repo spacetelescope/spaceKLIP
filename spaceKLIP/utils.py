@@ -110,7 +110,7 @@ def read_obs(fitsfile,
         'SCI' extension FITS header.
     is2d : bool
         Is the original data 2D?
-    alignshift : 2D-array
+    align_shift : 2D-array
         Array of shape (nints, 2) containing the alignment shifts applied to the
         frames. None if not available.
     center_shift : 2D-array
@@ -129,9 +129,8 @@ def read_obs(fitsfile,
         'VAR_POISSON' extension data.
     var_rnoise : 3D-array, optional
         'VAR_RNOISE' extension data.
-    
     """
-    
+
     # Read FITS file.
     hdul = pyfits.open(fitsfile)
     data = hdul['SCI'].data
@@ -154,9 +153,9 @@ def read_obs(fitsfile,
     if data.ndim != 3:
         raise UserWarning('Requires 2D/3D data cube')
     try:
-        alignshift = hdul['ALIGNSHIFT'].data
+        align_shift = hdul['ALIGN_SHIFT'].data
     except KeyError:
-        alignshift = None
+        align_shift = None
     try:
         center_shift = hdul['CENTER_SHIFT'].data
     except KeyError:
@@ -179,9 +178,9 @@ def read_obs(fitsfile,
     hdul.close()
     
     if return_var:
-        return data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs, var_poisson, var_rnoise
+        return data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs, var_poisson, var_rnoise
     else:
-        return data, erro, pxdq, head_pri, head_sci, is2d, alignshift, center_shift, align_mask, center_mask, maskoffs
+        return data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs
 
 def write_obs(fitsfile,
               output_dir,
@@ -191,7 +190,7 @@ def write_obs(fitsfile,
               head_pri,
               head_sci,
               is2d,
-              alignshift=None,
+              align_shift=None,
               center_shift=None,
               align_mask=None,
               center_mask=None,
@@ -219,7 +218,7 @@ def write_obs(fitsfile,
         'SCI' extension FITS header.
     is2d : bool
         Is the original data 2D?
-    alignshift : 2D-array
+    align_shift : 2D-array
         Array of shape (nints, 2) containing the alignment shifts applied to the
         frames. None if not available.
     center_shift : 2D-array
@@ -258,11 +257,11 @@ def write_obs(fitsfile,
         hdul['DQ'].data = pxdq
     hdul[0].header = head_pri
     hdul['SCI'].header = head_sci
-    if alignshift is not None:
+    if align_shift is not None:
         try:
-            hdul['ALIGNSHIFT'].data = alignshift
+            hdul['ALIGN_SHIFT'].data = align_shift
         except KeyError:
-            hdu = pyfits.ImageHDU(alignshift, name='ALIGNSHIFT')
+            hdu = pyfits.ImageHDU(align_shift, name='ALIGN_SHIFT')
             hdul.append(hdu)
     if center_shift is not None:
         try:
