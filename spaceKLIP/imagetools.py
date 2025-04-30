@@ -2827,7 +2827,7 @@ class ImageTools():
                         # Mask remains the same.
                         maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1-indexed
                         maskceny = self.database.obs[key]['MASKCENY'][j]  # 1-indexed 
-
+                        
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
                         log.warning('  --> Recenter frames: not implemented for MIRI coronagraphy, skipped')
@@ -2844,9 +2844,9 @@ class ImageTools():
                         # Star center and mask center stay the same.
                         starcenx = self.database.obs[key]['STARCENX'][j]  # 1-indexed
                         starceny = self.database.obs[key]['STARCENY'][j]  # 1-indexed  
-
-                        maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1-indexed
-                        maskceny = self.database.obs[key]['MASKCENY'][j]  # 1-indexed                      
+                         
+                        crpix1 = self.database.obs[key]['CRPIX1'][j]  # 1-indexed
+                        crpix2 = self.database.obs[key]['CRPIX2'][j]  # 1-indexed                    
 
                     # Other data types.
                     else:
@@ -2871,7 +2871,7 @@ class ImageTools():
                         # Update star center (image center - shift).
                         starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
                         starceny = (data.shape[-2] - 1) / 2. - shifts[0][1] + 1  # 1-indexed
-
+                        
                         maskcenx = None
                         maskceny = None
                     
@@ -2932,6 +2932,9 @@ class ImageTools():
                 if maskcenx is not None:
                     head_sci['MASKCENX'] = maskcenx
                     head_sci['MASKCENY'] = maskceny
+                # Reading in CRPIX1/2 from database for updates from update_nircam_centers.
+                head_sci['CRPIX1'] = self.database.obs[key]['CRPIX1'][j]
+                head_sci['CRPIX2'] = self.database.obs[key]['CRPIX2'][j]
 
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
