@@ -2695,7 +2695,241 @@ class ImageTools():
                     # Change also CRPIX to be the same as maskcen.
                     self.database.update_obs(key, j, fitsfile, maskfile, crpix1=maskcenx, crpix2=maskceny, maskcenx=maskcenx, maskceny=maskceny)
 
-        pass         
+        pass 
+
+    def recenter_frames(self,
+                        method='fourier',
+                        subpix_first_sci_only=False,
+                        first_sci_only=True,
+                        spectral_type='G2V',
+                        shft_exp=1,
+                        kwargs={},
+                        highpass=False,
+                        subdir='recentered'):
+        """
+        Recenter frames so that the host star position is data.shape // 2. For
+        NIRCam coronagraphy, use a WebbPSF model to determine the star position
+        behind the coronagraphic mask for the first SCI frame. Then, shift all
+        other SCI and REF frames by the same amount. For MIRI coronagraphy, do
+        nothing. For all other data types, simply recenter the host star PSF.
+
+        Parameters
+        ----------
+        method : 'fourier' or 'spline' (not recommended), optional
+            Method for shifting the frames. The default is 'fourier'.
+        subpix_first_sci_only : bool, optional
+            By default, all frames will be recentered to subpixel precision. If
+            'subpix_first_sci_only' is True, then only the first SCI frame will
+            be recentered to subpixel precision and all other SCI and REF
+            frames will only be recentered to integer pixel precision by
+            rolling the image. Can be helpful when working with poorly sampled
+            data to avoid another interpolation step if the 'align_frames'
+            routine is run subsequently. Only applicable to non-coronagraphic
+            data. The default is False.
+        first_sci_only : bool, optional
+            Recenter all files and not just the first SCI file in each concate-
+            nation. Only applicable to NIRCam coronagraphy. The default is
+            True.
+        spectral_type : str, optional
+            Host star spectral type for the WebbPSF model used to determine the
+            star position behind the coronagraphic mask. The default is 'G2V'.
+        shft_exp : float, optional
+            Take image to the given power before cross correlating for shifts, default is 1. For instance, 1/2 helps align nircam bar/narrow data (or other data with weird speckles)
+        kwargs : dict, optional
+            Keyword arguments for the scipy.ndimage.shift routine. The default
+            is {}.
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'recentered'.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        #### DEPRECATION WARNING ####
+        log.warning('This function is deprecated. Use `calculate_centers` and `shift_frames` instead.')
+
+        # Update NIRCam coronagraphy centers, i.e., change SIAF CRPIX position
+        # to true mask center determined by Jarron.
+        # self.update_nircam_centers()  # shall be run purposely by the user
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Find science and reference files.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+            ww_sci_ta = np.where(self.database.obs[key]['TYPE'] == 'SCI_TA')[0]
+            ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
+            ww_ref_ta = np.where(self.database.obs[key]['TYPE'] == 'REF_TA')[0]
+
+            # Loop through FITS files.
+            ww_all = np.append(ww_sci, ww_ref)
+            ww_all = np.append(ww_all, ww_sci_ta)
+            ww_all = np.append(ww_all, ww_ref_ta)
+            shifts_all = []
+            for j in ww_all:
+
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+
+                # Recenter frames. Use different algorithms based on data type.
+                head, tail = os.path.split(fitsfile)
+                log.info('  --> Recenter frames: ' + tail)
+                if np.sum(np.isnan(data)) != 0:
+                    raise UserWarning('Please replace nan pixels before attempting to recenter frames')
+                shifts = []  # shift between star position and image center (data.shape // 2)
+                maskoffs_temp = []  # shift between star and coronagraphic mask position
+
+                # SCI and REF data.
+                if j in ww_sci or j in ww_ref:
+
+                    # NIRCam coronagraphy.
+                    if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                        for k in range(data.shape[0]):
+
+                            # For the first SCI frame, get the star position
+                            # and the shift between the star and coronagraphic
+                            # mask position.
+
+                            if (not first_sci_only or j == ww_sci[0]) and k == 0:
+                                xc, yc, xshift, yshift = self.find_nircam_centers(data0=data.copy(),
+                                                                                  key=key,
+                                                                                  j=j,
+                                                                                  shft_exp=shft_exp,
+                                                                                  spectral_type=spectral_type,
+                                                                                  date=head_pri['DATE-BEG'],
+                                                                                  output_dir=output_dir,
+                                                                                  highpass=highpass)
+                            
+                            # Apply the same shift to all SCI and REF frames.
+                            shifts += [np.array([-(xc - (data.shape[-1] - 1.) / 2.), -(yc - (data.shape[-2] - 1.) / 2.)])]
+                            maskoffs_temp += [np.array([xshift, yshift])]
+                            data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        if mask is not None:
+                            # mask = ut.imshift(mask, [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            mask = spline_shift(mask, [shifts[k][1], shifts[k][0]], order=0, mode='constant', cval=np.nanmedian(mask))
+                        xoffset = self.database.obs[key]['XOFFSET'][j] - self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
+                        yoffset = self.database.obs[key]['YOFFSET'][j] - self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
+                        crpix1 = (data.shape[-1] - 1.) / 2. + 1.  # 1-indexed
+                        crpix2 = (data.shape[-2] - 1.) / 2. + 1.  # 1-indexed
+                    
+                    # MIRI coronagraphy.
+                    elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
+                        log.warning('  --> Recenter frames: not implemented for MIRI coronagraphy, skipped')
+                        for k in range(data.shape[0]):
+
+                            # Do nothing.
+                            shifts += [np.array([0., 0.])]
+                            maskoffs_temp += [np.array([0., 0.])]
+                        xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
+                        yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
+                        crpix1 = self.database.obs[key]['CRPIX1'][j]  # 1-indexed
+                        crpix2 = self.database.obs[key]['CRPIX2'][j]  # 1-indexed
+
+                    # Other data types.
+                    else:
+                        for k in range(data.shape[0]):
+
+                            # Recenter SCI and REF frames to subpixel precision
+                            # using the 'BCEN' routine from XARA.
+                            # https://github.com/fmartinache/xara
+                            if subpix_first_sci_only == False or (j == ww_sci[0] and k == 0):
+                                pp = core.determine_origin(data[k], algo='BCEN')
+                                shifts += [np.array([-(pp[0] - data.shape[-1]//2), -(pp[1] - data.shape[-2]//2)])]
+                                maskoffs_temp += [np.array([0., 0.])]
+                                data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                                erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            else:
+                                shifts += [np.array([0., 0.])]
+                                maskoffs_temp += [np.array([0., 0.])]
+
+                            # Recenter SCI and REF frames to integer pixel
+                            # precision by rolling the image.
+                            ww_max = np.unravel_index(np.argmax(data[k]), data[k].shape)
+                            if ww_max != (data.shape[-2]//2, data.shape[-1]//2):
+                                dx, dy = data.shape[-1]//2 - ww_max[1], data.shape[-2]//2 - ww_max[0]
+                                shifts[-1][0] += dx
+                                shifts[-1][1] += dy
+                                data[k] = np.roll(np.roll(data[k], dx, axis=1), dy, axis=0)
+                                erro[k] = np.roll(np.roll(erro[k], dx, axis=1), dy, axis=0)
+                        xoffset = 0.  # arcsec
+                        yoffset = 0.  # arcsec
+                        crpix1 = data.shape[-1]//2 + 1  # 1-indexed
+                        crpix2 = data.shape[-2]//2 + 1  # 1-indexed
+
+                # TA data.
+                if j in ww_sci_ta or j in ww_ref_ta:
+                    for k in range(data.shape[0]):
+
+                        # Center TA frames on the nearest pixel center. This
+                        # pixel center is not necessarily the image center,
+                        # which is why a subsequent integer pixel recentering
+                        # is required.
+                        p0 = np.array([0., 0.])
+                        pp = minimize(ut.recenterlsq,
+                                      p0,
+                                      args=(data[k], method, kwargs))['x']
+                        shifts += [np.array([pp[0], pp[1]])]
+                        maskoffs_temp += [np.array([0., 0.])]
+                        data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+
+                        # Recenter TA frames to integer pixel precision by
+                        # rolling the image.
+                        ww_max = np.unravel_index(np.argmax(data[k]), data[k].shape)
+                        if ww_max != (data.shape[-2]//2, data.shape[-1]//2):
+                            dx, dy = data.shape[-1]//2 - ww_max[1], data.shape[-2]//2 - ww_max[0]
+                            shifts[-1][0] += dx
+                            shifts[-1][1] += dy
+                            data[k] = np.roll(np.roll(data[k], dx, axis=1), dy, axis=0)
+                            erro[k] = np.roll(np.roll(erro[k], dx, axis=1), dy, axis=0)
+                    xoffset = 0.  # arcsec
+                    yoffset = 0.  # arcsec
+                    crpix1 = data.shape[-1]//2 + 1  # 1-indexed
+                    crpix2 = data.shape[-2]//2 + 1  # 1-indexed
+                shifts = np.array(shifts)
+                shifts_all += [shifts]
+                maskoffs_temp = np.array(maskoffs_temp)
+                if imshifts is not None:
+                    imshifts += shifts
+                else:
+                    imshifts = shifts
+                if maskoffs is not None:
+                    maskoffs += maskoffs_temp
+                else:
+                    maskoffs = maskoffs_temp
+
+                # Compute shift distances.
+                dist = np.sqrt(np.sum(shifts[:, :2]**2, axis=1))  # pix
+                dist *= self.database.obs[key]['PIXSCALE'][j] * 1000  # mas
+                head, tail = os.path.split(self.database.obs[key]['FITSFILE'][j])
+                log.info('  --> Recenter frames: ' + tail)
+                log.info('  --> Recenter frames: median required shift = %.2f mas' % np.median(dist))
+
+                # Write FITS file and PSF mask.
+                head_pri['XOFFSET'] = xoffset #arcsec
+                head_pri['YOFFSET'] = yoffset #arcsec
+                head_sci['CRPIX1'] = crpix1
+                head_sci['CRPIX2'] = crpix2
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+
+        pass        
 
 
     def calculate_centers(self,
@@ -3136,6 +3370,353 @@ class ImageTools():
 
         # Return star position.
         return xc, yc, median_xshift, median_yshift
+
+
+    @plt.style.context('spaceKLIP.sk_style')
+    def align_frames(self,
+                     method='fourier',
+                     align_algo='leastsq',
+                     mask_override=None,
+                     msk_shp=8,
+                     shft_exp=1,
+                     align_to_file=None,
+                     scale_prior=False,
+                     kwargs={},
+                     subdir='aligned',
+                     save_figures=True):
+        """
+        Align all SCI and REF frames to the first SCI frame.
+
+        Parameters
+        ----------
+        method : 'fourier' or 'spline' (not recommended), optional
+            Method for shifting the frames. The default is 'fourier'.
+        align_algo : 'leastsq' or 'header'
+            Algorithm to determine the alignment offsets. Default is 'leastsq',
+            'header' assumes perfect header offsets.
+        mask_override : str, optional
+            Mask some pixels when cross correlating for shifts
+        msk_shp : int, optional
+            Shape (height or radius, or [inner radius, outer radius]) for custom mask invoked by "mask_override"
+        shft_exp : float, optional
+            Take image to the given power before cross correlating for shifts, default is 1. For instance, 1/2 helps align nircam bar/narrow data (or other data with weird speckles)
+        align_to_file : str, optional
+            Path to FITS file to which all images shall be aligned. Needs to be
+            a file with the same observational setup as all concatenations in
+            the spaceKLIP database. Hence, this can only be applied to one
+            observational setup at a time. The default is None.
+        scale_prior : bool, optional
+            If True, tries to find a better prior for the scale factor instead
+            of simply using 1. The default is False.
+        kwargs : dict, optional
+            Keyword arguments for the scipy.ndimage.shift routine. The default
+            is {}.
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'aligned'.
+        save_figures : bool, optional
+            Save the plots in a PDF?
+
+        Returns
+        -------
+        None.
+
+        """
+
+        #### DEPRECATION WARNING ####
+        log.warning('This function is deprecated. Use `calculate_alignment` and `shift_frames` instead.')
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # useful masks for computing shifts:
+        def create_annulus_mask(h, w, center=None, radius=None):
+
+            if center is None: # use the middle of the image
+                center = (int(w/2), int(h/2))
+            if radius is None: # use the smallest distance between the center and image walls
+                radius = min(center[0], center[1], w-center[0], h-center[1])
+
+            Y, X = np.ogrid[:h, :w]
+            dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
+
+            mask = (dist_from_center <= radius[0]) | (dist_from_center >= radius[1])
+            return mask
+        def create_circular_mask(h, w, center=None, radius=None):
+
+            if center is None: # use the middle of the image
+                center = (int(w/2), int(h/2))
+            if radius is None: # use the smallest distance between the center and image walls
+                radius = min(center[0], center[1], w-center[0], h-center[1])
+
+            Y, X = np.ogrid[:h, :w]
+            dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
+
+            mask = dist_from_center <= radius
+            return mask
+
+        def create_rec_mask(h, w, center=None, z=None):
+            if center is None: # use the middle of the image
+                center = (int(w/2), int(h/2))
+            if z is None:
+                z = h//4
+
+            mask = np.zeros((h,w), dtype=bool)
+            mask[center[1]-z:center[1]+z,:] = True
+
+            return mask
+
+        # Loop through concatenations.
+        database_temp = deepcopy(self.database.obs)
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Find science and reference files.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+            if len(ww_sci) == 0:
+                raise UserWarning('Could not find any science files')
+            ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
+            ww_all = np.append(ww_sci, ww_ref)
+
+            # Loop through FITS files.
+            if align_to_file is not None:
+                try:
+                    ref_image = pyfits.getdata(align_to_file, 'SCI')
+                except:
+                    ref_image = pyfits.getdata(align_to_file, 0)
+                if ref_image.ndim == 3:
+                    ref_image = np.nanmedian(ref_image, axis=0)
+            shifts_all = []
+            for j in ww_all:
+
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+                if mask_override is not None:
+                    if mask_override == 'ann':
+                        mask_circ = create_annulus_mask(data[0].shape[0], data[0].shape[1], radius=msk_shp)
+                    elif mask_override == 'circ':
+                        mask_circ = create_circular_mask(data[0].shape[0],data[0].shape[1], radius=msk_shp)
+                    elif mask_override == 'rec':
+                        mask_circ = create_rec_mask(data[0].shape[0],data[0].shape[1], z=msk_shp)
+                    else:
+                        raise ValueError('There are `circ` and `rec` custom masks available')
+                    mask_temp = data[0].copy()
+                    mask_temp[~mask_circ] = 1
+                    mask_temp[mask_circ] = 0
+                elif mask is None:
+                    mask_temp = np.ones_like(data[0])
+                else:
+                    mask_temp = mask.copy()
+                
+                # Align frames.
+                head, tail = os.path.split(fitsfile)
+                log.info('  --> Align frames: ' + tail)
+                if np.sum(np.isnan(data)) != 0:
+                    raise UserWarning('Please replace nan pixels before attempting to align frames')
+                shifts = []
+                for k in range(data.shape[0]):
+
+                    # Take the first science frame as reference frame.
+                    if j == ww_sci[0] and k == 0:
+                        if align_to_file is None:
+                            ref_image = data[k].copy()
+                        pp = np.array([0., 0., 1.])
+                        xoffset = self.database.obs[key]['XOFFSET'][j] #arcsec
+                        yoffset = self.database.obs[key]['YOFFSET'][j] #arcsec
+                        crpix1 = self.database.obs[key]['CRPIX1'][j] #pixels
+                        crpix2 = self.database.obs[key]['CRPIX2'][j] #pixels
+                        pxsc = self.database.obs[key]['PIXSCALE'][j] #arcsec
+
+                    # Align all other SCI and REF frames to the first science
+                    # frame.
+                    if align_to_file is not None or j != ww_sci[0] or k != 0:
+                        # Calculate shifts relative to first frame, work in pixels
+                        xfirst = crpix1 + (xoffset/pxsc)
+                        xoff_curr_pix = self.database.obs[key]['XOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
+                        xcurrent = self.database.obs[key]['CRPIX1'][j] + xoff_curr_pix
+                        xshift = xfirst - xcurrent
+
+                        yfirst = crpix2 + (yoffset/pxsc)
+                        yoff_curr_pix = self.database.obs[key]['YOFFSET'][j]/self.database.obs[key]['PIXSCALE'][j]
+                        ycurrent = self.database.obs[key]['CRPIX2'][j] + yoff_curr_pix
+                        yshift = yfirst - ycurrent
+
+                        if scale_prior:
+                            ww = mask < 0.5
+                            sh = mask.shape
+                            bw = 100
+                            ww[:bw, :] = 0.
+                            ww[:, :bw] = 0.
+                            ww[sh[0] - bw:, :] = 0.
+                            ww[:, sh[1] - bw:] = 0.
+                            # plt.imshow(ww, origin='lower')
+                            # plt.show()
+                            scale = np.nanmedian(np.true_divide(ref_image, data[k])[ww])
+                            if shft_exp != 1:
+                                scale = np.power(np.abs(scale), shft_exp)
+                            p0 = np.array([xshift, yshift, scale])
+                        else:
+                            p0 = np.array([xshift, yshift, 1.])
+
+                        # Fix for weird numerical behaviour if shifts are small
+                        # but not exactly zero.
+                        if (np.abs(xshift) < 1e-3) and (np.abs(yshift) < 1e-3):
+                            p0 = np.array([0., 0., p0[-1]])
+                        if align_algo == 'leastsq':
+                            if shft_exp != 1:
+                                args = (np.power(np.abs(data[k]), shft_exp), np.power(np.abs(ref_image), shft_exp), mask_temp, method, kwargs)
+                            else:
+                                args = (data[k], ref_image, mask_temp, method, kwargs)
+                            # Use header values to initiate least squares fit
+                            pp = leastsq(ut.alignlsq,
+                                         p0,
+                                         args=args)[0]
+                        elif align_algo == 'header':
+                            # Just assume the header values are correct
+                            pp = p0
+
+                    # Append shifts to array and apply shift to image
+                    # using defined method.
+                    shifts += [np.array([pp[0], pp[1], pp[2]])]
+                    if align_to_file is not None or j != ww_sci[0] or k != 0:
+                        data[k] = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        erro[k] = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                shifts = np.array(shifts)
+                if mask is not None:
+                    if align_to_file is not None or j != ww_sci[0]:
+                        temp = np.median(shifts, axis=0)
+                        mask = spline_shift(mask, [temp[1], temp[0]], order=0, mode='constant', cval=np.nanmedian(mask))
+                shifts_all += [shifts]
+                if imshifts is not None:
+                    imshifts += shifts[:, :-1]
+                else:
+                    imshifts = shifts[:, :-1]
+                if maskoffs is not None:
+                    maskoffs -= shifts[:, :-1]
+                else:
+                    maskoffs = -shifts[:, :-1]
+
+                # Compute shift distances.
+                dist = np.sqrt(np.sum(shifts[:, :2]**2, axis=1))  # pix
+                dist *= self.database.obs[key]['PIXSCALE'][j]*1000  # mas
+                if j == ww_sci[0]:
+                    dist = dist[1:]
+                log.info('  --> Align frames: median required shift = %.2f mas' % np.median(dist))
+                if self.database.obs[key]['TELESCOP'][j] == 'JWST':
+                    ww = (dist < 1e-5) | (dist > 100.)
+                else:
+                    ww = (dist < 1e-5)
+                if np.sum(ww) != 0:
+                    if j == ww_sci[0]:
+                        ww = np.append(np.array([False]), ww)
+                    ww = np.where(ww == True)[0]
+                    if align_algo != 'header':
+                        log.warning('  --> The following frames might not be properly aligned: '+str(ww))
+
+                # Write FITS file and PSF mask.
+                head_pri['XOFFSET'] = xoffset #arcseconds
+                head_pri['YOFFSET'] = yoffset #arcseconds
+                head_sci['CRPIX1'] = crpix1
+                head_sci['CRPIX2'] = crpix2
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
+
+            # Plot science frame alignment.
+            colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+            fig = plt.figure(figsize=(6.4, 4.8))
+            ax = plt.gca()
+            for index, j in enumerate(ww_sci):
+                ax.scatter(shifts_all[index][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
+                           shifts_all[index][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
+                           s=5, color=colors[index%len(colors)], marker='o',
+                           label='PA = %.0f deg' % self.database.obs[key]['ROLL_REF'][j])
+            ax.axhline(0., color='gray', lw=1, zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
+            ax.axvline(0., color='gray', lw=1, zorder=-1)
+
+            ax.set_aspect('equal')
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            xrng = xlim[1]-xlim[0]
+            yrng = ylim[1]-ylim[0]
+            if xrng > yrng:
+                ax.set_xlim(np.mean(xlim) - xrng, np.mean(xlim) + xrng)
+                ax.set_ylim(np.mean(ylim) - xrng, np.mean(ylim) + xrng)
+            else:
+                ax.set_xlim(np.mean(xlim) - yrng, np.mean(xlim) + yrng)
+                ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
+            ax.set_xlabel('x-shift [mas]')
+            ax.set_ylabel('y-shift [mas]')
+            ax.legend(loc='upper right')
+            ax.set_title(f'Science frame alignment\nfor {self.database.obs[key]["TARGPROP"][ww_sci[0]]}, {self.database.obs[key]["FILTER"][ww_sci[0]]}')
+            if save_figures:
+                output_file = os.path.join(output_dir, key + '_align_sci.pdf')
+                plt.savefig(output_file)
+                log.info(f" Plot saved in {output_file}")
+            plt.show()
+            plt.close(fig)
+            
+            # Plot reference frame alignment.
+            if len(ww_ref) > 0:
+                colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                fig = plt.figure(figsize=(6.4, 4.8))
+                ax = plt.gca()
+                seen = []
+                reps = []
+                syms = ['o', 'v', '^', '<', '>'] * (1 + len(ww_ref) // 5)
+                add = len(ww_sci)
+                for index, j in enumerate(ww_ref):
+                    this = '%.3f_%.3f' % (database_temp[key]['XOFFSET'][j], database_temp[key]['YOFFSET'][j])
+                    if this not in seen:
+                        ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
+                                   shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
+                                   s=5, color=colors[len(seen)%len(colors)], marker=syms[0], 
+                                   label='dither %.0f' % (len(seen) + 1))
+                        ax.hlines((-database_temp[key]['YOFFSET'][j] + yoffset) * 1000, 
+                                  (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 - 4., 
+                                  (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 + 4.,
+                                  color=colors[len(seen)%len(colors)], lw=1)
+                        ax.vlines((-database_temp[key]['XOFFSET'][j] + xoffset) * 1000, 
+                                  (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 - 4., 
+                                  (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 + 4., 
+                                  color=colors[len(seen)%len(colors)], lw=1)
+                        seen += [this]
+                        reps += [1]
+                    else:
+                        ww = np.where(np.array(seen) == this)[0][0]
+                        ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
+                                   shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000, 
+                                   s=5, color=colors[ww%len(colors)], marker=syms[reps[ww]])
+                        reps[ww] += 1
+                ax.set_aspect('equal')
+                xlim = ax.get_xlim()
+                ylim = ax.get_ylim()
+                xrng = xlim[1]-xlim[0]
+                yrng = ylim[1]-ylim[0]
+                if xrng > yrng:
+                    ax.set_xlim(np.mean(xlim) - xrng, np.mean(xlim) + xrng)
+                    ax.set_ylim(np.mean(ylim) - xrng, np.mean(ylim) + xrng)
+                else:
+                    ax.set_xlim(np.mean(xlim) - yrng, np.mean(xlim) + yrng)
+                    ax.set_ylim(np.mean(ylim) - yrng, np.mean(ylim) + yrng)
+                ax.set_xlabel('x-shift [mas]')
+                ax.set_ylabel('y-shift [mas]')
+                ax.legend(loc='upper right', fontsize='small')
+                ax.set_title(f'Reference frame alignment\n showing {len(ww_ref)} PSF refs for {self.database.obs[key]["FILTER"][ww_ref[0]]}')
+                if save_figures:
+                    output_file = os.path.join(output_dir, key + '_align_ref.pdf')
+                    plt.savefig(output_file)
+                    log.info(f" Plot saved in {output_file}")
+                plt.show()
+                plt.close(fig)
+
 
     @plt.style.context('spaceKLIP.sk_style')
     def calculate_alignment(self,
