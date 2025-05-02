@@ -356,7 +356,8 @@ def read_red(fitsfile):
 
 def write_fitpsf_images(fitpsf,
                         fitsfile,
-                        row):
+                        row,
+                        fm_bestfit_convolved=None):
     """
     Write a best fit FM PSF to a FITS file.
     
@@ -368,7 +369,9 @@ def write_fitpsf_images(fitpsf,
         Path of output FITS file.
     row : astropy.table.Row
         Astropy table row of the companion to be saved to the FITS file.
-    
+    fm_bestfit_convolved: 2D array or None
+        residual 2D array from gaussian convolution fit to be saved to the FITS file.
+        If None, save the standard mcmc fit residuals. Default is None.
     Returns
     -------
     None.
@@ -378,10 +381,14 @@ def write_fitpsf_images(fitpsf,
     # Make best fit FM PSF.
     dx = fitpsf.fit_x.bestfit - fitpsf.data_stamp_x_center
     dy = fitpsf.fit_y.bestfit - fitpsf.data_stamp_y_center
-    fm_bestfit = fitpsf.fit_flux.bestfit * sinterp.shift(fitpsf.fm_stamp, [dy, dx])
-    if fitpsf.padding > 0:
-        fm_bestfit = fm_bestfit[fitpsf.padding:-fitpsf.padding, fitpsf.padding:-fitpsf.padding]
-    
+    if fm_bestfit_convolved is None:
+        fm_bestfit = fitpsf.fit_flux.bestfit * sinterp.shift(fitpsf.fm_stamp, [dy, dx])
+
+        if fitpsf.padding > 0:
+            fm_bestfit = fm_bestfit[fitpsf.padding:-fitpsf.padding, fitpsf.padding:-fitpsf.padding]
+    else:
+        fm_bestfit = fm_bestfit_convolved
+
     # Make residual image.
     residual_image = fitpsf.data_stamp - fm_bestfit
     snr = np.nanmax(fm_bestfit) / np.nanstd(residual_image)
@@ -390,11 +397,13 @@ def write_fitpsf_images(fitpsf,
     # Write FITS file.
     pri = pyfits.PrimaryHDU()
     for key in row.keys():
-        if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
-                   'THETA_ERROR'] and np.isnan(row[key]):
-            pri.header[key] = 'NONE'
-        else:
-            pri.header[key] = row[key]
+        # if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST'] and np.isnan(row[key]):
+        #     pri.header[key] = 'NONE'
+        # else:
+            if not isinstance(row[key], str) and np.isnan(row[key]):
+                pri.header[key] = 'NONE'
+            else:
+                pri.header[key] = row[key]
     res = pyfits.ImageHDU(residual_image, name='RES')
     sci = pyfits.ImageHDU(fitpsf.data_stamp, name='SCI')
     mod = pyfits.ImageHDU(fm_bestfit, name='MOD')
