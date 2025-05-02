@@ -981,8 +981,7 @@ def run_obs(database,
                     del steps['mask_groups']['maxgrps_bright']
 
             fitsout_path_list.append(fitsout_path)
-            # # Update spaceKLIP database.
-            # database.update_obs(key, j, fitsout_path)
+        # Update spaceKLIP database.
         for j in jtervals:
             # Update spaceKLIP database.
             database.update_obs(key, j, fitsout_path_list[j])
