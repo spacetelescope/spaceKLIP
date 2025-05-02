@@ -1820,7 +1820,7 @@ class AnalysisTools():
                                         mstar_err_temp = mstar_err[filt]
                                     else:
                                         mstar_err_temp = mstar_err
-                                    appmag_conv = mstar[filt] + delmag  # vegamag
+                                    appmag_conv = mstar[filt] + delmag_conv  # vegamag
                                     appmag_err_conv = np.sqrt(mstar_err_temp ** 2 + delmag_err_conv ** 2)
                                     fitsfile_conv = os.path.join(output_dir_comp,
                                                             mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
