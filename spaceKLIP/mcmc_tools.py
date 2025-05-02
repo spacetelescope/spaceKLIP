@@ -332,9 +332,10 @@ class MCMCTools():
             model = shift(model, shift=[y_guess - y, x_guess - x], mode='constant', cval=0.0)
 
         if rotate:
-            model = rotate_image(model, angle=psi, reshape=False)
+            model = rotate_image(model, angle=psi, reshape=False, order=1, mode='constant', cval=0)
 
-
+        if model.shape[0] != model.shape[1]:
+            pass
         return model
 
     def run(self, data, psf, x_guess=0, y_guess=0, r=0, nsteps=5000, ndim=3, nwalkers=32,
@@ -391,11 +392,14 @@ class MCMCTools():
                 float: Log-likelihood value.
             """
             model = self.build_model_from_psf(params, psf, binarity, rotate)
+            if model.shape[0] != model.shape[1]:
+                pass
             if rotate:
                 model = self.extract_subarray(model.copy(), np.where(model == np.nanmax(model))[1][0],
                                                    np.where(model == np.nanmax(model))[0][0], size=self.size,
                                                    flat_and_skip_center=False)
-
+            if model.shape[0] != model.shape[1]:
+                pass
             ydat, xdat = np.indices(model.shape)
 
             if r > 0:
