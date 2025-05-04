@@ -41,6 +41,7 @@ import copy
 import pyklip.fakes as fakes
 from spaceKLIP.psf import get_offsetpsf
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
+from spaceKLIP.target_acq_tools import ta_analysis
 from pyklip.instruments.JWST import JWSTData
 from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 from astropy.io import fits
@@ -2958,6 +2959,7 @@ class ImageTools():
 
     def calculate_centers(self,
                           method='fourier',
+                          use_ta=False,
                           subpix_first_sci_only=False,
                           first_sci_only=True,
                           spectral_type='G2V',
@@ -2967,16 +2969,21 @@ class ImageTools():
                           subdir='recentered'):
         """
         Calculate shifts necessary to recenter frames so that the host star
-        position is data.shape // 2. For NIRCam coronagraphy, use a WebbPSF model
-        to determine the star position behind the coronagraphic mask for the
-        first SCI frame. Then, shift all other SCI and REF frames by the same amount.
-        For MIRI coronagraphy, do nothing. For all other data types, simply recenter
-        the host star PSF.
+        position is data.shape // 2. For NIRCam coronagraphy, use either a 
+        WebbPSF model or target acquisition data (if available) to determine 
+        the star's position behind the coronagraphic mask in the first SCI frame.
+        For MIRI coronagraphy, use target acquisition data (if available) to determine 
+        the star's position behind the coronagraphic mask in the first SCI frame;
+        otherwise, no shift is applied. Then, shift all other SCI and REF frames by 
+        the same amount. For all other data types, simply recenter the host star PSF.
 
         Parameters
         ----------
         method : 'fourier' or 'spline' (not recommended), optional
             Method for shifting the frames. The default is 'fourier'.
+        use_ta: bool, optional
+            Use target acquisition data to determine the star's position behind
+            the coronagraphic mask in the first SCI frame? The default is False.
         subpix_first_sci_only : bool, optional
             By default, all frames will be recentered to subpixel precision. If
             'subpix_first_sci_only' is True, then only the first SCI frame will
@@ -2995,7 +3002,7 @@ class ImageTools():
             star position behind the coronagraphic mask. The default is 'G2V'.
         shft_exp : float, optional
             Take image to the given power before cross correlating for shifts, default is 1.
-            For instance, 1/2 helps align nircam bar/narrow data (or other data with weird speckles)
+            For instance, 1/2 helps align NIRCam bar/narrow data (or other data with weird speckles).
         kwargs : dict, optional
             Keyword arguments for the scipy.ndimage.shift routine. The default
             is {}.
@@ -3008,9 +3015,9 @@ class ImageTools():
         None.
         """
 
-        # Update NIRCam coronagraphy centers, i.e., change SIAF CRPIX position
-        # to true mask center determined by Jarron 
-        # self.update_nircam_centers()  # shall be run purposely by the user
+        # Update NIRCam coronagraphy centers, i.e., change SIAF CRPIX/MASKCEN position
+        # to true mask center determined by Jarron.
+        # self.update_nircam_centers()  # Shall be run purposely by the user.
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -3046,29 +3053,46 @@ class ImageTools():
                 if np.sum(np.isnan(data)) != 0:
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
                 shifts = []  # Shift between star position and image center (data.shape // 2).
-                maskoffs_temp = []  # Shift between star and coronagraphic mask position.
-                mask_shifts = []  # Shifts applied to mask.
+                maskoffs_temp = []  # Offset between star and coronagraphic mask center.
+                mask_shifts = []  # Shift applied to the PSF mask to match the recentered image.
 
                 # SCI and REF data.
                 if j in ww_sci or j in ww_ref:
+
+                    # Grab the mask center if defined in the database.
+                    maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1-indexed
+                    maskceny = self.database.obs[key]['MASKCENY'][j]  # 1-indexed 
 
                     # NIRCam coronagraphy.
                     if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON']:
                         for k in range(data.shape[0]):
 
-                            # For the first SCI frame, get the star position
+                            # For the first SCI/REF frame, get the star position
                             # and the shift between the star and coronagraphic
                             # mask position.
 
                             if (not first_sci_only or j == ww_sci[0]) and k == 0:
-                                xc, yc, xshift, yshift = self.find_nircam_centers(data0=data.copy(),
-                                                                                  key=key,
-                                                                                  j=j,
-                                                                                  shft_exp=shft_exp,
-                                                                                  spectral_type=spectral_type,
-                                                                                  date=head_pri['DATE-BEG'],
-                                                                                  output_dir=output_dir,
-                                                                                  highpass=highpass)
+
+                                # Use TA data to determine the star position behind the coronagraphic mask.
+                                if use_ta:
+                                    xc, yc = ta_analysis(self.database.obs[key][j]['FITSFILE'],
+                                                         plot=True, verbose=True,
+                                                         output_dir=output_dir)
+
+                                    # Calculate the star - mask offset.
+                                    xshift, yshift = (xc - (maskcenx - 1), yc - (maskceny - 1))
+
+                                # Use WebbPSF model to determine the star position behind the coronagraphic mask.
+                                else:
+                                    xc, yc, xshift, yshift = self.find_nircam_centers(data0=data.copy(),
+                                                                                      key=key,
+                                                                                      j=j,
+                                                                                      shft_exp=shft_exp,
+                                                                                      spectral_type=spectral_type,
+                                                                                      date=head_pri['DATE-BEG'],
+                                                                                      output_dir=output_dir,
+                                                                                      highpass=highpass)
+
                             
                             # Apply the same shift to all SCI and REF frames and masks.
                             shifts += [np.array([-(xc - (data.shape[-1] - 1.) / 2.), -(yc - (data.shape[-2] - 1.) / 2.)])]
@@ -3082,29 +3106,55 @@ class ImageTools():
                         starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
                         starceny = (data.shape[-2] - 1) / 2. - shifts[0][1] + 1  # 1-indexed
 
-                        # Mask remains the same.
-                        maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1-indexed
-                        maskceny = self.database.obs[key]['MASKCENY'][j]  # 1-indexed 
+                        # Mask center remains the same.
+                        maskcenx = maskcenx  # 1-indexed
+                        maskceny = maskceny  # 1-indexed 
                         
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
                         log.warning('  --> Recenter frames: not implemented for MIRI coronagraphy, skipped')
                         for k in range(data.shape[0]):
+                            
+                            # For the first SCI/REF frame, get the star position
+                            # and the shift between the star and coronagraphic
+                            # mask position (if TA data avaliable else None). 
 
-                            # Do nothing.
-                            shifts += [np.array([0., 0.])]
-                            mask_shifts += [np.array([0., 0.])]
-                            maskoffs_temp += [np.array([0., 0.])]
+                            if (not first_sci_only or j == ww_sci[0]) and k == 0:
 
-                        xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
-                        yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
+                                # Use TA data to determine the star position behind the coronagraphic mask.
+                                if use_ta:
+                                    xc, yc = ta_analysis(self.database.obs[key][j]['FITSFILE'],
+                                                         plot=True, verbose=True,
+                                                         output_dir=output_dir)
 
-                        # Star center and mask center stay the same.
-                        starcenx = self.database.obs[key]['STARCENX'][j]  # 1-indexed
-                        starceny = self.database.obs[key]['STARCENY'][j]  # 1-indexed  
-                         
-                        crpix1 = self.database.obs[key]['CRPIX1'][j]  # 1-indexed
-                        crpix2 = self.database.obs[key]['CRPIX2'][j]  # 1-indexed                    
+                                    # Calculate the star - mask offset.
+                                    xshift, yshift = (xc - (maskcenx - 1), yc - (maskceny - 1))
+                                
+                                # Do nothing.
+                                else:
+                                    xc, yc = (data.shape[-1] - 1.) / 2., (data.shape[-2] - 1.) / 2.  # Shift will be 0.
+                                    xshift, yshift = 0., 0.
+
+                            # Apply the same shift to all SCI and REF frames and masks.
+                            shifts += [np.array([-(xc - (data.shape[-1] - 1.) / 2.), -(yc - (data.shape[-2] - 1.) / 2.)])]
+                            mask_shifts += [np.array([-(xc - (data.shape[-1] - 1.) / 2.), -(yc - (data.shape[-2] - 1.) / 2.)])]
+                            maskoffs_temp += [np.array([xshift, yshift])]
+
+                        if use_ta:
+                            xoffset = self.database.obs[key]['XOFFSET'][j] - self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
+                            yoffset = self.database.obs[key]['YOFFSET'][j] - self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
+                        else:
+                            xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
+                            yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
+
+                        # Star center.
+                        # If TA was used, shift from image center; otherwise, use provided header values.
+                        starcenx = ((data.shape[-1] - 1) / 2. - shifts[0][0] + 1) if use_ta else self.database.obs[key]['STARCENX'][j]  # 1-indexed
+                        starceny = ((data.shape[-2] - 1) / 2. - shifts[0][1] + 1) if use_ta else self.database.obs[key]['STARCENY'][j]  # 1-indexed
+
+                        # Mask center remains the same.
+                        maskcenx = maskcenx  # 1-indexed
+                        maskceny = maskceny  # 1-indexed                   
 
                     # Other data types.
                     else:
@@ -3346,6 +3396,7 @@ class ImageTools():
                 xc = np.mean(xsub_indarr) + xshift
                 yc = np.mean(ysub_indarr) + yshift
             xshift, yshift = (xc - maskcenx, yc - maskceny)
+            print(maskcenx, maskceny)
             shift_list.append([xshift, yshift])
             log.info('  --> Recenter frames: star offset between frame %i and coronagraph center (dx, dy) = (%.3f, %.3f) pix' % (count,xshift, yshift))
             count+=1
