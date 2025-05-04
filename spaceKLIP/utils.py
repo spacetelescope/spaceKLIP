@@ -1269,3 +1269,55 @@ def config_stpipe_log(level='WARNING', suppress=False):
     else:
         # Restore the default logging configuration.
         stpipe.log.load_configuration(stpipe.log._find_logging_config_file())
+
+
+def get_visitid(visitstr):
+    """
+    Common util function to handle several various kinds
+    of visit specifications.
+
+    Parameters
+    ----------
+    visitstr : str
+        The visit string in one of the following formats:
+        - Standard visit ID starting with "V" (e.g., "V0450331001")
+        - PPS format visit ID with colon-separated parts (e.g., "4503:31:1")
+
+    Returns
+    -------
+    str
+        The standardized visit ID starting with "V" (e.g., "V0450331001").
+    """
+    if visitstr.startswith("V"):
+        return visitstr
+    elif ':' in visitstr:
+        # Handle PPS format visit ID.
+        try:
+            parts = [int(p) for p in visitstr.split(':')]
+            if len(parts) != 3:
+                raise ValueError(f"Invalid PPS format: {visitstr}")
+            return f"V{parts[0]:05d}{parts[1]:03d}{parts[2]:03d}"
+        except ValueError as e:
+            raise ValueError(f"Invalid PPS format: {visitstr}") from e
+    else:
+        raise ValueError(f"Unrecognized visit string format: {visitstr}")
+
+
+def get_siaf(inst):
+    """
+    Simple wrapper for SIAF (Science Instrument Aperture File) load,
+    with caching for speed because it takes like 0.2 seconds
+    per instance to load this.
+
+    Parameters
+    ----------
+    inst : str
+        The name of the instrument for which to load the SIAF.
+
+    Returns
+    -------
+    pysiaf.Siaf
+        The loaded SIAF object for the specified instrument.
+    """
+    import pysiaf
+    return pysiaf.Siaf(inst)
