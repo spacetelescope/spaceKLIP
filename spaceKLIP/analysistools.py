@@ -1107,6 +1107,7 @@ class AnalysisTools():
                                        'TP_CORONMSK',
                                        'TP_COMSUBST',
                                        'FITSFILE',
+                                       'FILTER',
                                        'SIGMA_X',
                                        'SIGMA_X_ERROR',
                                        'SIGMA_Y',
@@ -1137,6 +1138,7 @@ class AnalysisTools():
                                        'float',
                                        'float',
                                        'object',
+                                       'str',
                                        'float',
                                        'float',
                                        'float',
@@ -1168,7 +1170,8 @@ class AnalysisTools():
                                        'LN(Z/Z0)',
                                        'TP_CORONMSK',
                                        'TP_COMSUBST',
-                                       'FITSFILE'),
+                                       'FITSFILE',
+                                       'FILTER'),
                                 dtype=('int',
                                        'float',
                                        'float',
@@ -1192,7 +1195,8 @@ class AnalysisTools():
                                        'float',
                                        'float',
                                        'float',
-                                       'object'))
+                                       'object',
+                                       'str'))
                 for k in range(len(companions)):
                     output_dir_comp = os.path.join(output_dir_kl, 'C%.0f' % (k + 1))
                     if not os.path.exists(output_dir_comp):
@@ -1662,6 +1666,7 @@ class AnalysisTools():
                                              scale_factor_avg,
                                              tp_comsubst,
                                              fitsfile,
+                                             filt,
                                              result.x[0],
                                              np.nan,
                                              result.x[1],
@@ -1693,7 +1698,8 @@ class AnalysisTools():
                                              np.nan,
                                              scale_factor_avg,
                                              tp_comsubst,
-                                             fitsfile))
+                                             fitsfile,
+                                             filt))
                             
                             # Write the FM PSF to a file for future plotting.
                             ut.write_fitpsf_images(fma, fitsfile, tab[-1])
@@ -1795,7 +1801,8 @@ class AnalysisTools():
                                          evidence_ratio,
                                          scale_factor_avg,
                                          tp_comsubst,
-                                         fitsfile))
+                                         fitsfile,
+                                         filt))
                             
                             # Write the FM PSF to a file for future plotting.
                             ut.write_fitpsf_images(fit, fitsfile, tab[-1])
