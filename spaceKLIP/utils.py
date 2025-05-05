@@ -787,12 +787,12 @@ def get_tp_comsubst(instrume,
     return tp_comsubst
 
 def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
-    """ Load filter information from the SVO Filter Profile Service or webbpsf
+    """ Load filter information from the SVO Filter Profile Service or STPSF (webbpsf)
 
     Load NIRCam, NIRISS, and MIRI filters from the SVO Filter Profile Service.
     http://svo2.cab.inta-csic.es/theory/fps/
 
-    If timeout to server, then use local copy of filter list and load through webbpsf.
+    If timeout to server, then use local copy of filter list and load through STPSF.
 
     Parameters
     ----------
@@ -803,13 +803,13 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
         Timeout in seconds for connection to SVO Filter Profile Service.
     do_svo : bool
         If True, try to load filter list from SVO Filter Profile Service. 
-        If False, use webbpsf without first check web server.
+        If False, use STPSF without first check web server.
     return_more : bool
         If True, also return `do_svo` variable, whether SVO was used or not.
     """
 
     from astroquery.svo_fps import SvoFps
-    import webbpsf
+    import stpsf as webbpsf
 
     iname_upper = instrument.upper()
 
@@ -821,7 +821,7 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
             log.warning('Using SVO Filter Profile Service timed out. Using WebbPSF instead.')
             do_svo = False
 
-    # If unsuccessful, use webbpsf to get filter list
+    # If unsuccessful, use STPSF to get filter list
     if not do_svo:
         inst_func = {
             'NIRCAM': webbpsf.NIRCam,
