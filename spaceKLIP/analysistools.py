@@ -1802,26 +1802,22 @@ class AnalysisTools():
                                     # Write the MCMC fit results into a table.
                                     flux_jy_conv = 10**result.x[3] * guess_flux
                                     flux_jy_conv *= fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
-                                    flux_jy_err_conv = fma.fit_flux.error * guess_flux
-                                    flux_jy_err_conv *= fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
+                                    flux_jy_err_conv = np.nan
                                     flux_si_conv = 10**result.x[3] * guess_flux
                                     flux_si_conv *= fzero_si[filt] / 10 ** (mstar[filt] / 2.5)  # erg/cm^2/s/A
                                     flux_si_conv *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                                    flux_si_err_conv = fma.fit_flux.error * guess_flux
-                                    flux_si_err_conv *= fzero_si[filt] / 10 ** (mstar[filt] / 2.5)  # erg/cm^2/s/A
-                                    flux_si_err_conv *= 1e-7 * 1e4 * 1e4  # W/m^2/um
+                                    flux_si_err_conv = np.nan
                                     flux_si_alt_conv = flux_jy * 1e-26 * 299792458. / (
                                                 1e-6 * self.database.red[key]['CWAVEL'][j]) ** 2 * 1e-6  # W/m^2/um
-                                    flux_si_alt_err_conv = flux_jy_err * 1e-26 * 299792458. / (
-                                                1e-6 * self.database.red[key]['CWAVEL'][j]) ** 2 * 1e-6  # W/m^2/um
+                                    flux_si_alt_err_conv = np.nan
                                     delmag_conv = -2.5 * np.log10(10**result.x[3] * guess_flux)  # mag
-                                    delmag_err_conv =np.nan  # mag
+                                    delmag_err_conv = np.nan
                                     if isinstance(mstar_err, dict):
                                         mstar_err_temp = mstar_err[filt]
                                     else:
                                         mstar_err_temp = mstar_err
                                     appmag_conv = mstar[filt] + delmag_conv  # vegamag
-                                    appmag_err_conv = np.sqrt(mstar_err_temp ** 2 + delmag_err_conv ** 2)
+                                    appmag_err_conv =np.nan
                                     fitsfile_conv = os.path.join(output_dir_comp,
                                                             mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
                                                                 subsections) + '_' + key + '-conv_fitpsf_c%.0f' % (
