@@ -2212,8 +2212,6 @@ class AnalysisTools():
     def mass_sensitivity(self,
                          starfile,
                          iterpolator,
-                         contrast_curves_ext='_cons.npy',
-                         separations_ext='_seps.npy',
                          age=24,
                          distance=50,
                          spectral_type='G2V',
@@ -2221,6 +2219,7 @@ class AnalysisTools():
                          contrast_subdir='rawcon',
                          plot_xlim=[0,5],
                          plot_ylim=[0,1],
+                         con_filetype='npy',
                          output_filetype='npy',
                          save_figures=True,
                          **kwargs):
@@ -2236,10 +2235,6 @@ class AnalysisTools():
         iterpolator: dict
             dictionary of dictionaries containing different interpolator functions. Example {filter: {'logmass': interpolating_function}}
             the expected paramters for the interpolating_function are (filtermag, log10age) ---> (log10mas)
-        contrast_curves_ext : str, optional
-            extention for contrast_curves file. The default is '_cons.npy'.
-        contrast_curves_ext : str, optional
-            extention for contrast_curves file. The default is '_seps.npy'.
         age: float, optional
             age for the target star for which the mass sensitivity is computed. The default is 24.
         distance: float, optional
@@ -2257,8 +2252,10 @@ class AnalysisTools():
             x limit for mass sesnitivity plot. The default is [0,5].
         plot_ylim: list, optional
             y limit for mass sesnitivity plot. The default is [0,1].
-        output_filetype : str
-            File type to save the raw contrast information to. Options are 'ecsv' or 'npy'.
+        con_filetype: str, optional
+            File type to read the contrast information from. Options are 'ecsv' or 'npy'.
+        output_filetype : str, optional
+            File type to save the mass sensitivity information to. Options are 'ecsv' or 'npy'.
         save_figures : bool, optional
             Save the plots in a PDF?
 
@@ -2287,10 +2284,25 @@ class AnalysisTools():
                 data, head_pri, head_sci, is2d = ut.read_red(fitsfile)
                 psfsub_strategy = f"{head_pri['MODE']} with {head_pri['ANNULI']} annuli." if head_pri['ANNULI'] > 1 else head_pri['MODE']
 
-                # load contrast curves and separation
-                contrast_list = np.load(os.path.join(self.database.output_dir, f"{contrast_subdir}/{fitsfile.split('/')[-1].split('.fits')[0]+contrast_curves_ext}"))
-                sep_list = np.load(os.path.join(self.database.output_dir, f"{contrast_subdir}/{fitsfile.split('/')[-1].split('.fits')[0]+separations_ext}"))
+                # # load contrast curves and separation
+                # contrast_list = np.load(os.path.join(self.database.output_dir, f"{contrast_subdir}/{fitsfile.split('/')[-1].split('.fits')[0]+contrast_curves_ext}"))
+                # sep_list = np.load(os.path.join(self.database.output_dir, f"{contrast_subdir}/{fitsfile.split('/')[-1].split('.fits')[0]+separations_ext}"))
 
+                # Get the raw contrast information with and without mask correction
+                file_str = os.path.join(self.database.output_dir, f"{contrast_subdir}/{fitsfile.split('/')[-1]}")
+                if con_filetype == 'npy':
+                    seps_file = file_str.replace('.fits', '_seps.npy')  # Arcseconds
+                    cons_file = file_str.replace('.fits', '_cons.npy')
+                    contrast_list = np.load(cons_file)
+                    sep_list = np.load(seps_file)
+
+                elif con_filetype == 'ecsv':
+                    raise NotImplementedError('.ecsv save format not currently supported for \
+                                        calibrated contrasts. Please use .npy raw contrasts as input.')
+                    # contrast_file = file_str.replace('.fits', '_contrast.ecsv')
+                    # contrast_path =  os.path.join(rawcon_dir, contrast_file)
+
+                    # rawcon_data = Table.read(contrast_path, format='ascii.ecsv')
 
                 log.info('--> Concatenation ' + key)
                 mstar, fzero, fzero_si = get_stellar_magnitudes(starfile, spectral_type, self.database.red[key]['INSTRUME'][j],
