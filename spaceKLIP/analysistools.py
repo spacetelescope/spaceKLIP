@@ -36,6 +36,8 @@ from scipy.optimize import minimize
 from scipy.ndimage import gaussian_filter, rotate, convolve
 from scipy.ndimage import shift as spline_shift
 from scipy.interpolate import interp1d
+from webbpsf_ext.spectra import mass_sensitivity_table
+
 from spaceKLIP import utils as ut
 from spaceKLIP.psf import get_offsetpsf, JWST_PSF
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
@@ -2206,6 +2208,163 @@ class AnalysisTools():
                     tab_conv.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
                     log.info(f'Table saved to {output_ecsv_path}')
         pass
+
+    def mass_sensitivity(self,
+                         starfile,
+                         iterpolator,
+                         contrast_curves_ext='_cons.npy',
+                         separations_ext='_seps.npy',
+                         age=24,
+                         distance=50,
+                         spectral_type='G2V',
+                         subdir='massesns',
+                         contrast_subdir='rawcon',
+                         plot_xlim=[0,5],
+                         plot_ylim=[0,1],
+                         output_filetype='npy',
+                         save_figures=True,
+                         **kwargs):
+
+        """
+        Compute the mass sensitivity curves relative to the provided host star flux and contrast curves.
+
+        Parameters
+        ----------
+        starfile : path
+            Path of VizieR VOTable containing host star photometry or two
+            column TXT file with wavelength (micron) and flux (Jy).
+        iterpolator: dict
+            dictionary of dictionaries containing different interpolator functions. Example {filter: {'logmass': interpolating_function}}
+            the expected paramters for the interpolating_function are (filtermag, log10age) ---> (log10mas)
+        contrast_curves_ext : str, optional
+            extention for contrast_curves file. The default is '_cons.npy'.
+        contrast_curves_ext : str, optional
+            extention for contrast_curves file. The default is '_seps.npy'.
+        age: float, optional
+            age for the target star for which the mass sensitivity is computed. The default is 24.
+        distance: float, optional
+            distance for the target star for which the mass sensitivity is computed. The default is 50.
+        spectral_type : str, optional
+            Host star spectral type for the stellar model SED. The default is
+            'G2V'.
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'massesns'.
+        contrast_subdir: str, optional
+            Name of the directory where the contrast curves are stored.
+            The default is 'rawcon'.
+        plot_xlim: list, optional
+            x limit for mass sesnitivity plot. The default is [0,5].
+        plot_ylim: list, optional
+            y limit for mass sesnitivity plot. The default is [0,1].
+        output_filetype : str
+            File type to save the raw contrast information to. Options are 'ecsv' or 'npy'.
+        save_figures : bool, optional
+            Save the plots in a PDF?
+
+        Returns
+        -------
+        None.
+
+        """
+
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.red.keys()):
+
+            # Loop through FITS files.
+            nfitsfiles = len(self.database.red[key])
+            for j in range(nfitsfiles):
+                filt = self.database.red[key][j]['FILTER']
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.red[key]['FITSFILE'][j]
+                data, head_pri, head_sci, is2d = ut.read_red(fitsfile)
+                psfsub_strategy = f"{head_pri['MODE']} with {head_pri['ANNULI']} annuli." if head_pri['ANNULI'] > 1 else head_pri['MODE']
+
+                # load contrast curves and separation
+                contrast_list = np.load(os.path.join(self.database.output_dir, f"{contrast_subdir}/{fitsfile.split('/')[-1].split('.fits')[0]+contrast_curves_ext}"))
+                sep_list = np.load(os.path.join(self.database.output_dir, f"{contrast_subdir}/{fitsfile.split('/')[-1].split('.fits')[0]+separations_ext}"))
+
+
+                log.info('--> Concatenation ' + key)
+                mstar, fzero, fzero_si = get_stellar_magnitudes(starfile, spectral_type, self.database.red[key]['INSTRUME'][j],
+                                                                return_si=True, output_dir=output_dir,
+                                                                **kwargs)  # vegamag, Jy, erg/cm^2/s/A
+
+                #convert specific contrast to magnitude and then to mass given an age and distance for the system
+                mass_sensitivity_curves=[]
+                for contrast_curve in contrast_list:
+                    mass_sensitivity_curve=[]
+                    for contrast in contrast_curve:
+                        delmag = -2.5 * np.log10(contrast)  # mag
+                        appmag = mstar[filt] + delmag
+                        mass = 10**iterpolator[filt]['logmass'](appmag-5 * np.log10(distance / 10),np.log10(age))
+                        mass_sensitivity_curve.append(mass)
+                    mass_sensitivity_curves.append(mass_sensitivity_curve)# vegamag
+
+                # Plot raw contrast.
+                klmodes = self.database.red[key]['KLMODES'][0].split(',')
+                fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
+                colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                mod = len(colors)
+                with plt.style.context('spaceKLIP.sk_style'):
+                    fig = plt.figure(figsize=(6.4, 4.8))
+                    ax = plt.gca()
+                    for k in range(len(klmodes)):
+                        ax.plot(sep_list[k], mass_sensitivity_curves[k], color=colors[k % mod], label=klmodes[k] + ' KL')
+
+                    ax.set_yscale('log')
+                    if plot_xlim is not None:
+                        ax.set_xlim(plot_xlim)
+                    if plot_ylim is not None:
+                        ax.set_ylim(plot_ylim)
+                    else:
+                        ax.set_ylim([None, 1])
+                    ax.set_xlabel('Separation [arcsec]')
+                    ax.set_ylabel(r'Mass sesitivity [M$_{J}$]')
+                    ax.legend(loc='upper right', ncols=3,
+                              title_fontsize=10)
+                    ax.set_title(f'Mass sesitivity in {filt}, {psfsub_strategy}')
+                    plt.tight_layout()
+                    if save_figures:
+                        output_file = fitsfile[:-5] + '_mass_sens.pdf'
+                        plt.savefig(output_file)
+                        log.info(f" Plot saved in {output_file}")
+                    plt.show()
+                    plt.close(fig)
+
+                if output_filetype.lower()=='ecsv':
+                    # Save outputs as astropy ECSV text tables
+                    columns = [sep_list[0]]
+                    names = ['separation']
+                    for i, klmode in enumerate(klmodes):
+                        columns.append(mass_sensitivity_curves[i])
+                        names.append(f'contrast, N_kl={klmode}')
+                    results_table = Table(columns,
+                                          names=names)
+                    results_table['separation'].unit = u.arcsec
+                    # the following needs debugging:
+                    #for kw in ['TELESCOP', 'INSTRUME', 'SUBARRAY', 'FILTER', 'CORONMSK', 'EXP_TYPE', 'FITSFILE']:
+                    #    results_table.meta[kw] = self.database.red[key][kw][j]
+
+                    output_fn =  fitsfile[:-5]+"_masssens.ecsv"
+                    results_table.write(output_fn, overwrite=True)
+                    print(f"Contrast results and plots saved to {output_fn}")
+                elif output_filetype.lower()=='npy':
+                    # Save outputs as numpy .npy files
+                    np.save(fitsfile[:-5] + '_seps.npy', sep_list)
+                    np.save(fitsfile[:-5] + '_masssens.npy', mass_sensitivity_curves)
+                    print(f"Contrast results and plots saved to {fitsfile[:-5] + '_seps.npy'}, {fitsfile[:-5] + '_masssens.npy'}")
+                else:
+                    raise ValueError('File save format not supported, options are "npy" or "ecsv".')
+
+            pass
 
 
 def loss_function(params,
