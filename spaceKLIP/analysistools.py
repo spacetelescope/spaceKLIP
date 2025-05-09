@@ -2219,6 +2219,7 @@ class AnalysisTools():
                          contrast_subdir='rawcon',
                          plot_xlim=[0,5],
                          plot_ylim=[0,1],
+                         ext='',
                          con_filetype='npy',
                          output_filetype='npy',
                          save_figures=True,
@@ -2252,6 +2253,8 @@ class AnalysisTools():
             x limit for mass sesnitivity plot. The default is [0,5].
         plot_ylim: list, optional
             y limit for mass sesnitivity plot. The default is [0,1].
+        ext: str, optional
+            add extension to load raw contrast curves (if '') or calibrate contrast cuves (with 'cal'). The default is ''.
         con_filetype: str, optional
             File type to read the contrast information from. Options are 'ecsv' or 'npy'.
         output_filetype : str, optional
@@ -2291,8 +2294,8 @@ class AnalysisTools():
                 # Get the raw contrast information with and without mask correction
                 file_str = os.path.join(self.database.output_dir, f"{contrast_subdir}/{fitsfile.split('/')[-1]}")
                 if con_filetype == 'npy':
-                    seps_file = file_str.replace('.fits', '_seps.npy')  # Arcseconds
-                    cons_file = file_str.replace('.fits', '_cons.npy')
+                    seps_file = file_str.replace('.fits', f'{ext}_seps.npy')  # Arcseconds
+                    cons_file = file_str.replace('.fits', f'{ext}_cons.npy')
                     contrast_list = np.load(cons_file)
                     sep_list = np.load(seps_file)
 
