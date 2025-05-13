@@ -196,12 +196,14 @@ class Database():
         BUNIT = []
         CRPIX1 = []  # pix
         CRPIX2 = []  # pix
-        MASKCENX = [] # pix
-        MASKCENY = [] # pix
-        STARCENX = [] # pix
-        STARCENY = [] # pix
-        ALIGN_SHIFT = [] # pix
-        CENTER_SHIFT = [] # pix
+        MASKCENX = []  # pix
+        MASKCENY = []  # pix
+        STARCENX = []  # pix
+        STARCENY = []  # pix
+        CROP_SHIFTX = []  # pix
+        CROP_SHIFTY = []  # pix
+        ALIGN_SHIFT = []  # pix
+        CENTER_SHIFT = []  # pix
         ALIGN_MASK = []  # pix
         CENTER_MASK = []  # pix
         VPARITY = []
@@ -300,6 +302,8 @@ class Database():
             MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
             STARCENX += [head.get('STARCENX', MASKCENX[-1])]
             STARCENY += [head.get('STARCENY', MASKCENY[-1])]
+            CROP_SHIFTX += [head.get('CROP_SHIFTX', np.nan)]
+            CROP_SHIFTY += [head.get('CROP_SHIFTY', np.nan)]
             ALIGN_SHIFT += [head.get('ALIGN_SHIFT', np.zeros)]
             CENTER_SHIFT += [head.get('CENTER_SHIFT', np.zeros)]
             ALIGN_MASK += [head.get('ALIGN_MASK', np.zeros)]
@@ -344,6 +348,8 @@ class Database():
         MASKCENY = np.array(MASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
+        CROP_SHIFTX = np.array(CROP_SHIFTX)
+        CROP_SHIFTY = np.array(CROP_SHIFTY)
         ALIGN_SHIFT = np.array(ALIGN_SHIFT)
         CENTER_SHIFT = np.array(CENTER_SHIFT)
         ALIGN_MASK = np.array(ALIGN_MASK)
@@ -450,6 +456,8 @@ class Database():
                                'MASKCENY',
                                'STARCENX',
                                'STARCENY',
+                               'CROP_SHIFTX',
+                               'CROP_SHIFTY',
                                'ALIGN_SHIFT',
                                'CENTER_SHIFT',
                                'ALIGN_MASK',
@@ -486,6 +494,8 @@ class Database():
                                'float',
                                'float',
                                'object',
+                               'float',
+                               'float',
                                'float',
                                'float',
                                'float',
@@ -583,6 +593,8 @@ class Database():
                              MASKCENY[ww][j],
                              STARCENX[ww][j],
                              STARCENY[ww][j],
+                             CROP_SHIFTX[ww][j],
+                             CROP_SHIFTY[ww][j],
                              ALIGN_SHIFT[ww][j],
                              CENTER_SHIFT[ww][j],
                              ALIGN_MASK[ww][j],
@@ -698,10 +710,12 @@ class Database():
         BUNIT = []
         CRPIX1 = []  # pix
         CRPIX2 = []  # pix
-        MASKCENX = [] # pix
-        MASKCENY = [] # pix
-        STARCENX = [] # pix
-        STARCENY = [] # pix
+        MASKCENX = []  # pix
+        MASKCENY = []  # pix
+        STARCENX = []  # pix
+        STARCENY = []  # pix
+        CROP_SHIFTX = []  # pix
+        CROP_SHIFTY = []  # pix
         BLURFWHM = []  # pix
         HASH = []
         Ndatapaths = len(datapaths)
@@ -803,6 +817,8 @@ class Database():
             MASKCENY += [head.get('MASKCENY', CRPIX2[i])]
             STARCENX += [head.get('STARCENX', np.nan)]
             STARCENY += [head.get('STARCENY', np.nan)]
+            CROP_SHIFTX += [head.get('CROP_SHIFTX', 0.)]
+            CROP_SHIFTY += [head.get('CROP_SHIFTY', 0.)]
             HASH += [TELESCOP[-1] + '_' + INSTRUME[-1] + '_' + DETECTOR[-1] + '_' + FILTER[-1] + '_' + PUPIL[-1] + '_' + CORONMSK[-1] + '_' + SUBARRAY[-1]]
             hdul.close()
         TYPE = np.array(TYPE)
@@ -838,17 +854,19 @@ class Database():
         MASKCENY = np.array(MASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
+        CROP_SHIFTX = np.array(CROP_SHIFTX)
+        CROP_SHIFTY = np.array(CROP_SHIFTY)
         BLURFWHM = np.array(BLURFWHM)
         HASH = np.array(HASH)
-        
+
         # Find unique concatenations.
         HASH_unique = np.unique(HASH)
         NHASH_unique = len(HASH_unique)
-        
+
         # Loop through concatenations.
         for i in range(NHASH_unique):
             ww = np.where(HASH == HASH_unique[i])[0]
-            
+
             # Make Astropy tables for concatenations.
             if HASH_unique[i] not in self.red.keys():
                 tab = Table(names=('TYPE',
@@ -1195,6 +1213,8 @@ class Database():
                    maskceny=None,
                    starcenx=None,
                    starceny=None,
+                   crop_shiftx=None,
+                   crop_shifty=None,
                    align_shift=None,
                    center_shift=None,
                    align_mask=None,
@@ -1245,6 +1265,10 @@ class Database():
         starceny : float, optional
             New star y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
+        crop_shiftx : tuple, optional
+            Stores shifts in x due to any cropping. The default is None.
+        crop_shifty : tuple, optional
+            Stores shifts in y due to any cropping. The default is None.
         align_shift: object
             Array of shift values to recenter science frames. The default is None.
         center_shift: object
@@ -1298,6 +1322,10 @@ class Database():
             self.obs[key]['STARCENX'][index] = starcenx
         if starceny is not None:
             self.obs[key]['STARCENY'][index] = starceny
+        if crop_shiftx is not None:
+            self.obs[key]['CROP_SHIFTX'][index] = crop_shiftx
+        if crop_shifty is not None:
+            self.obs[key]['CROP_SHIFTY'][index] = crop_shifty
         if align_shift is not None:
             self.obs[key]['ALIGN_SHIFT'][index] = align_shift
         if center_shift is not None:
