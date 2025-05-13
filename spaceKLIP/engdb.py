@@ -13,6 +13,7 @@ from requests import Session
 from datetime import datetime, timedelta, timezone
 from spaceKLIP.utils import get_visitid
 
+# Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
