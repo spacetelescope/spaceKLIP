@@ -1010,7 +1010,7 @@ class AnalysisTools():
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
                 dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass,
-                                          center_keywords=['STARCENX','STARCENY'])
+                                   center_keywords=['STARCENX', 'STARCENY'])
                 kwargs_temp['dataset'] = dataset
                 kwargs_temp['aligned_center'] = dataset._centers[0]
                 kwargs_temp['psf_library'] = dataset.psflib
