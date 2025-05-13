@@ -1,41 +1,47 @@
 from __future__ import division
 
-import matplotlib
-
 # =============================================================================
 # IMPORTS
 # =============================================================================
 
+# general imports
 import os
-import pdb
 import sys
-
-import astropy.io.fits as fits
-import matplotlib.pyplot as plt
-from astropy.table import Table
-import astropy.units as u
-
-from cycler import cycler
-import numpy as np
-
 import copy
-import corner
-import emcee
+import shutil
+import logging
+import numpy as np
+from io import StringIO
+from tqdm.auto import trange
+from cycler import cycler
+from functools import partial
+
+# astropy imports
+import astropy.units as u
+import astropy.io.fits as fits
+from astropy.table import Table
+
+# plotting imports
+import matplotlib
+import matplotlib.pyplot as plt
 import matplotlib.patheffects as PathEffects
+
+# pyklip imports
+import pyklip.fm as fm
 import pyklip.fakes as fakes
 import pyklip.fitpsf as fitpsf
-import pyklip.fm as fm
 import pyklip.fmlib.fmpsf as fmpsf
-import shutil
-
 from pyklip import klip, parallelized
 from pyklip.instruments.JWST import JWSTData
-from scipy.ndimage import fourier_shift, gaussian_filter, rotate
+
+# scipy imports
 import scipy.ndimage.interpolation as sinterp
+from scipy.ndimage import fourier_shift, gaussian_filter, rotate, convolve
 from scipy.optimize import minimize
-from scipy.ndimage import gaussian_filter, rotate, convolve
 from scipy.ndimage import shift as spline_shift
 from scipy.interpolate import interp1d
+
+# spaceKLIP imports
 from spaceKLIP import utils as ut
 from spaceKLIP.psf import get_offsetpsf, JWST_PSF
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
@@ -43,15 +49,11 @@ from spaceKLIP.pyklippipeline import get_pyklip_filepaths
 from spaceKLIP.utils import write_starfile, set_surrounded_pixels, pop_pxar_kw
 from spaceKLIP.imagetools import gaussian_kernel
 
-from functools import partial
 from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 
-from tqdm.auto import trange
-from io import StringIO
-import logging
+# Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
-
 
 # =============================================================================
 # MAIN
@@ -437,7 +439,6 @@ class AnalysisTools():
                 else:
                     raise ValueError('File save format not supported, options are "npy" or "ecsv".')
 
-
     def calibrate_contrast(self,
                            subdir='calcon',
                            rawcon_subdir='rawcon',
@@ -449,46 +450,46 @@ class AnalysisTools():
                            multi_injection_spacing=None,
                            use_saved=False,
                            thrput_fit_method='median',
-                           plot_xlim=(0,10),
+                           plot_xlim=(0, 10),
                            **kwargs
                            ):
-        """ 
-        Compute a calibrated contrast curve relative to the host star flux. 
-       
+        """
+        Compute a calibrated contrast curve relative to the host star flux.
+
         Parameters
         ----------
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'calcon'.
         rawcon_subdir : str, optional
-            Name of the directory where the raw contrast data products have been 
-            saved. The default is 'rawcon'.
+            Name of the directory where the raw contrast data products have
+            been saved. The default is 'rawcon'.
         rawcon_filetype : str
-            Save filetype of the raw contrast files. 
+            Save filetype of the raw contrast files.
         companions : list of list of three float, optional
             List of companions to be masked before computing the raw contrast.
             For each companion, there should be a three element list containing
             [RA offset (arcsec), Dec offset (arcsec), mask radius (lambda/D)].
             The default is None.
         injection_seps : 1D-array, optional
-            List of separations to inject companions at (arcsec). 
+            List of separations to inject companions at (arcsec).
         injection_pas : 1D-array, optional
-            List of position angles to inject companions at (degrees).  
+            List of position angles to inject companions at (degrees).
         injection_flux_sigma : float, optional
-            The peak flux of all injected companions in units of sigma, relative 
-            to the 1sigma contrast at the injected separation. 
+            The peak flux of all injected companions in units of sigma, relative
+            to the 1sigma contrast at the injected separation.
         multi_injection_spacing : int, None, optional
             Spacing between companions injected in a single image. If companions
             are too close then it can pollute the recovered flux. Set to 'None'
             to inject only one companion at a time (lambda/D).
         use_saved : bool, optional
             Toggle to use existing saved injected and recovered fluxes instead of
-            repeating the process. 
+            repeating the process.
         thrput_fit_method : str, optional
-            Method to use when fitting/interpolating the measure KLIP throughputs 
+            Method to use when fitting/interpolating the measure KLIP throughputs
             across all of the injection positions. 'median' for a median of PAs at
             with the same separation. 'log_grow' for a logistic growth function.
-            
+
         Returns
         -------
         None.
@@ -802,6 +803,7 @@ class AnalysisTools():
                 ax.legend(ncol=3, fontsize=10)
                 standardize_plots_annotate_save(ax, title=f'Injected companions in {filt}, {psfsub_strategy}, all KL modes', ylabel='Throughput',
                     filename=save_string + '_allKL_throughput.pdf')
+                plt.show()
                 plt.close(fig)
 
 
@@ -823,6 +825,7 @@ class AnalysisTools():
                                                 title=f"Injected companions in {filt}, {psfsub_strategy}, for KL={klip_args['numbasis'][median_KL_index]}",
                                                 ylabel='Throughput',
                                                 filename=save_string + '_medKL_throughput.pdf')
+                plt.show()
                 plt.close(fig)
 
 
@@ -841,6 +844,7 @@ class AnalysisTools():
                                                 title=f'Calibrated contrast in {filt}, {psfsub_strategy}',
                                                 ylabel='Contrast',
                                                 filename=save_string + '_calcon.pdf')
+                plt.show()
                 plt.close(fig)
 
                 # Plot calibrated contrast curves compared to raw
@@ -858,6 +862,7 @@ class AnalysisTools():
                                                 title=f'Calibrated contrast vs Raw contrast in {filt}, {psfsub_strategy}',
                                                 ylabel='Contrast',
                                                 filename=save_string + '_calcon_vs_rawcon.pdf')
+                plt.show()
                 plt.close(fig)
 
     def extract_companions(self,
