@@ -3,7 +3,6 @@
 # =============================================================================
 
 import os
-import jwst
 import urllib
 import astropy
 import logging
