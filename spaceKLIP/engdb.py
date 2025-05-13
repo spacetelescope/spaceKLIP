@@ -5,12 +5,16 @@
 import os
 import astropy
 import warnings
+import logging
 import functools
 import numpy as np
 from csv import reader
 from requests import Session
 from datetime import datetime, timedelta, timezone
 from spaceKLIP.utils import get_visitid
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
 
 # =============================================================================
 # MAIN
@@ -117,7 +121,8 @@ def extract_oss_event_msgs_for_visit(eventlog,
 
 
 def extract_oss_TA_centroids(eventlog,
-                             selected_visit_id):
+                             selected_visit_id,
+                             verbose=False):
     """
     Return the TA centroid values from OSS.
 
@@ -130,6 +135,8 @@ def extract_oss_TA_centroids(eventlog,
         The format should be either:
             - 'VPPPPPOOOVVV' (e.g., V01234001001)
             - 'PPPP:O:V' (e.g., 1234:0:1).
+    verbose : bool, optional
+        If True, displays detailed progress messages and logs during execution.
 
     Returns
     -------
@@ -141,7 +148,7 @@ def extract_oss_TA_centroids(eventlog,
 
     # Retrieve TA-related messages for the selected visit.
     msgs = extract_oss_event_msgs_for_visit(eventlog, selected_visit_id,
-                                            ta_only=True, verbose=False,
+                                            ta_only=True, verbose=verbose,
                                             return_text=True)
 
     # Parse messages to find all centroid coordinates.
@@ -159,8 +166,9 @@ def extract_oss_TA_centroids(eventlog,
             centroids.append(coords)
 
             # Print extracted details.
-            print("\nExtracted date and time:", date_time)
-            print("Extracted Centroid Coordinates:", coords)
+            if verbose:
+                log.info("--> Extracted date and time:", date_time)
+                log.info("--> Extracted OSS Centroid Coordinates:", coords)
 
     # If no centroid coordinates are found, raise an error.
     if not centroids:
