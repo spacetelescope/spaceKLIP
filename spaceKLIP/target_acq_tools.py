@@ -604,14 +604,15 @@ def ta_analysis(data_product,
 
     # Initialize plotting.
     if plot:
-        nrows = 2 if inst == 'MIRI' else 3
-        fig, axes = plt.subplots(figsize=(15, 20), nrows=nrows)
+        fig, ax = plt.subplots(figsize=(40, 40))
 
     # Get and plot the observed TA image -- plot last one.
     i_ta = n_ta_imgs - 1
     if plot:
-        (hdul, ax, norm, cmap, bglevel, inset_ax) = show_ta_img(visitid, ax=axes[i_ta],
-                                                                return_handles=True, inst=inst,
+        (hdul, ax, norm, cmap, bglevel, inset_ax) = show_ta_img(visitid,
+                                                                ax=ax,
+                                                                return_handles=True,
+                                                                inst=inst,
                                                                 ta_expnum=i_ta + 1,
                                                                 zoom=zoom,
                                                                 verbose=False,
@@ -727,7 +728,7 @@ def ta_analysis(data_product,
             deltapos_type.append('OSS - WCS')
 
         if plot:
-            ax = axes[i_ta]  # Select correct subplot for TA image.
+            ax = ax  # Select correct subplot for TA image.
             oss_centroid_text = (f"OSS centroid: {oss_cen_ta[0]:.2f}, {oss_cen_ta[1]:.2f}" or "")
             ax.scatter(*oss_cen_ta, color='r', marker='x', s=50)
             ax.text(*oss_cen_ta, 'OSS  ', color='r', verticalalignment='center', horizontalalignment='right')
@@ -877,11 +878,9 @@ def ta_analysis(data_product,
 
     # Manage axes visibility for single TA image.
     if plot:
-        axes[0].set_visible(False)
-
-        cb = fig.colorbar(ax.images[0], ax=axes[1], orientation='horizontal',
+        cb = fig.colorbar(ax.images[0], ax=ax, orientation='horizontal',
                           label=hdul['SCI'].header['BUNIT'], fraction=0.05,
-                          shrink=0.9, pad=0.07)
+                          shrink=0.9, pad=0.02)
         ticks = cb.ax.get_xticks()
         cb.ax.set_xticks([t for t in ticks if t > 0.1])
 
