@@ -4200,7 +4200,6 @@ class ImageTools():
             plt.close(fig)
 
             # Plot reference frame alignment.
-            print(xoffset, yoffset)
             if len(ww_ref) > 0:
                 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
                 fig = plt.figure(figsize=(6.4, 4.8))
@@ -4210,7 +4209,6 @@ class ImageTools():
                 syms = ['o', 'v', '^', '<', '>'] * (1 + len(ww_ref) // 5)
                 add = len(ww_sci)
                 for index, j in enumerate(ww_ref):
-                    print(xoffset, yoffset, -database_temp[key]['YOFFSET'][j], -database_temp[key]['XOFFSET'][j])
                     this = '%.3f_%.3f' % (database_temp[key]['XOFFSET'][j], database_temp[key]['YOFFSET'][j])
                     if this not in seen:
                         ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
