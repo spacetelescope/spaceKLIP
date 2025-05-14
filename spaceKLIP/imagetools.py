@@ -2698,8 +2698,8 @@ class ImageTools():
 
     def update_miri_offsets(self):
         """
-        For older datasets. Properly sets the XOFFSET and YOFFSET (the mask star offset) in the header of SCI files to zero and the reference.
-
+        Updates SCI frame X/Y offsets to zero for older MIRI coronagraphy datasets,
+        and updates REF frame offsets accordingly in FITS headers and the database.
         """
 
         # Loop through concatenations.
