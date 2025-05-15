@@ -7,25 +7,20 @@ import matplotlib
 # =============================================================================
 
 import os
-import pdb
-import sys
 
 import astropy.io.fits as fits
 import numpy as np
 
 from tqdm import trange
 
-from jwst.lib import reffile_utils
 from jwst.stpipe import Step
 from jwst import datamodels
-from jwst.datamodels import dqflags, RampModel, SaturationModel
-from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
+from jwst.datamodels import dqflags, RampModel
+from jwst.pipeline import Detector1Pipeline
 from .fnoise_clean import kTCSubtractStep, OneOverfStep
 from .expjumpramp import ExperimentalJumpRampStep
-from webbpsf_ext import robust
 
 from scipy.interpolate import interp1d
-from skimage.metrics import structural_similarity
 
 import warnings
 import logging

@@ -1,36 +1,36 @@
 from __future__ import division
 
-import matplotlib
-
 # =============================================================================
 # IMPORTS
 # =============================================================================
 
+# general imports
 import os
 import glob
-import pdb
-import sys
-
-import astropy.io.fits as pyfits
+import copy
+import logging
 import numpy as np
 
-import copy
-import json
+# astropy imports
 import pysiaf
-import stpsf as webbpsf
-import webbpsf_ext
-
+from astropy.io import fits
 from astropy.table import Table
-from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
+
+# jwst imports
+from jwst.pipeline import Detector1Pipeline
 from stdatamodels.jwst import datamodels
 
-from .utils import nircam_apname, get_nrcmask_from_apname, get_filter_info, config_stpipe_log
+# webbpsf_ext imports
+from webbpsf_ext.logging_utils import setup_logging
+from webbpsf_ext.imreg_tools import get_files
+from webbpsf_ext.imreg_tools import get_coron_apname as nircam_apname
 
-import logging
+# helper functions
+from .utils import get_nrcmask_from_apname, get_filter_info, config_stpipe_log
+
+#  Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
-
-
 
 # =============================================================================
 # MAIN
@@ -41,26 +41,25 @@ siaf_nrc = pysiaf.Siaf('NIRCam')
 siaf_nis = pysiaf.Siaf('NIRISS')
 siaf_mir = pysiaf.Siaf('MIRI')
 
-from webbpsf_ext.logging_utils import setup_logging
 setup_logging('WARN', verbose=False)
 
-# Load NIRCam, NIRISS, and MIRI filters
+# Load NIRCam, NIRISS, and MIRI filters.
 wave_nircam, weff_nircam, do_svo = get_filter_info('NIRCAM', return_more=True)
 wave_niriss, weff_niriss = get_filter_info('NIRISS', do_svo=do_svo)
-wave_miri,   weff_miri   = get_filter_info('MIRI',   do_svo=False) 
+wave_miri, weff_miri = get_filter_info('MIRI', do_svo=False)
+
 
 class Database():
     """
     The central spaceKLIP database class.
-    
     """
-    
+
     def __init__(self,
                  output_dir):
         """
         Initialize the central spaceKLIP database class. It stores the
         observational metadata and keeps track of the reduction steps.
-        
+
         The pre-PSF subtraction data is stored in the Database.obs dictionary
         and the post-PSF subtraction data is stored in the Database.red
         dictionary. They contain a table of metadata for each concatenation,
@@ -68,20 +67,19 @@ class Database():
         mask, and image mask. The tables can be edited by the user at any
         stage of the data reduction process and spaceKLIP will continue with
         the updated metadata (e.g., modified host star position).
-        
+
         A non-verbose mode is available by setting Database.verbose = False.
-        
+
         Parameters
         ----------
         output_dir : path
             Directory where the reduction products shall be saved.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Output directory for saving reduction products.
         self.output_dir = output_dir
 
@@ -89,24 +87,24 @@ class Database():
         if not os.path.isdir(self.output_dir):
             log.warning(f'Output directory does not exist. Creating {self.output_dir}.')
             os.makedirs(self.output_dir)
-        
+
         # Initialize observations dictionary which contains the individual
         # concatenations.
         self.obs = {}
-        
+
         # Initialize reductions dictionary which contains the individual
         # concatenations.
         self.red = {}
-        
+
         # Initialize source dictionary which contains the individual
         # companions.
         self.src = {}
-        
+
         # Verbose mode?
         self.verbose = True
-        
+
         pass
-    
+
     def read_jwst_s012_data(self,
                             datapaths,
                             psflibpaths=None,
@@ -121,7 +119,7 @@ class Database():
         be edited by the user at any stage of the data reduction process and
         spaceKLIP will continue with the updated metadata (e.g., modified host
         star position).
-        
+
         Parameters
         ----------
         datapaths : list of paths
@@ -142,13 +140,12 @@ class Database():
             SCI and REF observations based on the target name from the APT
             file. Otherwise, only consider the instrument parameters to
             distinguish between SCI and REF TA/BG. The default is True.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Check input.
         if isinstance(datapaths, str):
             datapaths = [datapaths]
@@ -166,7 +163,7 @@ class Database():
                 else:
                     if bgpaths[i] not in datapaths:
                         raise UserWarning('Background path ' + bgpaths[i] + ' does not occur in data paths')
-        
+
         # Read FITS headers.
         DATAMODL = []
         TELESCOP = []
@@ -197,12 +194,14 @@ class Database():
         BUNIT = []
         CRPIX1 = []  # pix
         CRPIX2 = []  # pix
-        MASKCENX = [] # pix
-        MASKCENY = [] # pix
-        STARCENX = [] # pix
-        STARCENY = [] # pix
-        ALIGN_SHIFT = [] # pix
-        CENTER_SHIFT = [] # pix
+        MASKCENX = []  # pix
+        MASKCENY = []  # pix
+        STARCENX = []  # pix
+        STARCENY = []  # pix
+        CROP_SHIFTX = []  # pix
+        CROP_SHIFTY = []  # pix
+        ALIGN_SHIFT = []  # pix
+        CENTER_SHIFT = []  # pix
         ALIGN_MASK = []  # pix
         CENTER_MASK = []  # pix
         VPARITY = []
@@ -219,7 +218,7 @@ class Database():
         Nallpaths = len(allpaths)
 
         for i in range(Nallpaths):
-            hdul = pyfits.open(allpaths[i])
+            hdul = fits.open(allpaths[i])
             head = hdul[0].header
             # Only read in the data if needed.
             data = hdul['SCI'].data if not head.get('NINTS') else None
@@ -301,6 +300,8 @@ class Database():
             MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
             STARCENX += [head.get('STARCENX', MASKCENX[-1])]
             STARCENY += [head.get('STARCENY', MASKCENY[-1])]
+            CROP_SHIFTX += [head.get('CROP_SHIFTX', np.nan)]
+            CROP_SHIFTY += [head.get('CROP_SHIFTY', np.nan)]
             ALIGN_SHIFT += [head.get('ALIGN_SHIFT', np.zeros)]
             CENTER_SHIFT += [head.get('CENTER_SHIFT', np.zeros)]
             ALIGN_MASK += [head.get('ALIGN_MASK', np.zeros)]
@@ -345,6 +346,8 @@ class Database():
         MASKCENY = np.array(MASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
+        CROP_SHIFTX = np.array(CROP_SHIFTX)
+        CROP_SHIFTY = np.array(CROP_SHIFTY)
         ALIGN_SHIFT = np.array(ALIGN_SHIFT)
         CENTER_SHIFT = np.array(CENTER_SHIFT)
         ALIGN_MASK = np.array(ALIGN_MASK)
@@ -356,11 +359,11 @@ class Database():
         ROLL_REF = np.array(ROLL_REF)
         BLURFWHM = np.array(BLURFWHM)
         HASH = np.array(HASH)
-        
+
         # Find unique concatenations.
         HASH_unique = np.unique(HASH)
         NHASH_unique = len(HASH_unique)
-        
+
         # Associate TA files with science or reference files.
         ww = []
         for i in range(NHASH_unique):
@@ -378,15 +381,15 @@ class Database():
                     raise UserWarning('Could not associate TA files with science or reference files')
         HASH_unique = np.delete(HASH_unique, ww)
         NHASH_unique = len(HASH_unique)
-        
+
         # Get PSF mask directory.
         maskbase = os.path.split(os.path.abspath(__file__))[0]
         maskbase = os.path.join(maskbase, 'resources/transmissions/')
-        
+
         # Loop through concatenations.
         for i in range(NHASH_unique):
             ww = HASH == HASH_unique[i]
-            
+
             # Find science and reference files.
             if psflibpaths is not None:
                 ww_sci = []
@@ -417,7 +420,7 @@ class Database():
                     else:
                         log.warning('  --> Could not identify science and reference files based on dither pattern')
                         raise UserWarning('Please use psflibpaths to specify reference files')
-            
+
             # Make Astropy tables for concatenations.
             tab = Table(names=('TYPE',
                                'EXP_TYPE',
@@ -451,6 +454,8 @@ class Database():
                                'MASKCENY',
                                'STARCENX',
                                'STARCENY',
+                               'CROP_SHIFTX',
+                               'CROP_SHIFTY',
                                'ALIGN_SHIFT',
                                'CENTER_SHIFT',
                                'ALIGN_MASK',
@@ -483,10 +488,12 @@ class Database():
                                'float',
                                'float',
                                'object',
-                               'object', 
+                               'object',
                                'float',
                                'float',
                                'object',
+                               'float',
+                               'float',
                                'float',
                                'float',
                                'float',
@@ -530,9 +537,9 @@ class Database():
                         else:
                             tt = 'REF_BG'
                 maskfile = allpaths[ww][j].replace('.fits', '_psfmask.fits')
-                if not os.path.exists(maskfile):    
+                if not os.path.exists(maskfile):
                     if EXP_TYPE[ww][j] == 'NRC_CORON':
-                    
+
                         config_stpipe_log(suppress=True)  # Suppress logging.
 
                         pipeline = Detector1Pipeline()
@@ -584,6 +591,8 @@ class Database():
                              MASKCENY[ww][j],
                              STARCENX[ww][j],
                              STARCENY[ww][j],
+                             CROP_SHIFTX[ww][j],
+                             CROP_SHIFTY[ww][j],
                              ALIGN_SHIFT[ww][j],
                              CENTER_SHIFT[ww][j],
                              ALIGN_MASK[ww][j],
@@ -596,7 +605,7 @@ class Database():
                              maskfile))
             self.obs[HASH_unique[i]] = tab.copy()
             del tab
-            
+
             # Associate background files with science or reference files.
             for j in range(len(self.obs[HASH_unique[i]])):
                 if self.obs[HASH_unique[i]]['TYPE'][j] == 'SCI_BG':
@@ -611,7 +620,7 @@ class Database():
                             self.obs[HASH_unique[i]]['TYPE'][j] = 'SCI_BG'
                         else:
                             raise UserWarning('Background exposure ' + self.obs[HASH_unique[i]]['FITSFILE'][j] + ' could not be matched with PSF')
-            
+
             # Reassociate TA and background files with science or reference
             # files based on target name.
             if assoc_using_targname:
@@ -632,13 +641,13 @@ class Database():
                             ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                             if np.sum(ww) != 0:
                                 self.obs[HASH_unique[i]]['TYPE'][j] = self.obs[HASH_unique[i]]['TYPE'][j].replace('REF', 'SCI')
-        
+
         # Print Astropy tables for concatenations.
         if self.verbose:
             self.print_obs()
-        
+
         pass
-    
+
     def read_jwst_s3_data(self,
                           datapaths,
                           cr_from_siaf=False):
@@ -651,24 +660,23 @@ class Database():
         mask, and image mask. The tables can be edited by the user at any stage
         of the data reduction process and spaceKLIP will continue with the
         updated metadata (e.g., modified host star position).
-        
+
         Parameters
         ----------
         datapaths : list of paths
             List of paths of the input JWST data.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Check input.
         if isinstance(datapaths, str):
             datapaths = [datapaths]
         if len(datapaths) == 0:
             raise UserWarning('Could not find any data paths')
-        
+
         # Read FITS headers.
         TYPE = []
         DATAMODL = []
@@ -699,15 +707,17 @@ class Database():
         BUNIT = []
         CRPIX1 = []  # pix
         CRPIX2 = []  # pix
-        MASKCENX = [] # pix
-        MASKCENY = [] # pix
-        STARCENX = [] # pix
-        STARCENY = [] # pix
+        MASKCENX = []  # pix
+        MASKCENY = []  # pix
+        STARCENX = []  # pix
+        STARCENY = []  # pix
+        CROP_SHIFTX = []  # pix
+        CROP_SHIFTY = []  # pix
         BLURFWHM = []  # pix
         HASH = []
         Ndatapaths = len(datapaths)
         for i in range(Ndatapaths):
-            hdul = pyfits.open(datapaths[i])
+            hdul = fits.open(datapaths[i])
             head = hdul[0].header
             if datapaths[i].endswith('i2d.fits'):
                 TYPE += ['CORON3']
@@ -804,6 +814,8 @@ class Database():
             MASKCENY += [head.get('MASKCENY', CRPIX2[i])]
             STARCENX += [head.get('STARCENX', np.nan)]
             STARCENY += [head.get('STARCENY', np.nan)]
+            CROP_SHIFTX += [head.get('CROP_SHIFTX', 0.)]
+            CROP_SHIFTY += [head.get('CROP_SHIFTY', 0.)]
             HASH += [TELESCOP[-1] + '_' + INSTRUME[-1] + '_' + DETECTOR[-1] + '_' + FILTER[-1] + '_' + PUPIL[-1] + '_' + CORONMSK[-1] + '_' + SUBARRAY[-1]]
             hdul.close()
         TYPE = np.array(TYPE)
@@ -839,17 +851,19 @@ class Database():
         MASKCENY = np.array(MASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
+        CROP_SHIFTX = np.array(CROP_SHIFTX)
+        CROP_SHIFTY = np.array(CROP_SHIFTY)
         BLURFWHM = np.array(BLURFWHM)
         HASH = np.array(HASH)
-        
+
         # Find unique concatenations.
         HASH_unique = np.unique(HASH)
         NHASH_unique = len(HASH_unique)
-        
+
         # Loop through concatenations.
         for i in range(NHASH_unique):
             ww = np.where(HASH == HASH_unique[i])[0]
-            
+
             # Make Astropy tables for concatenations.
             if HASH_unique[i] not in self.red.keys():
                 tab = Table(names=('TYPE',
@@ -956,7 +970,7 @@ class Database():
                              maskfile))
             self.red[HASH_unique[i]] = tab.copy()
             del tab
-            
+
             # Read corresponding observations database.
             if HASH_unique[i] not in self.obs.keys():
                 try:
@@ -966,13 +980,13 @@ class Database():
                     self.obs[HASH_unique[i]]['MASKFILE'] = self.obs[HASH_unique[i]]['MASKFILE'].astype(object)
                 except FileNotFoundError:
                     raise UserWarning('Observations database for concatenation ' + HASH_unique[i] + ' not found')
-        
+
         # Print Astropy tables for concatenations.
         if self.verbose:
             self.print_red()
-        
+
         pass
-    
+
     def read_jwst_s4_data(self,
                           datapaths):
         """
@@ -980,24 +994,23 @@ class Database():
         Database.src dictionary. It contains a list of tables of metadata for
         each concatenation, which are identified automatically based on
         instrument, filter, pupil mask, and image mask.
-        
+
         Parameters
         ----------
         datapaths : list of paths
             List of paths of the input JWST data.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Check input.
         if isinstance(datapaths, str):
             datapaths = [datapaths]
         if len(datapaths) == 0:
             raise UserWarning('Could not find any data paths')
-        
+
         # Find unique concatenations.
         HASH = []
         Ndatapaths = len(datapaths)
@@ -1007,10 +1020,10 @@ class Database():
             HASH += [temp[:ww]]
         HASH_unique = np.unique(np.array(HASH))
         NHASH_unique = len(HASH_unique)
-        
+
         # Loop through concatenations.
         for i in range(NHASH_unique):
-            
+
             # Make Astropy tables for concatenations.
             if HASH_unique[i] not in self.src.keys():
                 self.src[HASH_unique[i]] = []
@@ -1046,11 +1059,11 @@ class Database():
                                'float',
                                'float',
                                'object'))
-            
+
             # Read FITS headers.
             for j in range(Ndatapaths):
                 if HASH[j] == HASH_unique[i]:
-                    hdul = pyfits.open(datapaths[j])
+                    hdul = fits.open(datapaths[j])
                     head = hdul[0].header
                     if head['LN(Z/Z0)'] == 'NONE':
                         evidence_ratio = np.nan
@@ -1074,41 +1087,40 @@ class Database():
                                  head['FITSFILE']))
             self.src[HASH_unique[i]] += [tab.copy()]
             del tab
-        
+
         # Print Astropy tables for concatenations.
         if self.verbose:
             self.print_src()
-        
+
         pass
-    
+
     def print_obs(self,
                   include_fitsfiles=False):
         """
         Print an abbreviated version of the observations database.
-        
+
         Parameters
         ----------
         include_fitsfiles : bool, optional
             Include the FITS file and PSF mask paths in the output. The default
             is False.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Print Astropy tables for concatenations.
         log.info('--> Identified %.0f concatenation(s)' % len(self.obs))
         for i, key in enumerate(self.obs.keys()):
             log.info('  --> Concatenation %.0f: ' % (i + 1) + key)
             print_tab = copy.deepcopy(self.obs[key])
             if include_fitsfiles:
-                print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER', 
-                                          'CRPIX1', 'CRPIX2','MASKCENX','MASKCENY','STARCENX','STARCENY', 'RA_REF', 'DEC_REF'])
+                print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER',
+                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF'])
             else:
-                print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER', 
-                                          'CRPIX1', 'CRPIX2','MASKCENX','MASKCENY','STARCENX','STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
+                print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER',
+                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
             print_tab['XOFFSET'] *= 1e3
             print_tab['XOFFSET'] = np.round(print_tab['XOFFSET'])
             print_tab['XOFFSET'][print_tab['XOFFSET'] == 0.] = 0.
@@ -1116,26 +1128,25 @@ class Database():
             print_tab['YOFFSET'] = np.round(print_tab['YOFFSET'])
             print_tab['YOFFSET'][print_tab['YOFFSET'] == 0.] = 0.
             print_tab.pprint()
-        
+
         pass
-    
+
     def print_red(self,
                   include_fitsfiles=False):
         """
         Print an abbreviated version of the reductions database.
-        
+
         Parameters
         ----------
         include_fitsfiles : bool, optional
             Include the FITS file and PSF mask paths in the output. The default
             is False.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Print Astropy tables for concatenations.
         log.info('--> Identified %.0f concatenation(s)' % len(self.red))
         for i, key in enumerate(self.red.keys()):
@@ -1146,25 +1157,24 @@ class Database():
             else:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER', 'FITSFILE', 'MASKFILE'])
             print_tab.pprint()
-        
+
         pass
-    
+
     def print_src(self,
                   include_fitsfiles=False):
         """
         Print an abbreviated version of the source database.
-        
+
         Parameters
         ----------
         include_fitsfiles : bool, optional
             Include the FITS file paths in the output. The default is False.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Print Astropy tables for concatenations.
         log.info('--> Identified %.0f concatenation(s)' % len(self.src))
         for i, key in enumerate(self.src.keys()):
@@ -1178,9 +1188,9 @@ class Database():
                 else:
                     print_tab.remove_columns(['FITSFILE'])
                 print_tab.pprint()
-        
+
         pass
-    
+
     def update_obs(self,
                    key,
                    index,
@@ -1196,6 +1206,8 @@ class Database():
                    maskceny=None,
                    starcenx=None,
                    starceny=None,
+                   crop_shiftx=None,
+                   crop_shifty=None,
                    align_shift=None,
                    center_shift=None,
                    align_mask=None,
@@ -1204,7 +1216,7 @@ class Database():
                    update_pxar=False):
         """
         Update the content of the observations database.
-        
+
         Parameters
         ----------
         key : str
@@ -1246,6 +1258,10 @@ class Database():
         starceny : float, optional
             New star y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
+        crop_shiftx : tuple, optional
+            Stores shifts in x due to any cropping. The default is None.
+        crop_shifty : tuple, optional
+            Stores shifts in y due to any cropping. The default is None.
         align_shift: object
             Array of shift values to recenter science frames. The default is None.
         center_shift: object
@@ -1260,13 +1276,12 @@ class Database():
         update_pxar : bool, optional
             Update the pixel area column of the database based on the FITS file
             header information? The default is False.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Update spaceKLIP database.
         if 'uncal' in fitsfile:
             DATAMODL = 'STAGE0'
@@ -1276,7 +1291,7 @@ class Database():
             DATAMODL = 'STAGE2'
         else:
             raise UserWarning('File name must contain one of the following: uncal, rate, rateints, cal, calints')
-        hdul = pyfits.open(fitsfile)
+        hdul = fits.open(fitsfile)
         self.obs[key]['DATAMODL'][index] = DATAMODL
         if nints is not None:
             self.obs[key]['NINTS'][index] = nints
@@ -1299,6 +1314,10 @@ class Database():
             self.obs[key]['STARCENX'][index] = starcenx
         if starceny is not None:
             self.obs[key]['STARCENY'][index] = starceny
+        if crop_shiftx is not None:
+            self.obs[key]['CROP_SHIFTX'][index] = crop_shiftx
+        if crop_shifty is not None:
+            self.obs[key]['CROP_SHIFTY'][index] = crop_shifty
         if align_shift is not None:
             self.obs[key]['ALIGN_SHIFT'][index] = align_shift
         if center_shift is not None:
@@ -1314,21 +1333,21 @@ class Database():
             self.obs[key]['MASKFILE'][index] = maskfile
         if update_pxar:
             try:
-                pxar = pyfits.getheader(self.obs[key]['FITSFILE'][index], 'SCI')['PIXAR_SR']
+                pxar = fits.getheader(self.obs[key]['FITSFILE'][index], 'SCI')['PIXAR_SR']
                 self.obs[key]['PIXAR_SR'][index] = pxar
             except:
                 pass
         hdul.close()
-        
+
         pass
-    
+
     def update_src(self,
                    key,
                    index,
                    tab):
         """
         Update the content of the source database.
-        
+
         Parameters
         ----------
         key : str
@@ -1337,13 +1356,12 @@ class Database():
             Database index of the source to be updated.
         tab : astropy.table.Table
             Astropy table of the companions to be saved to the source database.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         # Update spaceKLIP database.
         try:
             if isinstance(self.src[key], list):
@@ -1354,7 +1372,7 @@ class Database():
                     self.src[key] += [None] * (index - nindex) + [tab]
         except KeyError:
             self.src[key] = [None] * index + [tab]
-        
+
         pass
 
     def adjust_dir(self, dir_path, data_type):
@@ -1386,40 +1404,38 @@ class Database():
             raise UserWarning(f"Invalid directory: {dir_path}. Error: {e}")
 
         pass
-    
+
     def summarize(self):
         """
         Succinctly summarize the contents of the observations database, i.e.,
         how many files are present at each level of reduction, what kind (SCI,
         REF, TA), etc.
-        
+
         Returns
         -------
         None.
-        
         """
-        
+
         def short_concat_name(concat_name):
             """
             Return a shorter, less redundant name for a coronagraphic mode,
             useful for display.
-            
+
             Parameters
             ----------
             concat_name : str
                 Concatenation name.
-            
+
             Returns
             -------
             concat_name : str
                 Less redundant concatenation name.
-            
             """
-            
+
             parts = concat_name.split('_')
-            
+
             return "_".join([parts[1], parts[3], parts[5], ])
-        
+
         for mode in self.obs:
             print(short_concat_name(mode))
             tab = self.obs[mode]
@@ -1430,7 +1446,7 @@ class Database():
                     nref = np.sum(stagetab['TYPE'] == 'REF')
                     nta = np.sum((stagetab['TYPE'] == 'SCI_TA') | (stagetab['TYPE'] == 'REF_TA'))
                     nbg = np.sum((stagetab['TYPE'] == 'SCI_BG') | (stagetab['TYPE'] == 'REF_BG'))
-                    
+
                     summarystr = f'\tSTAGE{stage}: {len(stagetab)} files;\t{nsci} SCI, {nref} REF'
                     if nta:
                         summarystr += f', {nta} TA'
@@ -1449,14 +1465,15 @@ class Database():
                     summarystr = f'\tSTAGE{stage}: {len(stagetab)} files;\t'
                     for i, typestr in enumerate(s3types):
                         ntype = np.sum(stagetab['TYPE'] == typestr)
-                        summarystr += (', ' if i>0 else '') + f'{ntype} {typestr}'
+                        summarystr += (', ' if i > 0 else '') + f'{ntype} {typestr}'
                     print(summarystr)
 
-def create_database(output_dir, 
-                    pid, 
+
+def create_database(output_dir,
+                    pid,
                     obsids=None,
                     input_dir=None,
-                    psflibpaths=None, 
+                    psflibpaths=None,
                     bgpaths=None,
                     assoc_using_targname=True,
                     verbose=True,
@@ -1464,9 +1481,10 @@ def create_database(output_dir,
                     cr_from_siaf=False,
                     **kwargs):
 
-    """ Create a spaceKLIP database from JWST data
+    """
+    Create a spaceKLIP database from JWST data
 
-    Automatically searches for uncal.fits in the input directory and creates 
+    Automatically searches for uncal.fits in the input directory and creates
     a database of the JWST data. Only works for stage0, stage1, or stage2 data
     by default; set readlevel=3 to read in stage 3 outputs.
 
@@ -1497,7 +1515,7 @@ def create_database(output_dir,
         or '4' to read in extracted PSF fitting products.
     verbose : bool, optional
         Print information to the screen. The default is True.
-    
+
     Keyword Arguments
     -----------------
     sca : str
@@ -1520,8 +1538,6 @@ def create_database(output_dir,
         products. By default, only levels 0,1,2 data will be read and indexed.
     """
 
-    from webbpsf_ext.imreg_tools import get_files
-
     if input_dir is None:
         mast_dir = os.getenv('JWSTDOWNLOAD_OUTDIR')
         input_dir = os.path.join(mast_dir, f'{pid:05d}')
@@ -1539,7 +1555,6 @@ def create_database(output_dir,
     db = Database(output_dir=output_dir)
     db.verbose = verbose
 
-
     if str(readlevel) in '012' or str(readlevel) == '012':
         db.read_jwst_s012_data(datapaths=datapaths,
                                psflibpaths=psflibpaths,
@@ -1550,11 +1565,9 @@ def create_database(output_dir,
         # the above get_files usage won't match KLIP outputsa, so find them here
         datapaths_klip = sorted(glob.glob(os.path.join(input_dir, "*KLmodes-all.fits")))
         db.read_jwst_s3_data(datapaths=datapaths+datapaths_klip,
-                             cr_from_siaf=cr_from_siaf,
-                            )
+                             cr_from_siaf=cr_from_siaf,)
     elif str(readlevel) == '4':
-        db.read_jwst_s4_data(datapaths=datapaths,
-                            )
+        db.read_jwst_s4_data(datapaths=datapaths,)
     else:
         raise ValueError("Invalid/unknown value for readlevel parameter")
 

@@ -249,10 +249,13 @@ def run_obs(database,
         file = os.path.join(output_dir, key + '.dat')
         for col in ['CENTER_MASK', 'ALIGN_MASK', 'CENTER_SHIFT', 'ALIGN_SHIFT']:
             if col in database.obs[key].colnames:
-                # Turn each 2D list (per row) into a single string
                 database.obs[key][col] = [
-                    str([x.tolist() for x in row]) for row in database.obs[key][col]
+                    str([x.tolist() if hasattr(x, "tolist") else x for x in row])
+                    if row is not None and hasattr(row, '__iter__')
+                    else str(row)
+                    for row in database.obs[key][col]
                 ]
+
 
         database.obs[key].write(file, format='ascii', overwrite=True)
 
