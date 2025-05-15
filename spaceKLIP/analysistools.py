@@ -44,7 +44,7 @@ from spaceKLIP.utils import write_starfile, set_surrounded_pixels, pop_pxar_kw
 from spaceKLIP.imagetools import gaussian_kernel
 
 from functools import partial
-from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
+from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 
 from tqdm.auto import trange
 from io import StringIO
