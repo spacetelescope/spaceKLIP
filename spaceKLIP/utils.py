@@ -25,10 +25,7 @@ from scipy.ndimage import fourier_shift, gaussian_filter
 from scipy.ndimage import shift as spline_shift
 
 # webbpsf_ext imports
-import webbpsf
 from webbpsf_ext import robust
-from webbpsf_ext.imreg_tools import get_coron_apname as nircam_apname
-from webbpsf_ext.image_manip import expand_mask
 from webbpsf_ext.bandpasses import nircam_filter, nircam_com_th
 from webbpsf_ext.maths import jl_poly_fit, jl_poly
 

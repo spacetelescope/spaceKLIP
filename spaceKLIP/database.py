@@ -13,7 +13,7 @@ import numpy as np
 
 # astropy imports
 import pysiaf
-import astropy.io.fits as pyfits
+from astropy.io import fits
 from astropy.table import Table
 
 # jwst imports
@@ -217,7 +217,7 @@ class Database():
         Nallpaths = len(allpaths)
 
         for i in range(Nallpaths):
-            hdul = pyfits.open(allpaths[i])
+            hdul = fits.open(allpaths[i])
             head = hdul[0].header
             # Only read in the data if needed.
             data = hdul['SCI'].data if not head.get('NINTS') else None
@@ -716,7 +716,7 @@ class Database():
         HASH = []
         Ndatapaths = len(datapaths)
         for i in range(Ndatapaths):
-            hdul = pyfits.open(datapaths[i])
+            hdul = fits.open(datapaths[i])
             head = hdul[0].header
             if datapaths[i].endswith('i2d.fits'):
                 TYPE += ['CORON3']
@@ -1062,7 +1062,7 @@ class Database():
             # Read FITS headers.
             for j in range(Ndatapaths):
                 if HASH[j] == HASH_unique[i]:
-                    hdul = pyfits.open(datapaths[j])
+                    hdul = fits.open(datapaths[j])
                     head = hdul[0].header
                     if head['LN(Z/Z0)'] == 'NONE':
                         evidence_ratio = np.nan
@@ -1290,7 +1290,7 @@ class Database():
             DATAMODL = 'STAGE2'
         else:
             raise UserWarning('File name must contain one of the following: uncal, rate, rateints, cal, calints')
-        hdul = pyfits.open(fitsfile)
+        hdul = fits.open(fitsfile)
         self.obs[key]['DATAMODL'][index] = DATAMODL
         if nints is not None:
             self.obs[key]['NINTS'][index] = nints
@@ -1332,7 +1332,7 @@ class Database():
             self.obs[key]['MASKFILE'][index] = maskfile
         if update_pxar:
             try:
-                pxar = pyfits.getheader(self.obs[key]['FITSFILE'][index], 'SCI')['PIXAR_SR']
+                pxar = fits.getheader(self.obs[key]['FITSFILE'][index], 'SCI')['PIXAR_SR']
                 self.obs[key]['PIXAR_SR'][index] = pxar
             except:
                 pass
