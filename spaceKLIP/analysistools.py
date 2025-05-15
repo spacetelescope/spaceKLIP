@@ -1736,15 +1736,15 @@ class AnalysisTools():
                             evidence_ratio = fm_evidence - null_evidence
                             
                             # Plot the pymultinest fit results.
-                            fit.fit_plots()
-                            if save_figres:
+                            fig = fit.fit_plots()
+                            if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
                             plt.close(fig)
 
-                            fit.fm_residuals()
-                            if save_figres:
+                            fig, _ = fit.fm_residuals()
+                            if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
