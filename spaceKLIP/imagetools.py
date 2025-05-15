@@ -841,7 +841,7 @@ class ImageTools():
 
             # Find science, reference, and background files.
             ww = np.where((self.database.obs[key]['TYPE'] == 'SCI')
-                          (self.database.obs[key]['TYPE'] == 'REF'))[0]
+                          | (self.database.obs[key]['TYPE'] == 'REF'))[0]
             ww_sci_bg = np.where(self.database.obs[key]['TYPE'] == 'SCI_BG')[0]
             ww_ref_bg = np.where(self.database.obs[key]['TYPE'] == 'REF_BG')[0]
 
