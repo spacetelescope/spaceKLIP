@@ -1464,6 +1464,7 @@ class ImageTools():
                 ax.set_title(f"{os.path.basename(fitsfile)} \n Original vs. Cleaned Data", fontsize=16)
                 output_file = os.path.join(output_dir, tail.replace('.fits', '_hist.png'))
                 plt.savefig(output_file)
+                plt.close(fig)
 
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)

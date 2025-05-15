@@ -21,6 +21,7 @@ from .fnoise_clean import kTCSubtractStep, OneOverfStep
 from .expjumpramp import ExperimentalJumpRampStep
 
 from scipy.interpolate import interp1d
+from webbpsf_ext.image_manip import expand_mask
 
 import warnings
 import logging
@@ -314,7 +315,6 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             Output JWST datamodel.
         
         """
-        from .utils import expand_mask
         
         # Save original step parameter.
         npix_grow = self.saturation.n_pix_grow_sat
