@@ -215,8 +215,8 @@ tests/data/*
 tests/ultranest
 tests/species_*
 
-tutorials/data_miri_hd65426
-tutorials/data_nircam_hd65426
+tutorials/data_miri_hd65426/*
+tutorials/data_nircam_hd65426/*
 
 # setuptools-scm
 
