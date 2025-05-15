@@ -283,7 +283,7 @@ def get_visit_ta_image(visitid,
                 if err.code == 401:  # Unauthorized access error code.
                     # Use MAST API to retrieve exclusive access data if needed.
                     mast_api_token = os.environ.get('MAST_API_TOKEN', None)
-                    obs = Observations(api_token=mast_api_token)
+                    obs = Observations(mast_token=mast_api_token)
                     uri = f"mast:JWST/product/{filename}"
                     obs.download_file(uri, local_path=cache_path, cache=False)
                     ta_hdul = fits.open(cache_path)
@@ -686,7 +686,7 @@ def ta_analysis(data_product,
         # Extract the OSS centroids from the log.
         try:
             visit_id = 'V' + hdul[0].header['VISIT_ID']
-            oss_cen = extract_oss_TA_centroids(osslog, visit_id)[i_ta]
+            oss_cen = extract_oss_TA_centroids(osslog, visit_id)[-1]  # We plot the last image and appropraite centroid. 
 
             # Convert from full-frame (as used by OSS)
             # to detector subarray coords for TA:
