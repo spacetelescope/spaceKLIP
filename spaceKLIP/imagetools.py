@@ -66,7 +66,6 @@ from jwst.datamodels import ModelContainer, ModelLibrary
 from jwst.resample import resample_step
 
 # Set up log.
-=======
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
