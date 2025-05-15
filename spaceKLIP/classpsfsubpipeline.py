@@ -7,8 +7,6 @@ import matplotlib
 # =============================================================================
 
 import os
-import pdb
-import sys
 
 import astropy.io.fits as pyfits
 import matplotlib.pyplot as plt
@@ -17,8 +15,7 @@ import numpy as np
 from astropy import wcs
 from pyklip.klip import _rotate_wcs_hdr
 from pyklip.klip import rotate as nanrotate
-from scipy.ndimage import gaussian_filter, rotate
-from scipy.ndimage import shift as spline_shift
+from scipy.ndimage import gaussian_filter
 from scipy.optimize import leastsq
 from spaceKLIP import utils as ut
 from spaceKLIP.psf import get_transmission

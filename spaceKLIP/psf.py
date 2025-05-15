@@ -13,8 +13,9 @@ import sys
 import astropy.io.fits as pyfits
 import numpy as np
 
-import webbpsf, webbpsf_ext
-from webbpsf_ext import synphot_ext as Sz
+import stpsf as webbpsf
+import webbpsf_ext
+from webbpsf_ext import synphot_ext as S
 
 from pyklip.klip import rotate as nanrotate
 from scipy.ndimage import rotate
@@ -611,7 +612,7 @@ def _sp_to_spext(sp, **kwargs):
         flux = sp(sp.waveset)
         wunit = wave.unit.to_string()
         funit = flux.unit.to_string()
-        sp = S.ArraySpectrum(wave.value, flux.value, waveunits=wunit, fluxunits=funit, 
+        sp = S.ArraySpectrum(wave.value, flux.value, waveunits=wunit, fluxunits=funit,
                              name=sp.meta['name'], **kwargs)
 
     return sp

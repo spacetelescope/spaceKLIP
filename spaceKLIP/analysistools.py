@@ -44,7 +44,7 @@ from spaceKLIP.utils import write_starfile, set_surrounded_pixels, pop_pxar_kw
 from spaceKLIP.imagetools import gaussian_kernel
 
 from functools import partial
-from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
+from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 
 from tqdm.auto import trange
 from io import StringIO
@@ -89,7 +89,7 @@ class AnalysisTools():
                      starfile,
                      spectral_type='G2V',
                      companions=None,
-                     overwrite_starcen=None,
+                     overwrite_crpix=None,
                      subdir='rawcon',
                      output_filetype='npy',
                      plot_xlim=(0,10),
@@ -111,8 +111,8 @@ class AnalysisTools():
             For each companion, there should be a three element list containing
             [RA offset (arcsec), Dec offset (arcsec), mask radius (lambda/D)].
             The default is None.
-        overwrite_starcen : tuple of two float, optional
-            Overwrite the PSF center with the (STARCENX, STARCENY) values provided
+        overwrite_crpix : tuple of two float, optional
+            Overwrite the PSF center with the (CRPIX1, CRPIX2) values provided
             here (in 1-indexed coordinates). This is required for Coron3 data!
             The default is None.
         subdir : str, optional
@@ -219,10 +219,10 @@ class AnalysisTools():
                     resolution = np.hypot(resolution, self.database.obs[key]['BLURFWHM'][j])
                 
                 # Get the star position.
-                if overwrite_starcen is None:
-                    center = (head_pri['STARCENX'] - 1., head_pri['STARCENY'] - 1.)  # pix (0-indexed)
+                if overwrite_crpix is None:
+                    center = (head_pri['CRPIX1'] - 1., head_pri['CRPIX2'] - 1.)  # pix (0-indexed)
                 else:
-                    center = (overwrite_starcen[0] - 1., overwrite_starcen[1] - 1.)  # pix (0-indexed)
+                    center = (overwrite_crpix[0] - 1., overwrite_crpix[1] - 1.)  # pix (0-indexed)
                 
                 # Mask coronagraph spiders, 4QPM edges, etc. 
                 if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON']:
@@ -558,8 +558,7 @@ class AnalysisTools():
                 # Read Stage 2 files and make pyKLIP dataset
                 filepaths, psflib_filepaths = get_pyklip_filepaths(self.database, key)
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                pyklip_dataset = JWSTData(filepaths, psflib_filepaths,
-                                          center_keywords=['STARCENX','STARCENY'])
+                pyklip_dataset = JWSTData(filepaths, psflib_filepaths)
 
                 # Compute the resolution element. Account for possible blurring.
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
@@ -1009,8 +1008,7 @@ class AnalysisTools():
                 
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass,
-                                          center_keywords=['STARCENX','STARCENY'])
+                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass)
                 kwargs_temp['dataset'] = dataset
                 kwargs_temp['aligned_center'] = dataset._centers[0]
                 kwargs_temp['psf_library'] = dataset.psflib
@@ -1235,7 +1233,7 @@ class AnalysisTools():
                         # Get shift between star and coronagraphic mask
                         # position. If positive, the coronagraphic mask center
                         # is to the left/bottom of the star position.
-                        _, _, _, _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
+                        _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
                         
                         # NIRCam.
                         if maskoffs is not None:
@@ -1738,14 +1736,17 @@ class AnalysisTools():
                             evidence_ratio = fm_evidence - null_evidence
                             
                             # Plot the pymultinest fit results.
-                            fit.fit_plots()
+                            H1, H0 = fit.fit_plots()
                             if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
-                                plt.savefig(path)
+                                H1.savefig(path)
+                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-noise_corner_c%.0f' % (k + 1) + '.pdf')
+                                H0.savefig(path)
                             plt.show()
-                            plt.close(fig)
+                            plt.close(H1)
+                            plt.close(H0)
 
-                            fit.fm_residuals()
+                            fig, _ = fit.fm_residuals()
                             if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
