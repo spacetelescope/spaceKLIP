@@ -33,6 +33,7 @@ from webbpsf_ext.bandpasses import nircam_filter, nircam_com_th
 from webbpsf_ext.maths import jl_poly_fit, jl_poly
 
 from stdatamodels.jwst.datamodels.dqflags import pixel, dqflags_to_mnemonics
+import stpsf as webbpsf
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -854,7 +855,7 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
     Load NIRCam, NIRISS, and MIRI filters from the SVO Filter Profile Service.
     http://svo2.cab.inta-csic.es/theory/fps/
 
-    If timeout to server, then use local copy of filter list and load through webbpsf.
+    If timeout to server, then use local copy of filter list and load through STPSF.
 
     Parameters
     ----------
@@ -864,12 +865,12 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
     timeout : float
         Timeout in seconds for connection to SVO Filter Profile Service.
     do_svo : bool
-        If True, try to load filter list from SVO Filter Profile Service.
-        If False, use webbpsf without first check web server.
+        If True, try to load filter list from SVO Filter Profile Service. 
+        If False, use STPSF without first check web server.
     return_more : bool
         If True, also return `do_svo` variable, whether SVO was used or not.
     """
-
+    
     iname_upper = instrument.upper()
 
     # Try to get filter list from SVO
@@ -880,7 +881,7 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
             log.warning('Using SVO Filter Profile Service timed out. Using WebbPSF instead.')
             do_svo = False
 
-    # If unsuccessful, use webbpsf to get filter list
+    # If unsuccessful, use STPSF to get filter list
     if not do_svo:
         inst_func = {
             'NIRCAM': webbpsf.NIRCam,

@@ -42,7 +42,7 @@ import webbpsf_ext
 from webbpsf_ext import robust
 from webbpsf_ext.coords import dist_image
 from webbpsf_ext.webbpsf_ext_core import _transmission_map
-from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
+from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 
 # spaceKLIP imports
 from spaceKLIP import utils as ut
@@ -59,9 +59,14 @@ import pyklip.fakes as fakes
 from pyklip import parallelized
 from pyklip.instruments.JWST import JWSTData
 
+# jwst imports
 import jwst.datamodels
+from stdatamodels.jwst import datamodels
+from jwst.datamodels import ModelContainer, ModelLibrary
+from jwst.resample import resample_step
 
 # Set up log.
+=======
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
@@ -3324,6 +3329,124 @@ class ImageTools():
                                          center_shift=center_shift, center_mask=center_mask)
 
         pass
+
+    def resample_frames(self, subdir='resampled'):
+        '''
+        Resample frames applying distortion correction to the data
+
+        Parameters
+        ----------
+         subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'recentered'.
+
+        Returns
+        -------
+        None.
+
+        '''
+        def to_container(model, target=True):
+            """Convert to a ModelContainer of ImageModels for each plane"""
+
+            container = ModelContainer()
+            if target:
+                attr_list = [
+                    'data', 'dq', 'err', 'zeroframe', 'area',
+                    'var_poisson', 'var_rnoise', 'var_flat'
+                ]
+            else:
+                # model = model
+                attr_list = [
+                    'data'
+                ]
+            for plane in range(model.data.shape[0]):
+                image = datamodels.ImageModel()
+                for attribute in attr_list:
+                    try:
+                        setattr(image, attribute, model.getarray_noinit(attribute)[plane])
+                    except AttributeError:
+                        pass
+                image.update(model)
+                try:
+                    image.meta.wcs = model.meta.wcs
+                except AttributeError:
+                    pass
+                container.append(image)
+            return container
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            # Read FITS file and PSF mask.
+
+            log.info('--> Concatenation ' + key)
+
+            # Find science and reference files.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+            if len(ww_sci) == 0:
+                raise UserWarning('Could not find any science files')
+            ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
+            ww_all = np.append(ww_sci, ww_ref)
+
+            # Make ASN file.
+            log.info('  --> Resampling: ' + key)
+
+            resample_step.ResampleStep.blendheaders = False
+
+            for j in ww_all:
+                target_file = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(target_file)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+
+                with datamodels.open(target_file) as target:
+                    # #storing wcs information for mask resampling
+                    # wcs = target.meta.wcs
+                    # wcsinfo = target.meta.wcsinfo
+                    data_list = []
+                    dq_list = []
+                    err_list = []
+                    for model in to_container(target):
+                        resample_input = ModelContainer()
+                        resample_input.append(model)
+
+                        # Call the resample step to combine all psf-subtracted target images
+                        # for compatibility with image3 pipeline use of ModelLibrary,
+                        # convert ModelContainer to ModelLibrary
+                        resample_library = ModelLibrary(resample_input, on_disk=False)
+
+                        # Output is a single datamodel
+                        result = resample_step.ResampleStep.call(resample_library)
+                        data_list.append(result.data)
+                        dq_list.append(result.dq)
+                        err_list.append(result.err)
+
+                    target.data = np.array([mask])
+                    for model in to_container(target, target=False):
+                        resample_input = ModelContainer()
+                        resample_input.append(model)
+
+                        # Call the resample step to combine all psf-subtracted target images
+                        # for compatibility with image3 pipeline use of ModelLibrary,
+                        # convert ModelContainer to ModelLibrary
+                        resample_library = ModelLibrary(resample_input, on_disk=False)
+
+                        # Output is a single datamodel
+                        result = resample_step.ResampleStep.call(resample_library)
+                        mask = result.data
+
+                    # Write FITS file and PSF mask.
+                    fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d, imshifts,
+                                            maskoffs)
+                    maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                    # Update spaceKLIP database.
+                    self.database.update_obs(key, j, fitsfile, maskfile)
+                    pass
 
     @plt.style.context('spaceKLIP.sk_style')
     def find_nircam_centers(self,

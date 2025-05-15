@@ -49,7 +49,8 @@ from spaceKLIP.pyklippipeline import get_pyklip_filepaths
 from spaceKLIP.utils import write_starfile, set_surrounded_pixels, pop_pxar_kw
 from spaceKLIP.imagetools import gaussian_kernel
 
-from webbpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
+# other imports
+from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 
 # Set up log.
 log = logging.getLogger(__name__)
