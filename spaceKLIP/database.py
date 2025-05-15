@@ -23,9 +23,10 @@ from stdatamodels.jwst import datamodels
 # webbpsf_ext imports
 from webbpsf_ext.logging_utils import setup_logging
 from webbpsf_ext.imreg_tools import get_files
+from webbpsf_ext.imreg_tools import get_coron_apname as nircam_apname
 
 # helper functions
-from .utils import nircam_apname, get_nrcmask_from_apname, get_filter_info, config_stpipe_log
+from .utils import get_nrcmask_from_apname, get_filter_info, config_stpipe_log
 
 #  Set up log.
 log = logging.getLogger(__name__)
