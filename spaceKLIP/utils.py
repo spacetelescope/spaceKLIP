@@ -502,7 +502,8 @@ def crop_image(image,
 
 def imshift(image,
             shift,
-            pad=False,
+            pad=True,
+            pad_amount=5,
             cval=0.,
             method='fourier',
             kwargs={}):
@@ -518,6 +519,8 @@ def imshift(image,
     pad : bool, optional
         Pad the image before shifting it? Otherwise, it will wrap around
         the edges. The default is True.
+    pad_amount : int, optional
+        Extra padding to be applied to the image. The default is 5.
     cval : float, optional
         Fill value for the padded pixels. The default is 0.
     method : 'fourier' or 'spline' (not recommended), optional
@@ -534,13 +537,11 @@ def imshift(image,
     """
     
     if pad:
-        
-        # Pad image.
-        sy, sx = image.shape
-        xshift, yshift = shift
-        padx = np.abs(int(xshift)) + 5
-        pady = np.abs(int(yshift)) + 5
-        impad = np.pad(image, ((pady, pady), (padx, padx)), mode='constant', constant_values=cval)
+        # Apply padding with a reflection
+        impad = np.pad(image, pad_amount, mode="reflect")
+
+        # Create a mask to keep track of which pixels are reflected
+        mask = np.pad(np.zeros_like(image, dtype=int), pad_amount, mode="constant", constant_values=1)
         
         # Shift image.
         if method == 'fourier':
@@ -549,9 +550,15 @@ def imshift(image,
             imsft = spline_shift(impad, shift[::-1], **kwargs)
         else:
             raise UserWarning('Image shift method "' + method + '" is not known')
-        
-        # Crop image to original size.
-        return imsft[pady:pady + sy, padx:padx + sx]
+
+        # Shift mask and assume pixels influenced by reflected pixels are != 0
+        masksft = spline_shift(mask, shift[::-1], order=1, cval=1)
+        masksft = np.array([[1 if x!=0 else 0 for x in y] for y in masksft])
+
+        # Replace reflected pixels with NaNs
+        imsft = np.ma.masked_array(imsft, mask=masksft).filled(np.nan)
+
+        return imsft
     else:
         if method == 'fourier':
             return np.fft.ifftn(fourier_shift(np.fft.fftn(image), shift[::-1])).real
@@ -559,6 +566,15 @@ def imshift(image,
             return spline_shift(image, shift[::-1], **kwargs)
         else:
             raise UserWarning('Image shift method "' + method + '" is not known')
+
+def estimate_padding_for_shift(align_shift, center_shift):
+
+    summed_shift = np.array(align_shift) + np.array(center_shift)
+    flattened_shift = np.concatenate(summed_shift).ravel()
+    max_shift = np.max(np.abs(flattened_shift))
+    padding = int(np.ceil(max_shift))
+
+    return padding
 
 def alignlsq(shift,
              image,
@@ -595,9 +611,9 @@ def alignlsq(shift,
     """
     
     if mask is None:
-        return (ref_image - shift[2] * imshift(image, shift[:2], method=method, kwargs=kwargs)).ravel()
+        return (ref_image - shift[2] * imshift(image, shift[:2], method=method, pad=False, kwargs=kwargs)).ravel()
     else:
-        return ((ref_image - shift[2] * imshift(image, shift[:2], method=method, kwargs=kwargs)) * mask).ravel()
+        return ((ref_image - shift[2] * imshift(image, shift[:2], method=method, pad=False, kwargs=kwargs)) * mask).ravel()
 
 def recenterlsq(shift,
                 image,
