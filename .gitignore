@@ -211,12 +211,15 @@ crds_cache
 .ipynb_checkpoints/
 spaceKLIP.egg-info
 
+/docs/source/tutorials/data_nircam_hd65426/
+/docs/source/tutorials/data_miri_hd65426/
+/docs/source/tutorials/*nrcalong.pdf
+/docs/source/tutorials/.ipynb_checkpoints/
+
 tests/data/*
 tests/ultranest
 tests/species_*
 
-docs/tutorials/data_miri_hd65426/*
-docs/tutorials/data_nircam_hd65426/*
 
 # setuptools-scm
 
@@ -225,3 +228,5 @@ docs/tutorials/data_nircam_hd65426/*
 
 
 spaceKLIP/_version.py
+
+
