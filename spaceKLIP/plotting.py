@@ -401,9 +401,11 @@ def display_coron_dataset(database,
         Database of files to plot.
     restrict_to : str or dict, optional
         Optional query to filter and display specific data.
+
         - `None`: No filtering; all tables are processed.
         - `str`: Only datasets whose database concatenation (file group) name includes this string will be shown. Most simply, set this to a filter name to only plot images with that filter.
         - `dict`: Filters tables based on database column values, where keys are column names and values are filter criteria.
+
     stage3 : str, optional
         Specify if data is stage 3.
     save_filename : str
@@ -421,9 +423,11 @@ def display_coron_dataset(database,
     bbox_color : str, optional
         The background color for the text label. Default is '#4B0082'.
         If set to None, no background box will be drawn.
+
     Returns
     -------
     None.
+
     """
     # Initialize PDF saving if a filename is provided.
     pdf = PdfPages(save_filename) if save_filename else None
@@ -498,10 +502,12 @@ def display_image_comparisons(database,
         List of base directory names.
     restrict_to : str or dict, optional
         Optional query to filter and display specific data.
+
         - `None`: No filtering; all tables are processed.
         - `str`: Only datasets whose database concatenation (file group) name includes this string will be shown.
                  Most simply, set this to a filter name to only plot images with that filter.
         - `dict`: Filters tables based on database column values, where keys are column names and values are filter criteria.
+
     save_filename : str
         If provided, the plots will be saved to a PDF file with this name.
     vmin, vmax : float, optional

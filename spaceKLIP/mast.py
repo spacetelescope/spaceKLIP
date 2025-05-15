@@ -9,6 +9,7 @@ import numpy as np
 import astropy, astropy.table
 from astroquery.mast import Mast
 import requests
+import tqdm
 
 import logging
 log = logging.getLogger(__name__)
@@ -192,7 +193,7 @@ def query_coron_datasets(inst,
 
     if return_filenames:
 
-        if level is not None and level.lower() is not 'cal' and level.lower() is not '2b':
+        if level is not None and level.lower() != 'cal' and level.lower() != '2b':
             # Transform filenames to either rate or uncal files
             # This may not be robust to all possible scenarios yet...
             if level.lower()=='rate' or level.lower()=='2a':

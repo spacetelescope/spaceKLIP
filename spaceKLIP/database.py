@@ -17,7 +17,8 @@ import numpy as np
 import copy
 import json
 import pysiaf
-import webbpsf, webbpsf_ext
+import stpsf as webbpsf
+import webbpsf_ext
 
 from astropy.table import Table
 from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
@@ -113,8 +114,8 @@ class Database():
                             cr_from_siaf=False,
                             assoc_using_targname=True):
         """
-        Read JWST stage 0 (*uncal), 1 (*rate or *rateints), or 2 (*cal or
-        *calints) data into the Database.obs dictionary. It contains a table of
+        Read JWST stage 0 (\*uncal), 1 (\*rate or \*rateints), or 2 (\*cal or
+        \*calints) data into the Database.obs dictionary. It contains a table of
         metadata for each concatenation, which are identified automatically
         based on instrument, filter, pupil mask, and image mask. The tables can
         be edited by the user at any stage of the data reduction process and
@@ -593,7 +594,7 @@ class Database():
                           datapaths,
                           cr_from_siaf=False):
         """
-        Read JWST stage 3 data (this can be *i2d data from the official JWST
+        Read JWST stage 3 data (this can be \*i2d data from the official JWST
         pipeline, or data products from the pyKLIP and classical PSF
         subtraction pipelines implemented in spaceKLIP) into the Database.red
         dictionary. It contains a table of metadata for each concatenation,
@@ -1243,6 +1244,36 @@ class Database():
         except KeyError:
             self.src[key] = [None] * index + [tab]
         
+        pass
+
+    def adjust_dir(self, dir_path, data_type):
+        """
+        Adjust the directory of the data products.
+
+        Parameters
+        ----------
+        dir_path : str
+            New directory of the data products.
+        data_type : str
+            Type of data to adjust ('red' for reduced data, 'obs' for observations data, 'src' for source data).
+
+        Returns
+        -------
+        None.
+
+        """
+        # Adjust the directory of the data products.
+        try:
+            data_dict = getattr(self, data_type)
+            for key in data_dict.keys():
+                for i in range(len(data_dict[key])):
+                    data_dict[key]['FITSFILE'][i] = os.path.join(dir_path,
+                                                                 os.path.split(data_dict[key]['FITSFILE'][i])[1])
+                    data_dict[key]['MASKFILE'][i] = os.path.join(dir_path,
+                                                                 os.path.split(data_dict[key]['MASKFILE'][i])[1])
+        except Exception as e:
+            raise UserWarning(f"Invalid directory: {dir_path}. Error: {e}")
+
         pass
     
     def summarize(self):
