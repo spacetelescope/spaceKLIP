@@ -868,6 +868,7 @@ class AnalysisTools():
                            klmode='max',
                            date='auto',
                            use_fm_psf=True,
+                           flip_fmpsf_xy=None,
                            highpass=False,
                            fitmethod='mcmc',
                            minmethod=None,
@@ -917,6 +918,8 @@ class AnalysisTools():
             If True, use a FM PSF generated with pyKLIP, otherwise use a more
             simple integration time-averaged model offset PSF which does not
             incorporate any KLIP throughput losses. The default is True.
+        flip_fmpsf_xy : str, optional
+            If 'x', flip the x-axis of the FM PSF. If 'y', flip the y-axis of the FM PSF. 'xy' or 'yx' for both.
         highpass : bool or float, optional
             If float, will apply a high-pass filter to the FM PSF and KLIP
             dataset. The default is False.
@@ -1208,7 +1211,7 @@ class AnalysisTools():
                     # Offset PSF that is not affected by the coronagraphic
                     # mask, but only the Lyot stop.
                     psf_no_coronmsk = offsetpsf_func.psf_off
-                    
+
                     # Initial guesses for the fit parameters.
                     guess_dx = companions[k][0] / pxsc_arcsec  # pix
                     guess_dy = companions[k][1] / pxsc_arcsec  # pix
@@ -1272,7 +1275,7 @@ class AnalysisTools():
                                                                     do_shift=False,
                                                                     quick=True,
                                                                     addV3Yidl=False)
-                        
+
                         # Coronagraphic mask throughput is not incorporated
                         # into the flux calibration of the JWST pipeline so
                         # that the companion flux from the detector pixels will
@@ -1300,12 +1303,21 @@ class AnalysisTools():
                         
                         # Apply scale factor to incorporate the coronagraphic
                         # mask througput.
+                        # NOTE: There is no need to apply a correction for the substrate
+                        # as this is accounted for by the pipeline.
                         offsetpsf *= scale_factor
-                        
-                        # Apply scale factor to incorporate the COM substrate
-                        # transmission.
-                        # offsetpsf *= tp_comsubst
-                        
+
+                        # Flip model PSF in x or y direction if requested
+                        if flip_fmpsf_xy is not None:
+                            if flip_fmpsf_xy == 'x':
+                                offsetpsf = np.fliplr(offsetpsf)
+                            elif flip_fmpsf_xy == 'y':
+                                offsetpsf = np.flipud(offsetpsf)
+                            elif flip_fmpsf_xy == 'xy' or flip_fmpsf_xy == 'yx':
+                                offsetpsf = np.flipud(np.fliplr(offsetpsf))
+                            else:
+                                raise ValueError('flip_fmpsf_xy must be "x", "y", "xy", or "yx".')
+
                         # Blur frames with a Gaussian filter.
                         if not np.isnan(self.database.obs[key]['BLURFWHM'][ww]):
                             gauss_sigma = self.database.obs[key]['BLURFWHM'][j] / np.sqrt(8. * np.log(2.))
