@@ -4502,8 +4502,10 @@ class ImageTools():
                                      (center_shift_star[j][k][1] if not isinstance(center_shift_star[j], types.BuiltinFunctionType) else 0.0)
                             shifts += [np.array([xshift, yshift])]
 
-                            data_shift += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)]
-                            erro_shift += [ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)]
+                            data_shift += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
+                            erro_shift += [ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
                         if mask is not None:
@@ -4513,16 +4515,16 @@ class ImageTools():
                                              cval=np.nanmedian(mask),  kwargs={'mode':'constant'})
 
                             # Update mask center.
-                            maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0]
-                            maskceny = self.database.obs[key]['MASKCENY'][j] + shifts[0][1]
+                            maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0] + shiftpad
+                            maskceny = self.database.obs[key]['MASKCENY'][j] + shifts[0][1] + shiftpad
 
                         # Update star center.
-                        starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0]
-                        starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1]
+                        starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0] + shiftpad
+                        starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1] + shiftpad
 
                         # Update CRPIX values.
-                        crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0]
-                        crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1]
+                        crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0] + shiftpad
+                        crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1] + shiftpad
 
                     # Other data types.
                     else:
@@ -4532,8 +4534,10 @@ class ImageTools():
                             yshift = align_shift_star[j][k][1] + center_shift_star[j][k][1]
                             shifts += [np.array([xshift, yshift])]
 
-                            this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                            this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                            this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                            this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
 
                             # Recenter SCI and REF frames to integer pixel
                             # precision by rolling the image.
@@ -4548,12 +4552,12 @@ class ImageTools():
                         erro = np.array(erro_shift)
 
                         # Update star center.
-                        starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0]
-                        starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1]
+                        starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0] + shiftpad
+                        starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1] + shiftpad
 
                         # Update CRPIX values.
-                        crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0]
-                        crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1]
+                        crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0] + shiftpad
+                        crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1] + shiftpad
 
                 # TA data.
                 if j in ww_sci_ta or j in ww_ref_ta:
@@ -4563,8 +4567,10 @@ class ImageTools():
                         yshift = align_shift_star[j][k][1] + center_shift_star[j][k][1]
                         shifts += [np.array([xshift, yshift])]
 
-                        this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
-                        this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]], method=method, kwargs=kwargs)
+                        this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                        this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
 
                         # Recenter TA frames to integer pixel precision by
                         # rolling the image.
@@ -4579,12 +4585,12 @@ class ImageTools():
                     erro = np.array(erro_shift)
 
                     # Update star center.
-                    starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0]
-                    starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1]
+                    starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0] + shiftpad
+                    starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1] + shiftpad
 
                     # Update CRPIX values.
-                    crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0]
-                    crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1]
+                    crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0] + shiftpad
+                    crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1] + shiftpad
 
                 shifts_all += [shifts]
 
