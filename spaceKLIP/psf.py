@@ -677,16 +677,16 @@ def get_offsetpsf(obs,
     
     # Generate an unocculted model PSF using WebbPSF.
     offsetpsf = gen_offsetpsf(obs)
-    
+
     # Recenter the offset PSF.
     if recenter:
         shift = recenter_jens(offsetpsf)
-        offsetpsf = imshift(offsetpsf, shift, pad=True)
-        ww_max = np.unravel_index(np.argmax(offsetpsf), offsetpsf.shape)
+        offsetpsf = imshift(offsetpsf, shift, crop_after_pad=True, nan_reflected=False)
+        ww_max = np.unravel_index(np.nanargmax(offsetpsf), offsetpsf.shape)
         if ww_max != (32, 32):
             dx, dy = 32 - ww_max[1], 32 - ww_max[0]
             offsetpsf = np.roll(np.roll(offsetpsf, dx, axis=1), dy, axis=0)
-    
+
     # Find the science target observations.
     ww_sci = np.where(obs['TYPE'] == 'SCI')[0]
     
@@ -701,7 +701,7 @@ def get_offsetpsf(obs,
             totpsf += [totint * rotate(offsetpsf.copy(), -obs['ROLL_REF'][j], reshape=False, mode='constant', cval=0.)]
             totexp += totint  # s
         totpsf = np.array(totpsf)
-        totpsf = np.sum(totpsf, axis=0) / totexp
+        totpsf = np.nansum(totpsf, axis=0) / totexp
     else:
         totpsf = offsetpsf
     

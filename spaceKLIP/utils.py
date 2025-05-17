@@ -513,7 +513,8 @@ def imshift(image,
             shift,
             pad=True,
             pad_amount=5,
-            cval=0.,
+            nan_reflected=True,
+            crop_after_pad=False,
             method='fourier',
             kwargs={}):
     """
@@ -530,6 +531,10 @@ def imshift(image,
         the edges. The default is True.
     pad_amount : int, optional
         Extra padding to be applied to the image. The default is 5.
+    nan_reflected : bool, optional
+        If True, the pixels that are reflected in the padding will be set to NaN after shifting.
+    crop_after_pad : bool, optional
+        Crop the image after padding it? The default is False.
     cval : float, optional
         Fill value for the padded pixels. The default is 0.
     method : 'fourier' or 'spline' (not recommended), optional
@@ -548,9 +553,6 @@ def imshift(image,
         # Apply padding with a reflection
         impad = np.pad(image, pad_amount, mode="reflect")
 
-        # Create a mask to keep track of which pixels are reflected
-        mask = np.pad(np.zeros_like(image, dtype=int), pad_amount, mode="constant", constant_values=1)
-        
         # Shift image.
         if method == 'fourier':
             imsft = np.fft.ifftn(fourier_shift(np.fft.fftn(impad), shift[::-1])).real
@@ -559,12 +561,20 @@ def imshift(image,
         else:
             raise UserWarning('Image shift method "' + method + '" is not known')
 
-        # Shift mask and assume pixels influenced by reflected pixels are != 0
-        masksft = spline_shift(mask, shift[::-1], order=1, cval=1)
-        masksft = np.array([[1 if x!=0 else 0 for x in y] for y in masksft])
+        if nan_reflected:
+            # Create a mask to keep track of which pixels are reflected
+            mask = np.pad(np.zeros_like(image, dtype=int), pad_amount, mode="constant", constant_values=1)
 
-        # Replace reflected pixels with NaNs
-        imsft = np.ma.masked_array(imsft, mask=masksft).filled(np.nan)
+            # Shift mask and assume pixels influenced by reflected pixels are != 0
+            masksft = spline_shift(mask, shift[::-1], order=1, cval=1)
+            masksft = np.array([[1 if x!=0 else 0 for x in y] for y in masksft])
+
+            # Replace reflected pixels with NaNs
+            imsft = np.ma.masked_array(imsft, mask=masksft).filled(np.nan)
+
+        if crop_after_pad:
+            # Crop the image to the original size
+            imsft = imsft[pad_amount:-pad_amount, pad_amount:-pad_amount]
 
         return imsft
     else:
@@ -648,7 +658,7 @@ def recenterlsq(shift,
         Inverse of the PSF's peak count.
     """
 
-    return 1. / np.nanmax(imshift(image, shift, method=method, kwargs=kwargs))
+    return 1. / np.nanmax(imshift(image, shift, method=method, pad=False, kwargs=kwargs))
 
 
 def subtractlsq(shift,
