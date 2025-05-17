@@ -1219,3 +1219,54 @@ def config_stpipe_log(level='WARNING', suppress=False):
     else:
         # Restore the default logging configuration.
         stpipe.log.load_configuration(stpipe.log._find_logging_config_file())
+
+def roll_zeropad(a, shift, axis=None):
+    """ Roll array elements along a given axis, without wrapping.
+
+    Elements off the end of the array are treated as zeros.
+
+    From https://stackoverflow.com/questions/2777907/python-numpy-roll-with-padding
+
+    Parameters
+    ----------
+    a : array_like
+        Input array.
+    shift : int
+        The number of places by which elements are shifted.
+    axis : int, optional
+        The axis along which elements are shifted.  By default, the array
+        is flattened before shifting, after which the original
+        shape is restored.
+
+    Returns
+    -------
+    res : ndarray
+        Output array, with the same shape as `a`.
+
+    See Also
+    --------
+    roll     : Elements that roll off one end come back on the other.
+    rollaxis : Roll the specified axis backwards, until it lies in a
+               given position.
+    """
+    a = np.asanyarray(a)
+    if shift == 0: return a
+    if axis is None:
+        n = a.size
+        reshape = True
+    else:
+        n = a.shape[axis]
+        reshape = False
+    if np.abs(shift) > n:
+        res = np.zeros_like(a)
+    elif shift < 0:
+        shift += n
+        zeros = np.zeros_like(a.take(np.arange(n-shift), axis))
+        res = np.concatenate((a.take(np.arange(n-shift,n), axis), zeros), axis)
+    else:
+        zeros = np.zeros_like(a.take(np.arange(n-shift,n), axis))
+        res = np.concatenate((zeros, a.take(np.arange(n-shift), axis)), axis)
+    if reshape:
+        return res.reshape(a.shape)
+    else:
+        return res
