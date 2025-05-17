@@ -1145,7 +1145,7 @@ def bg_minimize(par, X, Y, bgmaskfile):
     X0 = X[indices]
     Y0 = Y[indices]
     Z0 = X0 - Y0*par/100
-    return np.nansum(np.sqrt(Z0**2))
+    return np.sqrt(np.nansum(Z0**2))
 
 
 def interpret_dq_value(dq_value):

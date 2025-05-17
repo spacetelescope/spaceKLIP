@@ -3115,7 +3115,7 @@ class ImageTools():
                 head, tail = os.path.split(fitsfile)
                 log.info('  --> Calculating centers: ' + tail)
                 if np.sum(np.isnan(data)) != 0:
-                    raise UserWarning('Please replace nan pixels before attempting to recenter frames')
+                    raise UserWarning('Please replace nan pixels before attempting to calculate centers')
                 shifts = []  # Shift between star position and image center (data.shape // 2).
                 maskoffs_temp = []  # Offset between star and coronagraphic mask center.
                 mask_shifts = []  # Shift applied to the PSF mask to match the recentered image.
@@ -3168,10 +3168,10 @@ class ImageTools():
                         if first_sci_only:
                             xoffset -= self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
                             yoffset -= self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
-                            log.info('  --> Recenter frames: adjusted XOFFSET/YOFFSET relative to first SCI frame.')
+                            log.info('  --> Calculate centers: adjusted XOFFSET/YOFFSET relative to first SCI frame.')
                         else:
                             # XOFFSET/YOFFSET remain the same.
-                            log.info('  --> Recenter frames: no adjustment made to XOFFSET/YOFFSET, all SCI/REF files recenetered individually.')
+                            log.info('  --> Calculate centers: no adjustment made to XOFFSET/YOFFSET, all SCI/REF files recenetered individually.')
 
                         # Set star center (image center - shift).
                         starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
@@ -3179,7 +3179,6 @@ class ImageTools():
 
                     # MIRI coronagraphy.
                     elif self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
-                        log.warning('  --> Calculate center frames: not implemented for MIRI coronagraphy, skipped')
                         for k in range(data.shape[0]):
 
                             # Mask center remains the same.
@@ -3210,7 +3209,7 @@ class ImageTools():
 
                                 # Do nothing.
                                 else:
-                                    log.warning('  --> Recenter frames: not implemented for MIRI coronagraphy, skipped')
+                                    log.warning('  --> Calculate centers: not implemented for MIRI coronagraphy unless use_ta=True, skipped')
                                     xc, yc = (data.shape[-1] - 1.) / 2., (data.shape[-2] - 1.) / 2.  # Shift will be 0.
                                     xshift, yshift = 0., 0.
 
@@ -3222,10 +3221,10 @@ class ImageTools():
                         if first_sci_only:
                             xoffset -= self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
                             yoffset -= self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
-                            log.info('  --> Recenter frames: adjusted XOFFSET/YOFFSET relative to first SCI frame.')
+                            log.info('  --> Calculate centers: adjusted XOFFSET/YOFFSET relative to first SCI frame.')
                         else:
                             # XOFFSET/YOFFSET remain the same.
-                            log.info('  --> Recenter frames: no adjustment made to XOFFSET/YOFFSET, all SCI/REF files recentered individually.')
+                            log.info('  --> Calculate centers: no adjustment made to XOFFSET/YOFFSET, all SCI/REF files measured individually.')
 
                         # Star center.
                         # If TA was used, shift from image center; otherwise, use provided header values.
@@ -3305,7 +3304,7 @@ class ImageTools():
                 dist = np.sqrt(np.sum(shifts[:, :2]**2, axis=1))  # pix
                 dist *= self.database.obs[key]['PIXSCALE'][j] * 1000  # mas
                 head, tail = os.path.split(self.database.obs[key]['FITSFILE'][j])
-                log.info('  --> Recenter frames: median required shift = %.2f mas' % np.median(dist))
+                log.info('  --> Calculate centers: median measured shift = %.2f mas' % np.median(dist))
 
                 # Write FITS file and PSF mask.
                 head_pri['XOFFSET'] = xoffset  # arcsec
@@ -4222,12 +4221,12 @@ class ImageTools():
                     else:
                         shifts += [np.array([0, 0, 0])]
 
-                if mask is not None:
-                    if align_to_file is not None or j != ww_sci[0]:
-                        temp = np.median(shifts, axis=0)
-                        mask_shifts += [temp[0], temp[1]]
-                    else:
-                        mask_shifts += [0, 0]
+                    # Do the same for the mask
+                    if mask is not None:
+                        if align_to_file is not None or j != ww_sci[0]:
+                            mask_shifts += [np.array([pp[0], pp[1]])]
+                        else:
+                            mask_shifts += [np.array([0, 0])]
 
                 shifts = np.array(shifts)
                 mask_shifts = np.array(mask_shifts)
@@ -4478,7 +4477,7 @@ class ImageTools():
                             mask_shift = (center_shift_mask[j][0] if not isinstance(center_shift_mask[j], types.BuiltinFunctionType) else 0.0) + \
                                          (align_shift_mask[j] if not isinstance(align_shift_mask[j], types.BuiltinFunctionType) else 0.0)
                             mask = ut.imshift(mask, [mask_shift[0], mask_shift[1]], method='spline',
-                                             cval=np.nanmedian(mask), pad_amount=shiftpad, kwargs={'mode':'constant'})
+                                              pad_amount=shiftpad, kwargs={'mode':'constant'})
 
                             # Update mask center.
                             maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0] + shiftpad
@@ -4512,7 +4511,7 @@ class ImageTools():
                             mask_shift = (center_shift_mask[j][0] if not isinstance(center_shift_mask[j], types.BuiltinFunctionType) else 0.0) + \
                                          (align_shift_mask[j] if not isinstance(align_shift_mask[j], types.BuiltinFunctionType) else 0.0)
                             mask = ut.imshift(mask, [mask_shift[0], mask_shift[1]], method='spline',
-                                             cval=np.nanmedian(mask),  kwargs={'mode':'constant'})
+                                              pad_amount=shiftpad, kwargs={'mode':'constant'})
 
                             # Update mask center.
                             maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0] + shiftpad
