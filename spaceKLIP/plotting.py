@@ -3,13 +3,10 @@
 # =============================================================================
 
 import os
-import pdb
-import sys
-import glob
 from itertools import chain
 
 import numpy as np
-import math
+import warnings
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -264,7 +261,12 @@ def display_coron_image(filename,
         # PyKLIP output, we have to open this differently, can't use JWST datamodels.
         image = fits.getdata(filename)
         header = fits.getheader(filename)
-        center_x, center_y = header['CRPIX1'], header['CRPIX2']
+        #display(header)
+        try:
+            center_x, center_y = header['STARCENX'], header['STARCENY']
+        except:
+            warnings.warn(f'Keyword STARCENX/Y missing from fits header. Falling back to CRPIX1/2')
+            center_x, center_y = header['CRPIX1'], header['CRPIX2']
         bunit = header['BUNIT']
         wcs = astropy.wcs.WCS(header)
         if image.ndim == 3:
@@ -275,12 +277,20 @@ def display_coron_image(filename,
     else:
         # Handle JWST pipeline outputs.
         # Load in JWST pipeline outputs using jwst.datamodel.
+        header = fits.open(filename)[1].header
+        #display(header)
         modeltype = jwst.datamodels.CubeModel if cube_ints else jwst.datamodels.ImageModel
         model = modeltype(filename)
         image = np.nanmean(model.data, axis=0) if cube_ints else model.data
         dq = model.dq[0] if cube_ints else model.dq
         nints = model.meta.exposure.nints if cube_ints else None
-        center_x, center_y = model.meta.wcsinfo.crpix1, model.meta.wcsinfo.crpix2
+        #center_x, center_y = model.meta.wcsinfo.crpix1, model.meta.wcsinfo.crpix2
+        try:
+            center_x, center_y = header['STARCENX'], header['STARCENY']
+        except:
+            warnings.warn(f'Keyword STARCENX/Y missing from fits header. Falling back to CRPIX1/2')
+            center_x, center_y = header['CRPIX1'], header['CRPIX2']
+        
         bunit = model.meta.bunit_data
         is_psf = model.meta.exposure.psf_reference
         annotation_text = (
@@ -1048,11 +1058,13 @@ def plot_subimages(imgdirs, subdirs, filts, submodes, numKL,
 
         # get center information
         if instrument == 'NIRCAM':
-            center_pix = (int(np.rint(hdr['CRPIX2']-1)), 
-                          int(np.rint(hdr['CRPIX1']-1)))
+            center_pix = (int(np.rint(hdr.get('STARCENY', hdr.get('MASKCENY', hdr['CRPIX2']))-1)),
+                          int(np.rint(hdr.get('STARCENX', hdr.get('MASKCENX', hdr['CRPIX1']))-1)),
+                          )
             window_pix = int(np.rint(window_size / pltscale['NIRCAM'] / 2))
             offset = (window_pix - window_size / 0.063 / 2) *0.063
         else:
+            # Potentially use same center_pix code as for NIRCAM case above
             center_pix = miri_img_centers[flt]
             window_pix = int(np.rint(window_size / pltscale['MIRI'] / 2))
             offset = (window_pix - window_size / 0.11 / 2) *0.11

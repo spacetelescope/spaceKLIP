@@ -1,43 +1,50 @@
 from __future__ import division
 
-import matplotlib
-
 # =============================================================================
 # IMPORTS
 # =============================================================================
 
+# general imports
 import os
-import pdb
-import sys
 import io
 import stpipe
-
-import astropy.io.fits as pyfits
+import importlib
+import logging
 import numpy as np
 
-import importlib
-import scipy.ndimage.interpolation as sinterp
+# astropy imports
+import pysiaf
+import astropy.io.fits as pyfits
+from astroquery.svo_fps import SvoFps
+from astropy.nddata.bitmask import _is_bit_flag
 
+# scipy imports
+import scipy.ndimage.interpolation as sinterp
 from scipy.integrate import simpson
 from scipy.ndimage import fourier_shift, gaussian_filter
 from scipy.ndimage import shift as spline_shift
 
-import pysiaf
-from webbpsf_ext.imreg_tools import get_coron_apname as nircam_apname
-from webbpsf_ext.image_manip import expand_mask
+# webbpsf_ext imports
+from webbpsf_ext import robust
+from webbpsf_ext.bandpasses import nircam_filter, nircam_com_th
+from webbpsf_ext.maths import jl_poly_fit, jl_poly
 
-import logging
+from stdatamodels.jwst.datamodels.dqflags import pixel, dqflags_to_mnemonics
+import stpsf as webbpsf
+
+# Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
-
 
 # =============================================================================
 # MAIN
 # =============================================================================
 
+
 def get_nrcmask_from_apname(apname):
-    """Get mask name from aperture name
-    
+    """
+    Get mask name from aperture name.
+
     The aperture name is of the form:
     NRC[A/B][1-5]_[FULL]_[MASK]_[FILTER]
     where MASK is the name of the coronagraphic mask used.
@@ -56,7 +63,6 @@ def get_nrcmask_from_apname(apname):
     -------
     image_mask : str
         String for image mask
-
     """
 
     if 'MASK' not in apname:
@@ -79,23 +85,24 @@ def get_nrcmask_from_apname(apname):
             image_mask = image_mask.replace('FS', '')
 
         # Remove trailing S or L from LWB and SWB TA apertures
-        if ('WB' in image_mask) and (image_mask[-1]=='S' or image_mask[-1]=='L'):
+        if ('WB' in image_mask) and (image_mask[-1] == 'S' or image_mask[-1] == 'L'):
             image_mask = image_mask[:-1]
 
     return image_mask
+
 
 def read_obs(fitsfile,
              return_var=False):
     """
     Read an observation from a FITS file.
-    
+
     Parameters
     ----------
     fitsfile : path
         Path of input FITS file.
     return_var : bool, optional
         Return VAR_POISSON and VAR_RNOISE arrays? The default is False.
-    
+
     Returns
     -------
     data : 3D-array
@@ -110,9 +117,18 @@ def read_obs(fitsfile,
         'SCI' extension FITS header.
     is2d : bool
         Is the original data 2D?
-    imshifts : 2D-array
-        Array of shape (nints, 2) containing the total shifts applied to the
+    align_shift : 2D-array
+        Array of shape (nints, 2) containing the alignment shifts applied to the
         frames. None if not available.
+    center_shift : 2D-array
+        Array of shape (nints, 2) containing the recentering shifts applied to the
+        frames. None if not available.
+    align_mask : 2D-array
+        Array of shape (nints, 2) containing the alignment shifts applied to the
+        masks. None if not available.
+    center_mask : 2D-array
+        Array of shape (nints, 2) containing the recentering shifts applied to the
+        masks. None if not available.
     maskoffs : 2D-array
         Array of shape (nints, 2) containing the offsets between the star and
         coronagraphic mask position. None if not available.
@@ -120,9 +136,8 @@ def read_obs(fitsfile,
         'VAR_POISSON' extension data.
     var_rnoise : 3D-array, optional
         'VAR_RNOISE' extension data.
-    
     """
-    
+
     # Read FITS file.
     hdul = pyfits.open(fitsfile)
     data = hdul['SCI'].data
@@ -145,9 +160,21 @@ def read_obs(fitsfile,
     if data.ndim != 3:
         raise UserWarning('Requires 2D/3D data cube')
     try:
-        imshifts = hdul['IMSHIFTS'].data
+        align_shift = hdul['ALIGN_SHIFT'].data
     except KeyError:
-        imshifts = None
+        align_shift = None
+    try:
+        center_shift = hdul['CENTER_SHIFT'].data
+    except KeyError:
+        center_shift = None
+    try:
+        align_mask = hdul['ALIGN_MASK'].data
+    except KeyError:
+        align_mask = None
+    try:
+        center_mask = hdul['CENTER_MASK'].data
+    except KeyError:
+        center_mask = None
     try:
         maskoffs = hdul['MASKOFFS'].data
     except KeyError:
@@ -156,11 +183,12 @@ def read_obs(fitsfile,
         var_poisson = hdul['VAR_POISSON'].data
         var_rnoise = hdul['VAR_RNOISE'].data
     hdul.close()
-    
+
     if return_var:
-        return data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs, var_poisson, var_rnoise
+        return data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs, var_poisson, var_rnoise
     else:
-        return data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs
+        return data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs
+
 
 def write_obs(fitsfile,
               output_dir,
@@ -170,13 +198,16 @@ def write_obs(fitsfile,
               head_pri,
               head_sci,
               is2d,
-              imshifts=None,
+              align_shift=None,
+              center_shift=None,
+              align_mask=None,
+              center_mask=None,
               maskoffs=None,
               var_poisson=None,
               var_rnoise=None):
     """
     Write an observation to a FITS file.
-    
+
     Parameters
     ----------
     fitsfile : path
@@ -195,9 +226,18 @@ def write_obs(fitsfile,
         'SCI' extension FITS header.
     is2d : bool
         Is the original data 2D?
-    imshifts : 2D-array, optional
-        Array of shape (nints, 2) containing the total shifts applied to the
-        frames. The default is None.
+    align_shift : 2D-array
+        Array of shape (nints, 2) containing the alignment shifts applied to the
+        frames. None if not available.
+    center_shift : 2D-array
+        Array of shape (nints, 2) containing the recentering shifts applied to the
+        frames. None if not available.
+    align_mask : 2D-array
+        Array of shape (nints, 2) containing the alignment shifts applied to the
+        masks. None if not available.
+    center_mask : 2D-array
+        Array of shape (nints, 2) containing the recentering shifts applied to the
+        masks. None if not available.
     maskoffs : 2D-array, optional
         Array of shape (nints, 2) containing the offsets between the star and
         coronagraphic mask position. The default is None.
@@ -205,14 +245,13 @@ def write_obs(fitsfile,
         'VAR_POISSON' extension data. The default is None.
     var_rnoise : 3D-array, optional
         'VAR_RNOISE' extension data. The default is None.
-    
+
     Returns
     -------
     fitsfile : path
         Path of output FITS file.
-    
     """
-    
+
     # Write FITS file.
     hdul = pyfits.open(fitsfile)
     if is2d:
@@ -225,11 +264,29 @@ def write_obs(fitsfile,
         hdul['DQ'].data = pxdq
     hdul[0].header = head_pri
     hdul['SCI'].header = head_sci
-    if imshifts is not None:
+    if align_shift is not None:
         try:
-            hdul['IMSHIFTS'].data = imshifts
+            hdul['ALIGN_SHIFT'].data = align_shift
         except KeyError:
-            hdu = pyfits.ImageHDU(imshifts, name='IMSHIFTS')
+            hdu = pyfits.ImageHDU(align_shift, name='ALIGN_SHIFT')
+            hdul.append(hdu)
+    if center_shift is not None:
+        try:
+            hdul['CENTER_SHIFT'].data = center_shift
+        except KeyError:
+            hdu = pyfits.ImageHDU(center_shift, name='CENTER_SHIFT')
+            hdul.append(hdu)
+    if align_mask is not None:
+        try:
+            hdul['ALIGN_MASK'].data = align_mask
+        except KeyError:
+            hdu = pyfits.ImageHDU(align_mask, name='ALIGN_MASK')
+            hdul.append(hdu)
+    if center_mask is not None:
+        try:
+            hdul['CENTER_MASK'].data = center_mask
+        except KeyError:
+            hdu = pyfits.ImageHDU(center_mask, name='CENTER_MASK')
             hdul.append(hdu)
     if maskoffs is not None:
         try:
@@ -244,25 +301,25 @@ def write_obs(fitsfile,
     fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
     hdul.writeto(fitsfile, output_verify='fix', overwrite=True)
     hdul.close()
-    
+
     return fitsfile
+
 
 def read_msk(maskfile):
     """
     Read a PSF mask from a FITS file.
-    
+
     Parameters
     ----------
     maskfile : path
         Path of input FITS file.
-    
+
     Returns
     -------
     mask : 2D-array
         PSF mask. None if not available.
-    
     """
-    
+
     # Read FITS file.
     if maskfile != 'NONE':
         hdul = pyfits.open(maskfile)
@@ -270,7 +327,7 @@ def read_msk(maskfile):
         hdul.close()
     else:
         mask = None
-    
+
     return mask
 
 
@@ -279,7 +336,7 @@ def write_msk(maskfile,
               fitsfile):
     """
     Write a PSF mask to a FITS file.
-    
+
     Parameters
     ----------
     maskfile : path
@@ -288,14 +345,14 @@ def write_msk(maskfile,
         PSF mask. None if not available.
     fitsfile : path
         Path of output FITS file (to save the PSF mask in the same directory).
-    
+
     Returns
     -------
     maskfile : path
         Path of output FITS file.
-    
+
     """
-    
+
     # Write FITS file.
     if mask is not None:
         hdul = pyfits.open(maskfile)
@@ -305,18 +362,19 @@ def write_msk(maskfile,
         hdul.close()
     else:
         maskfile = 'NONE'
-    
+
     return maskfile
+
 
 def read_red(fitsfile):
     """
     Read a reduction from a FITS file.
-    
+
     Parameters
     ----------
     fitsfile : path
         Path of input FITS file.
-    
+
     Returns
     -------
     data : 3D-array
@@ -327,9 +385,9 @@ def read_red(fitsfile):
         'SCI' extension FITS header.
     is2d : bool
         Is the original data 2D?
-    
+
     """
-    
+
     # Read FITS file.
     hdul = pyfits.open(fitsfile)
     data = hdul[0].data
@@ -350,15 +408,16 @@ def read_red(fitsfile):
         is2d = True
     if data.ndim != 3:
         raise UserWarning('Requires 2D/3D data cube')
-    
+
     return data, head_pri, head_sci, is2d
+
 
 def write_fitpsf_images(fitpsf,
                         fitsfile,
                         row):
     """
     Write a best fit FM PSF to a FITS file.
-    
+
     Parameters
     ----------
     fitpsf : pyklip.fitpsf
@@ -367,25 +426,24 @@ def write_fitpsf_images(fitpsf,
         Path of output FITS file.
     row : astropy.table.Row
         Astropy table row of the companion to be saved to the FITS file.
-    
+
     Returns
     -------
     None.
-    
     """
-    
+
     # Make best fit FM PSF.
     dx = fitpsf.fit_x.bestfit - fitpsf.data_stamp_x_center
     dy = fitpsf.fit_y.bestfit - fitpsf.data_stamp_y_center
     fm_bestfit = fitpsf.fit_flux.bestfit * sinterp.shift(fitpsf.fm_stamp, [dy, dx])
     if fitpsf.padding > 0:
         fm_bestfit = fm_bestfit[fitpsf.padding:-fitpsf.padding, fitpsf.padding:-fitpsf.padding]
-    
+
     # Make residual image.
     residual_image = fitpsf.data_stamp - fm_bestfit
     snr = np.nanmax(fm_bestfit) / np.nanstd(residual_image)
     row['SNR'] = snr
-    
+
     # Write FITS file.
     pri = pyfits.PrimaryHDU()
     for key in row.keys():
@@ -399,8 +457,9 @@ def write_fitpsf_images(fitpsf,
     mod = pyfits.ImageHDU(fm_bestfit, name='MOD')
     hdul = pyfits.HDUList([pri, res, sci, mod])
     hdul.writeto(fitsfile, output_verify='fix', overwrite=True)
-    
+
     pass
+
 
 def crop_image(image,
                xycen,
@@ -408,7 +467,7 @@ def crop_image(image,
                return_indices=False):
     """
     Crop an image.
-    
+
     Parameters
     ----------
     image : 2D-array
@@ -420,7 +479,7 @@ def crop_image(image,
     return_indices : bool, optional
         If True, returns the x- and y-indices of the cropped image in the
         coordinate frame of the input image. The default is False.
-    
+
     Returns
     -------
     imsub : 2D-array
@@ -431,16 +490,15 @@ def crop_image(image,
     ysub_indarr : 1D-array, optional
         The y-indices of the cropped image in the coordinate frame of the
         input image.
-    
     """
-    
+
     # Compute pixel coordinates.
     xc, yc = xycen
     x1 = int(xc - npix / 2. + 0.5)
     x2 = x1 + npix
     y1 = int(yc - npix / 2. + 0.5)
     y2 = y1 + npix
-    
+
     # Crop image.
     imsub = image[y1:y2, x1:x2]
     if return_indices:
@@ -450,15 +508,18 @@ def crop_image(image,
     else:
         return imsub
 
+
 def imshift(image,
             shift,
-            pad=False,
-            cval=0.,
+            pad=True,
+            pad_amount=5,
+            nan_reflected=True,
+            crop_after_pad=False,
             method='fourier',
             kwargs={}):
     """
     Shift an image.
-    
+
     Parameters
     ----------
     image : 2D-array
@@ -468,6 +529,12 @@ def imshift(image,
     pad : bool, optional
         Pad the image before shifting it? Otherwise, it will wrap around
         the edges. The default is True.
+    pad_amount : int, optional
+        Extra padding to be applied to the image. The default is 5.
+    nan_reflected : bool, optional
+        If True, the pixels that are reflected in the padding will be set to NaN after shifting.
+    crop_after_pad : bool, optional
+        Crop the image after padding it? The default is False.
     cval : float, optional
         Fill value for the padded pixels. The default is 0.
     method : 'fourier' or 'spline' (not recommended), optional
@@ -475,23 +542,17 @@ def imshift(image,
     kwargs : dict, optional
         Keyword arguments for the scipy.ndimage.shift routine. The default
         is {}.
-    
+
     Returns
     -------
     imsft : 2D-array
         The shifted image.
-    
     """
-    
+
     if pad:
-        
-        # Pad image.
-        sy, sx = image.shape
-        xshift, yshift = shift
-        padx = np.abs(int(xshift)) + 5
-        pady = np.abs(int(yshift)) + 5
-        impad = np.pad(image, ((pady, pady), (padx, padx)), mode='constant', constant_values=cval)
-        
+        # Apply padding with a reflection
+        impad = np.pad(image, pad_amount, mode="reflect")
+
         # Shift image.
         if method == 'fourier':
             imsft = np.fft.ifftn(fourier_shift(np.fft.fftn(impad), shift[::-1])).real
@@ -499,9 +560,23 @@ def imshift(image,
             imsft = spline_shift(impad, shift[::-1], **kwargs)
         else:
             raise UserWarning('Image shift method "' + method + '" is not known')
-        
-        # Crop image to original size.
-        return imsft[pady:pady + sy, padx:padx + sx]
+
+        if nan_reflected:
+            # Create a mask to keep track of which pixels are reflected
+            mask = np.pad(np.zeros_like(image, dtype=int), pad_amount, mode="constant", constant_values=1)
+
+            # Shift mask and assume pixels influenced by reflected pixels are != 0
+            masksft = spline_shift(mask, shift[::-1], order=1, cval=1)
+            masksft = np.array([[1 if x!=0 else 0 for x in y] for y in masksft])
+
+            # Replace reflected pixels with NaNs
+            imsft = np.ma.masked_array(imsft, mask=masksft).filled(np.nan)
+
+        if crop_after_pad:
+            # Crop the image to the original size
+            imsft = imsft[pad_amount:-pad_amount, pad_amount:-pad_amount]
+
+        return imsft
     else:
         if method == 'fourier':
             return np.fft.ifftn(fourier_shift(np.fft.fftn(image), shift[::-1])).real
@@ -509,6 +584,15 @@ def imshift(image,
             return spline_shift(image, shift[::-1], **kwargs)
         else:
             raise UserWarning('Image shift method "' + method + '" is not known')
+
+def estimate_padding_for_shift(align_shift, center_shift):
+
+    summed_shift = np.array(align_shift) + np.array(center_shift)
+    flattened_shift = np.concatenate(summed_shift).ravel()
+    max_shift = np.max(np.abs(flattened_shift))
+    padding = int(np.ceil(max_shift))
+
+    return padding
 
 def alignlsq(shift,
              image,
@@ -519,7 +603,7 @@ def alignlsq(shift,
     """
     Align an image to a reference image using a Fourier shift and subtract
     method.
-    
+
     Parameters
     ----------
     shift : 1D-array
@@ -536,18 +620,18 @@ def alignlsq(shift,
     kwargs : dict, optional
         Keyword arguments for the scipy.ndimage.shift routine. The default
         is {}.
-    
+
     Returns
     -------
     imres : 1D-array
         Residual image collapsed into one dimension.
-    
     """
-    
+
     if mask is None:
-        return (ref_image - shift[2] * imshift(image, shift[:2], method=method, kwargs=kwargs)).ravel()
+        return (ref_image - shift[2] * imshift(image, shift[:2], method=method, pad=False, kwargs=kwargs)).ravel()
     else:
-        return ((ref_image - shift[2] * imshift(image, shift[:2], method=method, kwargs=kwargs)) * mask).ravel()
+        return ((ref_image - shift[2] * imshift(image, shift[:2], method=method, pad=False, kwargs=kwargs)) * mask).ravel()
+
 
 def recenterlsq(shift,
                 image,
@@ -555,7 +639,7 @@ def recenterlsq(shift,
                 kwargs={}):
     """
     Center a PSF on its nearest pixel by maximizing its peak count.
-    
+
     Parameters
     ----------
     shift : 1D-array
@@ -567,15 +651,15 @@ def recenterlsq(shift,
     kwargs : dict, optional
         Keyword arguments for the scipy.ndimage.shift routine. The default
         is {}.
-    
+
     Returns
     -------
     invpeak : float
         Inverse of the PSF's peak count.
-    
     """
-    
-    return 1. / np.nanmax(imshift(image, shift, method=method, kwargs=kwargs))
+
+    return 1. / np.nanmax(imshift(image, shift, method=method, pad=False, kwargs=kwargs))
+
 
 def subtractlsq(shift,
                 image,
@@ -583,7 +667,7 @@ def subtractlsq(shift,
                 mask=None):
     """
     Scale and subtract a reference from a science image.
-    
+
     Parameters
     ----------
     shift : 1D-array
@@ -595,14 +679,13 @@ def subtractlsq(shift,
     mask : 2D-array, optional
         Mask to be applied to the input and reference images. The default is
         None.
-    
+
     Returns
     -------
     imres : 1D-array
         Residual image collapsed into one dimension.
-    
     """
-    
+
     res = image - shift[0] * ref_image
     res = res - gaussian_filter(res, 5)
     if mask is None:
@@ -610,15 +693,16 @@ def subtractlsq(shift,
     else:
         return res[mask]
 
+
 def _get_tp_comsubst(instrume,
-                    subarray,
-                    filt):
+                     subarray,
+                     filt):
     """
     Get the COM substrate transmission averaged over the respective filter
     profile.
 
     *** Deprecated - use `get_tp_comsubst` instead. ***
-    
+
     Parameters
     ----------
     instrume : 'NIRCAM', 'NIRISS', or 'MIRI'
@@ -627,25 +711,24 @@ def _get_tp_comsubst(instrume,
         JWST subarray in use.
     filt : str
         JWST filter in use.
-    
+
     Returns
     -------
     tp_comsubst : float
         COM substrate transmission averaged over the respective filter profile
-    
     """
-    
+
     log.warning('This function is deprecated. Use `get_tp_comsubst` instead.')
 
     # Default return.
     tp_comsubst = 1.
-    
+
     # If NIRCam.
     if instrume == 'NIRCAM':
-        
+
         # If coronagraphy subarray.
         if '210R' in subarray or '335R' in subarray or '430R' in subarray or 'SWB' in subarray or 'LWB' in subarray:
-            
+
             # Read bandpass.
             try:
                 with importlib.resources.open_text(f'spaceKLIP.resources.PCEs.{instrume}', f'{filt}.txt') as bandpass_file:
@@ -654,30 +737,31 @@ def _get_tp_comsubst(instrume,
                     bandpass_throughput = bandpass_data[1]
             except FileNotFoundError:
                 log.error('--> Filter ' + filt + ' not found for instrument ' + instrume)
-            
+
             # Read COM substrate transmission.
-            with importlib.resources.open_text(f'spaceKLIP.resources.transmissions', f'ModA_COM_Substrate_Transmission_20151028_JKrist.dat') as comsubst_file:
+            with importlib.resources.open_text('spaceKLIP.resources.transmissions', 'ModA_COM_Substrate_Transmission_20151028_JKrist.dat') as comsubst_file:
                 comsubst_data = np.genfromtxt(comsubst_file).transpose()
                 comsubst_wave = comsubst_data[0][1:]  # micron
                 comsubst_throughput = comsubst_data[1][1:]
-            
+
             # Compute COM substrate transmission averaged over the respective
             # filter profile.
             bandpass_throughput = np.interp(comsubst_wave, bandpass_wave, bandpass_throughput)
             int_tp_bandpass = simpson(bandpass_throughput, comsubst_wave)
             int_tp_bandpass_comsubst = simpson(bandpass_throughput * comsubst_throughput, comsubst_wave)
             tp_comsubst = int_tp_bandpass_comsubst / int_tp_bandpass
-    
+
     # Return.
     return tp_comsubst
 
-def write_starfile(starfile,  
+
+def write_starfile(starfile,
                    new_starfile_path,
                    new_header=None):
     """
     Save stellar spectrum file to a different location, and insert
-    a header to the start if needed. 
-    
+    a header to the start if needed.
+
     Parameters
     ----------
     starfile : str
@@ -685,27 +769,28 @@ def write_starfile(starfile,
     new_starfile_path : str
         Path to new stellar spectrum file.
     new_header : str
-        Header to be inserted. 
-    
+        Header to be inserted.
+
     Returns
     -------
     None
-    
-    """ 
+    """
+
     if not os.path.exists(starfile):
         raise FileNotFoundError("The specified starfile does not exist.")
-    
+
     with open(starfile, 'r') as orig_starfile:
-        text=orig_starfile.read()
+        text = orig_starfile.read()
         with open(new_starfile_path, 'w') as new_starfile:
             if new_header is None:
                 new_starfile.write(text)
             else:
                 new_starfile.write(new_header+text)
 
+
 def set_surrounded_pixels(array, user_value=np.nan):
     """
-    Identifies pixels in a 2D array surrounded by NaN values 
+    Identifies pixels in a 2D array surrounded by NaN values
     on all eight sides and sets them to a user-defined value.
 
     Parameters
@@ -727,9 +812,10 @@ def set_surrounded_pixels(array, user_value=np.nan):
         nan_mask[1:-1, :-2] & nan_mask[1:-1, 2:] &
         nan_mask[2:, :-2] & nan_mask[2:, 1:-1] & nan_mask[2:, 2:]
     )
-    
+
     array[1:-1, 1:-1][surrounded_pixels] = user_value
     return array
+
 
 def get_tp_comsubst(instrume,
                     subarray,
@@ -740,7 +826,7 @@ def get_tp_comsubst(instrume,
 
     TODO: Spot check the COM throughput using photometric calibration data,
     assuming there are stellar offsets on and off the COM substrate.
-    
+
     Parameters
     ----------
     instrume : 'NIRCAM', 'NIRISS', or 'MIRI'
@@ -749,26 +835,23 @@ def get_tp_comsubst(instrume,
         JWST subarray in use.
     filt : str
         JWST filter in use.
-    
+
     Returns
     -------
     tp_comsubst : float
         COM substrate transmission averaged over the respective filter profile
-    
     """
-    
-    from webbpsf_ext.bandpasses import nircam_filter, nircam_com_th
 
     # Default return.
     tp_comsubst = 1.
-    
+
     # If NIRCam.
     instrume = instrume.upper()
     if instrume == 'NIRCAM':
-        
+
         # If coronagraphy subarray.
         if '210R' in subarray or '335R' in subarray or '430R' in subarray or 'SWB' in subarray or 'LWB' in subarray:
-            
+
             # Read bandpass.
             try:
                 bp = nircam_filter(filt)
@@ -776,18 +859,20 @@ def get_tp_comsubst(instrume,
                 bandpass_throughput = bp.throughput
             except FileNotFoundError:
                 log.error('--> Filter ' + filt + ' not found for instrument ' + instrume)
-            
+
             # Read COM substrate transmission interpolated at bandpass wavelengths.
             comsubst_throughput = nircam_com_th(bandpass_wave)
 
             # Compute weighted average of COM substrate transmission.
             tp_comsubst = np.average(comsubst_throughput, weights=bandpass_throughput)
-    
+
     # Return.
     return tp_comsubst
 
+
 def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
-    """ Load filter information from the SVO Filter Profile Service or STPSF (webbpsf)
+    """
+    Load filter information from the SVO Filter Profile Service or webbpsf
 
     Load NIRCam, NIRISS, and MIRI filters from the SVO Filter Profile Service.
     http://svo2.cab.inta-csic.es/theory/fps/
@@ -797,7 +882,7 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
     Parameters
     ----------
     instrument : str
-        Name of instrument to load filter list for. 
+        Name of instrument to load filter list for.
         Must be one of 'NIRCam', 'NIRISS', or 'MIRI'.
     timeout : float
         Timeout in seconds for connection to SVO Filter Profile Service.
@@ -807,9 +892,6 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
     return_more : bool
         If True, also return `do_svo` variable, whether SVO was used or not.
     """
-
-    from astroquery.svo_fps import SvoFps
-    import stpsf as webbpsf
 
     iname_upper = instrument.upper()
 
@@ -829,7 +911,7 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
             'MIRI'  : webbpsf.MIRI,
         }
         inst = inst_func[iname_upper]()
-        filter_list = inst.filter_list 
+        filter_list = inst.filter_list
 
     wave, weff = ({}, {})
     if do_svo:
@@ -849,29 +931,28 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
     else:
         return wave, weff
 
-def cube_fit(tarr, data, sat_vals, sat_frac=0.95, bias=None, 
+
+def cube_fit(tarr, data, sat_vals, sat_frac=0.95, bias=None,
              deg=1, bpmask_arr=None, fit_zero=False, verbose=False,
              use_legendre=False, lxmap=None, return_lxmap=False,
              return_chired=False):
     """Fit unsaturated data and return coefficients"""
-        
-    from webbpsf_ext.maths import jl_poly_fit, jl_poly
 
     nz, ny, nx = data.shape
-    
+
     # Subtract bias?
     imarr = data if bias is None else data - bias
-        
+
     # Array of masked pixels (saturated)
     mask_good = imarr < sat_frac*sat_vals
     if bpmask_arr is not None:
         mask_good = mask_good & ~bpmask_arr
-    
+
     # Reshape for all pixels in single dimension
     imarr = imarr.reshape([nz, -1])
     mask_good = mask_good.reshape([nz, -1])
 
-    # Initial 
+    # Initial
     cf = np.zeros([deg+1, nx*ny])
     if return_lxmap:
         lx_min = np.zeros([nx*ny])
@@ -879,66 +960,68 @@ def cube_fit(tarr, data, sat_vals, sat_frac=0.95, bias=None,
     if return_chired:
         chired = np.zeros([nx*ny])
 
-    # For each 
+    # For each
     npix_sum = 0
     i0 = 0 if fit_zero else 1
-    for i in np.arange(i0,nz)[::-1]:
+    for i in np.arange(i0, nz)[::-1]:
         ind = (cf[1] == 0) & (mask_good[i])
         npix = np.sum(ind)
         npix_sum += npix
-        
+
         if verbose:
-            print(i+1,npix,npix_sum, 'Remaining: {}'.format(nx*ny-npix_sum))
-            
-        if npix>0:
+            print(i+1, npix, npix_sum, 'Remaining: {}'.format(nx*ny-npix_sum))
+
+        if npix > 0:
             if fit_zero:
                 x = np.concatenate(([0], tarr[0:i+1]))
-                y = np.concatenate((np.zeros([1, np.sum(ind)]), imarr[0:i+1,ind]), axis=0)
+                y = np.concatenate((np.zeros([1, np.sum(ind)]), imarr[0:i+1, ind]), axis=0)
             else:
-                x, y = (tarr[0:i+1], imarr[0:i+1,ind])
+                x, y = (tarr[0:i+1], imarr[0:i+1, ind])
 
             if return_lxmap:
                 lx_min[ind] = np.min(x) if lxmap is None else lxmap[0]
                 lx_max[ind] = np.max(x) if lxmap is None else lxmap[1]
-                
+
             # Fit line if too few points relative to polynomial degree
             if len(x) <= deg+1:
-                cf[0:2,ind] = jl_poly_fit(x,y, deg=1, use_legendre=use_legendre, lxmap=lxmap)
+                cf[0:2, ind] = jl_poly_fit(x, y, deg=1, use_legendre=use_legendre, lxmap=lxmap)
             else:
-                cf[:,ind] = jl_poly_fit(x,y, deg=deg, use_legendre=use_legendre, lxmap=lxmap)
+                cf[:, ind] = jl_poly_fit(x, y, deg=deg, use_legendre=use_legendre, lxmap=lxmap)
 
             # Get reduced chi-sqr metric for poorly fit data
             if return_chired:
-                yfit = jl_poly(x, cf[:,ind])
-                deg_chi = 1 if len(x)<=deg+1 else deg
+                yfit = jl_poly(x, cf[:, ind])
+                deg_chi = 1 if len(x) <= deg+1 else deg
                 dof = y.shape[0] - deg_chi
                 chired[ind] = chisqr_red(y, yfit=yfit, dof=dof)
 
-    imarr = imarr.reshape([nz,ny,nx])
-    mask_good = mask_good.reshape([nz,ny,nx])
-    
-    cf = cf.reshape([deg+1,ny,nx])
+    imarr = imarr.reshape([nz, ny, nx])
+    mask_good = mask_good.reshape([nz, ny, nx])
+
+    cf = cf.reshape([deg+1, ny, nx])
     if return_lxmap:
-        lxmap_arr = np.array([lx_min, lx_max]).reshape([2,ny,nx])
+        lxmap_arr = np.array([lx_min, lx_max]).reshape([2, ny, nx])
         if return_chired:
-            chired = chired.reshape([ny,nx])
+            chired = chired.reshape([ny, nx])
             return cf, lxmap_arr, chired
         else:
             return cf, lxmap_arr
     else:
         if return_chired:
-            chired = chired.reshape([ny,nx])
+            chired = chired.reshape([ny, nx])
             return cf, chired
         else:
             return cf
-        
+
+
 def chisqr_red(yvals, yfit=None, err=None, dof=None,
                err_func=np.std):
-    """ Calculate reduced chi square metric
-    
+    """
+    Calculate reduced chi square metric
+
     If yfit is None, then yvals assumed to be residuals.
     In this case, `err` should be specified.
-    
+
     Parameters
     ==========
     yvals : ndarray
@@ -954,16 +1037,16 @@ def chisqr_red(yvals, yfit=None, err=None, dof=None,
     err_func : func
         Error function uses to estimate `err`.
     """
-    
+
     if (yfit is None) and (err is None):
         print("Both yfit and err cannot be set to None.")
         return
-    
+
     diff = yvals if yfit is None else yvals - yfit
-    
+
     sh_orig = diff.shape
     ndim = len(sh_orig)
-    if ndim==1:
+    if ndim == 1:
         if err is None:
             err = err_func(yvals[1:] - yvals[0:-1]) / np.sqrt(2)
         dev = diff / err
@@ -971,13 +1054,13 @@ def chisqr_red(yvals, yfit=None, err=None, dof=None,
         dof = len(chi_tot) if dof is None else dof
         chi_red = chi_tot / dof
         return chi_red
-    
+
     # Convert to 2D array
-    if ndim==3:
+    if ndim == 3:
         sh_new = [sh_orig[0], -1]
         diff = diff.reshape(sh_new)
         yvals = yvals.reshape(sh_new)
-        
+
     # Calculate errors for each element
     if err is None:
         err_arr = np.array([yvals[i+1] - yvals[i] for i in range(sh_orig[0]-1)])
@@ -988,15 +1071,17 @@ def chisqr_red(yvals, yfit=None, err=None, dof=None,
     # Get reduced chi sqr for each element
     dof = sh_orig[0] if dof is None else dof
     chi_red = np.sum((diff / err)**2, axis=0) / dof
-    
-    if ndim==3:
+
+    if ndim == 3:
         chi_red = chi_red.reshape(sh_orig[-2:])
-        
+
     return chi_red
 
+
 def cube_outlier_detection(data, sigma_cut=10, nint_min=10):
-    """Get outlier pixels in a cube model (e.g., rateints or calints)
-    
+    """
+    Get outlier pixels in a cube model (e.g., rateints or calints)
+
     Parameters
     ----------
     data : ndarray
@@ -1017,14 +1102,12 @@ def cube_outlier_detection(data, sigma_cut=10, nint_min=10):
     Mask of bad pixels with same shape as input cube.
     """
 
-    from webbpsf_ext import robust
-
     # Get bad pixels
     ndim = len(data.shape)
     if ndim < 3:
         log.warning(f'Skipping rateints outlier flagging. Only {ndim} dimensions.')
         return np.zeros_like(data, dtype=bool)
-    
+
     nint = data.shape[0]
     if nint < nint_min:
         log.warning(f'Skipping rateints outlier flagging. Only {nint} INTS.')
@@ -1036,9 +1119,11 @@ def cube_outlier_detection(data, sigma_cut=10, nint_min=10):
 
     return indbad
 
-def bg_minimize(par,X,Y,bgmaskfile):
-    """Simple minimisation function for Godoy background subtraction
-    
+
+def bg_minimize(par, X, Y, bgmaskfile):
+    """
+    Simple minimisation function for Godoy background subtraction
+
     Parameters
     ----------
     par : int
@@ -1053,17 +1138,19 @@ def bg_minimize(par,X,Y,bgmaskfile):
 
     Returns
     -------
-    Sum of the squares of the residuals between images X and Y. 
+    Sum of the squares of the residuals between images X and Y.
     """
     mask = pyfits.getdata(bgmaskfile)
     indices = np.where(mask == 1)
     X0 = X[indices]
     Y0 = Y[indices]
     Z0 = X0 - Y0*par/100
-    return np.nansum(np.sqrt(Z0**2))
+    return np.sqrt(np.nansum(Z0**2))
+
 
 def interpret_dq_value(dq_value):
-    """Interpret DQ value using DQ definition
+    """
+    Interpret DQ value using DQ definition
 
     Parameters
     ----------
@@ -1076,11 +1163,10 @@ def interpret_dq_value(dq_value):
         Interpretation of DQ value.
     """
 
-    from stdatamodels.jwst.datamodels.dqflags import pixel, dqflags_to_mnemonics
-
     if dq_value == 0:
         return {'GOOD'}
     return dqflags_to_mnemonics(dq_value, pixel)
+
 
 def gaussian_kernel(sigma_x=1, sigma_y=1, theta_degrees=0, n=6):
     """
@@ -1114,9 +1200,11 @@ def gaussian_kernel(sigma_x=1, sigma_y=1, theta_degrees=0, n=6):
     kernel /= kernel.sum()
     return kernel
 
+
 def get_dqmask(dqarr, bitvalues):
-    """Get DQ mask from DQ array
-    
+    """
+    Get DQ mask from DQ array.
+
     Given some DQ array and a list of bit values, return a mask
     for the pixels that have any of the specified bit values.
 
@@ -1125,12 +1213,10 @@ def get_dqmask(dqarr, bitvalues):
     dqarr : ndarray
         DQ array. Either 2D or 3D.
     bitvalues : list
-        List of bit values to use for DQ mask. 
+        List of bit values to use for DQ mask.
         These values must be powers of 2 (e.g., 1, 2, 4, 8, 16, ...),
         representing the specific DQ bit flags.
     """
-
-    from astropy.nddata.bitmask import _is_bit_flag
 
     for v in bitvalues:
         if not _is_bit_flag(v):
@@ -1144,9 +1230,9 @@ def get_dqmask(dqarr, bitvalues):
 
     return dqmask
 
+
 def pop_pxar_kw(filepaths):
     """
-    
     Populate the PIXAR_A2 SCI header keyword which is required by pyKLIP in
     case it is not already available.
 
@@ -1155,7 +1241,7 @@ def pop_pxar_kw(filepaths):
     filepaths : list or array
         File paths of the FITS files whose headers shall be checked.
     """
-    
+
     for filepath in filepaths:
         try:
             pxar = pyfits.getheader(filepath, 'SCI')['PIXAR_A2']
@@ -1176,8 +1262,9 @@ def pop_pxar_kw(filepaths):
             hdul['SCI'].header['PIXAR_A2'] = pix_scale**2
             hdul.writeto(filepath, output_verify='fix', overwrite=True)
             hdul.close()
-    
+
     pass
+
 
 def config_stpipe_log(level='WARNING', suppress=False):
     """
@@ -1191,7 +1278,7 @@ def config_stpipe_log(level='WARNING', suppress=False):
     suppress : bool
         If True, suppresses the log output to ERROR level.
         If False, restores the default logging configuration.
-        
+
     Returns
     -------
     None.
@@ -1219,3 +1306,55 @@ def config_stpipe_log(level='WARNING', suppress=False):
     else:
         # Restore the default logging configuration.
         stpipe.log.load_configuration(stpipe.log._find_logging_config_file())
+
+
+def get_visitid(visitstr):
+    """
+    Common util function to handle several various kinds
+    of visit specifications.
+
+    Parameters
+    ----------
+    visitstr : str
+        The visit string in one of the following formats:
+        - Standard visit ID starting with "V" (e.g., "V0450331001")
+        - PPS format visit ID with colon-separated parts (e.g., "4503:31:1")
+
+    Returns
+    -------
+    str
+        The standardized visit ID starting with "V" (e.g., "V0450331001").
+    """
+    if visitstr.startswith("V"):
+        return visitstr
+    elif ':' in visitstr:
+        # Handle PPS format visit ID.
+        try:
+            parts = [int(p) for p in visitstr.split(':')]
+            if len(parts) != 3:
+                raise ValueError(f"Invalid PPS format: {visitstr}")
+            return f"V{parts[0]:05d}{parts[1]:03d}{parts[2]:03d}"
+        except ValueError as e:
+            raise ValueError(f"Invalid PPS format: {visitstr}") from e
+    else:
+        raise ValueError(f"Unrecognized visit string format: {visitstr}")
+
+
+def get_siaf(inst):
+    """
+    Simple wrapper for SIAF (Science Instrument Aperture File) load,
+    with caching for speed because it takes like 0.2 seconds
+    per instance to load this.
+
+    Parameters
+    ----------
+    inst : str
+        The name of the instrument for which to load the SIAF.
+
+    Returns
+    -------
+    pysiaf.Siaf
+        The loaded SIAF object for the specified instrument.
+    """
+    import pysiaf
+    return pysiaf.Siaf(inst)
