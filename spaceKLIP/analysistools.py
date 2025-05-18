@@ -865,6 +865,7 @@ class AnalysisTools():
                            planetfile=None,
                            klmode='max',
                            date='auto',
+                           xy_check_override=False,
                            use_fm_psf=True,
                            flip_fmpsf_xy=None,
                            highpass=False,
@@ -878,6 +879,7 @@ class AnalysisTools():
                            overwrite=True,
                            subdir='companions',
                            save_figures=True,
+                           save_individual_ecsv=True,
                            **kwargs):
         """
         Extract the best fit parameters of a number of companions from each
@@ -912,6 +914,8 @@ class AnalysisTools():
             date. If 'auto', will grab date from the FITS file header. If None,
             then the default WebbPSF OPD is used (RevAA). The default is
             'auto'.
+        xy_check_override : bool, optional
+            If True, override the x-y position check to ensure the companion falls in the FOV. The default is False.
         use_fm_psf : bool, optional
             If True, use a FM PSF generated with pyKLIP, otherwise use a more
             simple integration time-averaged model offset PSF which does not
@@ -1001,11 +1005,20 @@ class AnalysisTools():
                 resolution = 1e-6 * self.database.red[key]['CWAVEL'][j] / diam / pxsc_rad  # pix
                 if not np.isnan(self.database.obs[key]['BLURFWHM'][j]):
                     resolution = np.hypot(resolution, self.database.obs[key]['BLURFWHM'][j])
+
+                # Log the subtraction information for this concatenation for later
+                mode = self.database.red[key]['MODE'][j]
+                annuli = int(self.database.red[key]['ANNULI'][j])
+                subsections = int(self.database.red[key]['SUBSECTS'][j])
                 
                 # Find science and reference files.
                 filepaths, psflib_filepaths, maxnumbasis = get_pyklip_filepaths(self.database, key, return_maxbasis=True)
                 if 'maxnumbasis' not in kwargs_temp.keys() or kwargs_temp['maxnumbasis'] is None:
                     kwargs_temp['maxnumbasis'] = maxnumbasis
+
+                # Read in the mask file
+                maskfile = self.database.red[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
                 
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
@@ -1217,7 +1230,30 @@ class AnalysisTools():
                     guess_spec = np.array([1.])
                     guess_sep = np.sqrt(guess_dx**2 + guess_dy**2)  # pix
                     guess_pa = np.rad2deg(np.arctan2(guess_dx, guess_dy))  # deg
-                    
+
+                    # Need to check if the guesses actually fall within the data
+                    # cube. If not, then the fit will fail.
+                    if not xy_check_override==True:
+                        # Get image extent in x and y
+                        x_extent = dataset.input.shape[2]
+                        y_extent = dataset.input.shape[1]
+                        # Check if the guess is within the image extent
+                        if (guess_dx < -x_extent / 2 or
+                                guess_dx > x_extent / 2 or
+                                guess_dy < -y_extent / 2 or
+                                guess_dy > y_extent / 2):
+                            log.warning(f"Companion {k + 1} guess is outside the image extent (dx: {-guess_dx}, dy: {guess_dy}). Skipping.")
+                            continue
+                        # Get approximate integer pixel position
+                        xcen = (dataset.input.shape[2] - 1) / 2.0
+                        ycen = (dataset.input.shape[1] - 1) / 2.0
+                        xpos = int(xcen - guess_dx)  # Minus because RA direction
+                        ypos = int(ycen + guess_dy)
+                        # Use the mask file to determine if we're in a good region.
+                        if np.isnan(mask[ypos, xpos]):
+                            log.warning(f"Companion {k + 1} guess is outside the image extent (dx: {-guess_dx}, dy: {guess_dy}). Skipping.")
+                            continue
+
                     # The initial guesses are made in RA/Dec space, but the
                     # model PSFs are defined by the offset between the
                     # coronagraphic mask center and the companion. Hence, we
@@ -1349,9 +1385,6 @@ class AnalysisTools():
                     # Compute the FM dataset if it does not exist yet, or if
                     # overwrite is True.
                     # Compute the FM dataset.
-                    mode = self.database.red[key]['MODE'][j]
-                    annuli = int(self.database.red[key]['ANNULI'][j])
-                    subsections = int(self.database.red[key]['SUBSECTS'][j])
                     fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fmpsf-KLmodes-all.fits')
                     klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-klipped-KLmodes-all.fits')
                     if overwrite or (not os.path.exists(fmdataset) or not os.path.exists(klipdataset)):
@@ -1912,9 +1945,6 @@ class AnalysisTools():
                             self.database.obs = temp
                         
                         # Reduce companion-subtracted data.
-                        mode = self.database.red[key]['MODE'][j]
-                        annuli = self.database.red[key]['ANNULI'][j]
-                        subsections = self.database.red[key]['SUBSECTS'][j]
                         parallelized.klip_dataset(dataset=dataset_orig,
                                                   mode=mode,
                                                   outputdir=output_dir_fm,
@@ -1940,12 +1970,19 @@ class AnalysisTools():
                     if subtract:
                         dataset = dataset_orig
 
+                    # Save individual file if necessary
+                    if save_individual_ecsv:
+                        ind_tab = tab[-1:]
+                        output_ind_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS'
+                                                            + str(subsections) + '_' + key + '-results.ecsv')
+                        ind_tab.write(output_ind_ecsv_path, format='ascii.ecsv', overwrite=True)
+
                 # Update source database.
                 self.database.update_src(key, j, tab)
 
                 # Save the results table.
-                output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                    subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                output_ecsv_path = os.path.join(output_dir_kl, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                    subsections) + '_' + key + '-results.ecsv')
                 tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
                 print(f'Table saved to {output_ecsv_path}')
         pass
