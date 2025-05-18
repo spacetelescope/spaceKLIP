@@ -3287,14 +3287,15 @@ class ImageTools():
                 shifts = np.array(shifts)
                 shifts_all += [shifts]
                 maskoffs_temp = np.array(maskoffs_temp)
+                maskshifts_temp = np.median(mask_shifts, axis=0)
                 if center_shift is not None:
                     center_shift += shifts
                 else:
                     center_shift = shifts
                 if center_mask is not None:
-                    center_mask += mask_shifts
+                    center_mask += maskshifts_temp
                 else:
-                    center_mask = mask_shifts
+                    center_mask = maskshifts_temp
                 if maskoffs is not None:
                     maskoffs += maskoffs_temp
                 else:
@@ -4221,12 +4222,13 @@ class ImageTools():
                     else:
                         shifts += [np.array([0, 0, 0])]
 
-                    # Do the same for the mask
-                    if mask is not None:
-                        if align_to_file is not None or j != ww_sci[0]:
-                            mask_shifts += [np.array([pp[0], pp[1]])]
-                        else:
-                            mask_shifts += [np.array([0, 0])]
+                # Do the same for the mask
+                if mask is not None:
+                    if align_to_file is not None or j != ww_sci[0]:
+                        temp = np.median(shifts, axis=0)
+                        mask_shifts = np.array([temp[1], temp[0]])
+                    else:
+                        mask_shifts = np.array([0, 0])
 
                 shifts = np.array(shifts)
                 mask_shifts = np.array(mask_shifts)
@@ -4474,8 +4476,7 @@ class ImageTools():
                         erro = np.array(erro_shift)
 
                         if mask is not None:
-                            mask_shift = (center_shift_mask[j][0] if not isinstance(center_shift_mask[j], types.BuiltinFunctionType) else 0.0) + \
-                                         (align_shift_mask[j] if not isinstance(align_shift_mask[j], types.BuiltinFunctionType) else 0.0)
+                            mask_shift = center_shift_mask[j] + align_shift_mask[j]
                             mask = ut.imshift(mask, [mask_shift[0], mask_shift[1]], method='spline',
                                               pad_amount=shiftpad, kwargs={'mode':'constant'})
 
@@ -4508,8 +4509,7 @@ class ImageTools():
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
                         if mask is not None:
-                            mask_shift = (center_shift_mask[j][0] if not isinstance(center_shift_mask[j], types.BuiltinFunctionType) else 0.0) + \
-                                         (align_shift_mask[j] if not isinstance(align_shift_mask[j], types.BuiltinFunctionType) else 0.0)
+                            mask_shift = center_shift_mask[j] + align_shift_mask[j]
                             mask = ut.imshift(mask, [mask_shift[0], mask_shift[1]], method='spline',
                                               pad_amount=shiftpad, kwargs={'mode':'constant'})
 
