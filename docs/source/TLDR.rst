@@ -2,7 +2,6 @@ TL;DR Setup Guide
 -----------------
 .. code-block:: bash
 
-    $ git clone https://github.com/kammerje/spaceKLIP.git
+    $ git clone https://github.com/spacetelescope/spaceKLIP.git
     $ pip install -r requirements.txt
     $ pip install -e .
-    $ python make_psfmasks.py
