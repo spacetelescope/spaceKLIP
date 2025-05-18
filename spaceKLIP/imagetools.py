@@ -238,10 +238,12 @@ class ImageTools():
                         align_shift = np.delete(align_shift, index_temp, axis=0)
                     if center_shift is not None:
                         center_shift = np.delete(center_shift, index_temp, axis=0)
-                    if align_mask is not None:
-                        align_mask = np.delete(align_mask, index_temp, axis=0)
-                    if center_mask is not None:
-                        center_mask = np.delete(center_mask, index_temp, axis=0)
+                    # There is only a single value for align_mask and center_mask, so we won't reshape
+                    # This should be improved in the future once the PSF mask is properly handled at the integration level.
+                    # if align_mask is not None:
+                    #     align_mask = np.delete(align_mask, index_temp, axis=0)
+                    # if center_mask is not None:
+                    #     center_mask = np.delete(center_mask, index_temp, axis=0)
                     if maskoffs is not None:
                         maskoffs = np.delete(maskoffs, index_temp, axis=0)
                     nints = data.shape[0]
@@ -527,10 +529,12 @@ class ImageTools():
                         align_shift = np.mean(align_shift[:nframes * ncoadds].reshape((nframes, ncoadds, align_shift.shape[-1])), axis=0)
                     if center_shift is not None:
                         center_shift = np.mean(center_shift[:nframes * ncoadds].reshape((nframes, ncoadds, center_shift.shape[-1])), axis=0)
-                    if align_mask is not None:
-                        align_mask = np.mean(align_mask[:nframes * ncoadds].reshape((nframes, ncoadds, align_mask.shape[-1])), axis=0)
-                    if center_mask is not None:
-                        center_mask = np.mean(center_mask[:nframes * ncoadds].reshape((nframes, ncoadds, center_mask.shape[-1])), axis=0)
+                    # There is only a single value for align_mask and center_mask, so we won't reshape
+                    # This should be improved in the future once the PSF mask is properly handled at the integration level.
+                    # if align_mask is not None:
+                    #     align_mask = np.mean(align_mask[:nframes * ncoadds].reshape((nframes, ncoadds, align_mask.shape[-1])), axis=0)
+                    # if center_mask is not None:
+                    #     center_mask = np.mean(center_mask[:nframes * ncoadds].reshape((nframes, ncoadds, center_mask.shape[-1])), axis=0)
                     if maskoffs is not None:
                         maskoffs = np.mean(maskoffs[:nframes * ncoadds].reshape((nframes, ncoadds, maskoffs.shape[-1])), axis=0)
                     nints = data.shape[0]
