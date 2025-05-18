@@ -511,8 +511,10 @@ def crop_image(image,
 
 def imshift(image,
             shift,
-            pad=False,
-            cval=0.,
+            pad=True,
+            pad_amount=5,
+            nan_reflected=True,
+            crop_after_pad=False,
             method='fourier',
             kwargs={}):
     """
@@ -527,6 +529,12 @@ def imshift(image,
     pad : bool, optional
         Pad the image before shifting it? Otherwise, it will wrap around
         the edges. The default is True.
+    pad_amount : int, optional
+        Extra padding to be applied to the image. The default is 5.
+    nan_reflected : bool, optional
+        If True, the pixels that are reflected in the padding will be set to NaN after shifting.
+    crop_after_pad : bool, optional
+        Crop the image after padding it? The default is False.
     cval : float, optional
         Fill value for the padded pixels. The default is 0.
     method : 'fourier' or 'spline' (not recommended), optional
@@ -542,13 +550,8 @@ def imshift(image,
     """
 
     if pad:
-
-        # Pad image.
-        sy, sx = image.shape
-        xshift, yshift = shift
-        padx = np.abs(int(xshift)) + 5
-        pady = np.abs(int(yshift)) + 5
-        impad = np.pad(image, ((pady, pady), (padx, padx)), mode='constant', constant_values=cval)
+        # Apply padding with a reflection
+        impad = np.pad(image, pad_amount, mode="reflect")
 
         # Shift image.
         if method == 'fourier':
@@ -558,8 +561,22 @@ def imshift(image,
         else:
             raise UserWarning('Image shift method "' + method + '" is not known')
 
-        # Crop image to original size.
-        return imsft[pady:pady + sy, padx:padx + sx]
+        if nan_reflected:
+            # Create a mask to keep track of which pixels are reflected
+            mask = np.pad(np.zeros_like(image, dtype=int), pad_amount, mode="constant", constant_values=1)
+
+            # Shift mask and assume pixels influenced by reflected pixels are != 0
+            masksft = spline_shift(mask, shift[::-1], order=1, cval=1)
+            masksft = np.array([[1 if x!=0 else 0 for x in y] for y in masksft])
+
+            # Replace reflected pixels with NaNs
+            imsft = np.ma.masked_array(imsft, mask=masksft).filled(np.nan)
+
+        if crop_after_pad:
+            # Crop the image to the original size
+            imsft = imsft[pad_amount:-pad_amount, pad_amount:-pad_amount]
+
+        return imsft
     else:
         if method == 'fourier':
             return np.fft.ifftn(fourier_shift(np.fft.fftn(image), shift[::-1])).real
@@ -568,6 +585,14 @@ def imshift(image,
         else:
             raise UserWarning('Image shift method "' + method + '" is not known')
 
+def estimate_padding_for_shift(align_shift, center_shift):
+
+    summed_shift = np.array(align_shift) + np.array(center_shift)
+    flattened_shift = np.concatenate(summed_shift).ravel()
+    max_shift = np.max(np.abs(flattened_shift))
+    padding = int(np.ceil(max_shift))
+
+    return padding
 
 def alignlsq(shift,
              image,
@@ -603,9 +628,9 @@ def alignlsq(shift,
     """
 
     if mask is None:
-        return (ref_image - shift[2] * imshift(image, shift[:2], method=method, kwargs=kwargs)).ravel()
+        return (ref_image - shift[2] * imshift(image, shift[:2], method=method, pad=False, kwargs=kwargs)).ravel()
     else:
-        return ((ref_image - shift[2] * imshift(image, shift[:2], method=method, kwargs=kwargs)) * mask).ravel()
+        return ((ref_image - shift[2] * imshift(image, shift[:2], method=method, pad=False, kwargs=kwargs)) * mask).ravel()
 
 
 def recenterlsq(shift,
@@ -633,7 +658,7 @@ def recenterlsq(shift,
         Inverse of the PSF's peak count.
     """
 
-    return 1. / np.nanmax(imshift(image, shift, method=method, kwargs=kwargs))
+    return 1. / np.nanmax(imshift(image, shift, method=method, pad=False, kwargs=kwargs))
 
 
 def subtractlsq(shift,
@@ -867,7 +892,7 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
     return_more : bool
         If True, also return `do_svo` variable, whether SVO was used or not.
     """
-    
+
     iname_upper = instrument.upper()
 
     # Try to get filter list from SVO
@@ -1120,7 +1145,7 @@ def bg_minimize(par, X, Y, bgmaskfile):
     X0 = X[indices]
     Y0 = Y[indices]
     Z0 = X0 - Y0*par/100
-    return np.nansum(np.sqrt(Z0**2))
+    return np.sqrt(np.nansum(Z0**2))
 
 
 def interpret_dq_value(dq_value):

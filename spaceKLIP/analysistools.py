@@ -172,7 +172,7 @@ class AnalysisTools():
 
                 # Get stellar magnitudes and filter zero points.
                 mstar, fzero = get_stellar_magnitudes(starfile, spectral_type, self.database.red[key]['INSTRUME'][j], output_dir=output_dir, **kwargs)  # vegamag, Jy
-                
+
                 tp_comsubst = ut.get_tp_comsubst(self.database.red[key]['INSTRUME'][j],
                                                  self.database.red[key]['SUBARRAY'][j],
                                                  self.database.red[key]['FILTER'][j])
@@ -199,8 +199,9 @@ class AnalysisTools():
                 # star.
                 filt = self.database.red[key]['FILTER'][j]
                 offsetpsf = get_offsetpsf(self.database.obs[key])
-                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.max(offsetpsf)  # MJy
-                # Get PSF subtraction strategy used, for use in plot labels below.
+                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
+
+               # Get PSF subtraction strategy used, for use in plot labels below.
                 psfsub_strategy = f"{head_pri['MODE']} with {head_pri['ANNULI']} annuli." if head_pri['ANNULI']>1 else head_pri['MODE']
 
                 # Set the inner and outer working angle and compute the
@@ -587,7 +588,7 @@ class AnalysisTools():
                                                       output_dir=output_dir,
                                                       **kwargs)  # vegamag, Jy
                 filt = self.database.red[key]['FILTER'][j]
-                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.max(offsetpsf)  # MJy
+                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
                 fstar *= ((180./np.pi)*3600.)**2/pxsc_arcsec**2 # MJy/sr
                 # Get PSF subtraction strategy used, for use in plot labels below.
                 psfsub_strategy = f"{head_pri['MODE']} with {head_pri['ANNULI']} annuli." if head_pri['ANNULI']>1 else head_pri['MODE']
@@ -788,9 +789,6 @@ class AnalysisTools():
                     if filename is not None:
                         plt.savefig(filename,
                                     bbox_inches='tight', dpi=300)
-
-
-
 
                 # Plot measured KLIP throughputs, for all KL modes
                 fig, ax = standardize_plots_setup()
@@ -1233,7 +1231,7 @@ class AnalysisTools():
                         # Get shift between star and coronagraphic mask
                         # position. If positive, the coronagraphic mask center
                         # is to the left/bottom of the star position.
-                        _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
+                        _, _, _, _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
                         
                         # NIRCam.
                         if maskoffs is not None:

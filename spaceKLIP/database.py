@@ -259,7 +259,8 @@ class Database():
                 raise UserWarning('Data originates from unknown telescope')
             EXP_TYPE += [head.get('EXP_TYPE', 'UNKNOWN')]
             EXPSTART += [head.get('EXPSTART', np.nan)]
-            NINTS += [head.get('NINTS', data.shape[0] if data is not None and data.ndim == 3 else 1)]
+            nintegrations = head.get('NINTS', data.shape[0] if data is not None and data.ndim == 3 else 1)
+            NINTS += [nintegrations]
             EFFINTTM += [head.get('EFFINTTM', np.nan)]
             IS_PSF += [head.get('IS_PSF', 'NONE')]
             SELFREF += [head.get('SELFREF', 'NONE')]
@@ -302,10 +303,10 @@ class Database():
             STARCENY += [head.get('STARCENY', MASKCENY[-1])]
             CROP_SHIFTX += [head.get('CROP_SHIFTX', np.nan)]
             CROP_SHIFTY += [head.get('CROP_SHIFTY', np.nan)]
-            ALIGN_SHIFT += [head.get('ALIGN_SHIFT', np.zeros)]
-            CENTER_SHIFT += [head.get('CENTER_SHIFT', np.zeros)]
-            ALIGN_MASK += [head.get('ALIGN_MASK', np.zeros)]
-            CENTER_MASK += [head.get('CENTER_MASK', np.zeros)]
+            ALIGN_SHIFT += [head.get('ALIGN_SHIFT', np.zeros((nintegrations, 2)))]
+            CENTER_SHIFT += [head.get('CENTER_SHIFT', np.zeros((nintegrations, 2)))]
+            ALIGN_MASK += [head.get('ALIGN_MASK', np.zeros((1,2)))]
+            CENTER_MASK += [head.get('CENTER_MASK', np.zeros((1,2)))]
             VPARITY += [head.get('VPARITY', -1)]
             V3I_YANG += [head.get('V3I_YANG', 0.)]
             RA_REF += [head.get('RA_REF', np.nan)]
@@ -348,10 +349,10 @@ class Database():
         STARCENY = np.array(STARCENY)
         CROP_SHIFTX = np.array(CROP_SHIFTX)
         CROP_SHIFTY = np.array(CROP_SHIFTY)
-        ALIGN_SHIFT = np.array(ALIGN_SHIFT)
-        CENTER_SHIFT = np.array(CENTER_SHIFT)
-        ALIGN_MASK = np.array(ALIGN_MASK)
-        CENTER_MASK = np.array(CENTER_MASK)
+        ALIGN_SHIFT = np.array(ALIGN_SHIFT, dtype='object')
+        CENTER_SHIFT = np.array(CENTER_SHIFT, dtype='object')
+        ALIGN_MASK = np.array(ALIGN_MASK, dtype='object')
+        CENTER_MASK = np.array(CENTER_MASK, dtype='object')
         VPARITY = np.array(VPARITY)
         V3I_YANG = np.array(V3I_YANG)
         RA_REF = np.array(RA_REF)
