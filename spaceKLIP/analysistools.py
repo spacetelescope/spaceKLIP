@@ -100,6 +100,7 @@ class AnalysisTools():
                      plot_xlim=(0,10),
                      plot_ylim=None,
                      save_figures=True,
+                     klmodes_sel = None,
                      **kwargs):
         """
         Compute the raw contrast relative to the provided host star flux.
@@ -129,6 +130,8 @@ class AnalysisTools():
             or 'npy'.
         save_figures : bool, optional
             Save the plots in a PDF?
+        klmodes_sel: list, optional
+            selected list of klmodes to show on plots. If None use all. Default is None.
         
         Returns
         -------
@@ -383,13 +386,17 @@ class AnalysisTools():
 
                 # Plot raw contrast.
                 klmodes = self.database.red[key]['KLMODES'][j].split(',')
+                if klmodes_sel is not None:
+                    klmode_index = [klmodes.index(str(i)) for i in klmodes_sel]
+                else:
+                    klmode_index = [i for i in range(data.shape[0])]
                 fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
                 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
                 mod = len(colors)
                 with plt.style.context('spaceKLIP.sk_style'):
                     fig = plt.figure(figsize=(6.4, 4.8))
                     ax = plt.gca()
-                    for k in range(data.shape[0]):
+                    for k in klmode_index:
                         if mask is None:
                             ax.plot(seps[k], cons[k], color=colors[k % mod], label=klmodes[k] + ' KL')
                         else:
