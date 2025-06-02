@@ -2230,6 +2230,7 @@ class AnalysisTools():
                          con_filetype='npy',
                          output_filetype='npy',
                          save_figures=True,
+                         klmodes_sel=None,
                          **kwargs):
 
         """
@@ -2268,6 +2269,8 @@ class AnalysisTools():
             File type to save the mass sensitivity information to. Options are 'ecsv' or 'npy'.
         save_figures : bool, optional
             Save the plots in a PDF?
+        klmodes_sel: list, optional
+            selected list of klmodes to show on plots. If None use all. Default is None.
 
         Returns
         -------
@@ -2332,13 +2335,17 @@ class AnalysisTools():
 
                 # Plot raw contrast.
                 klmodes = self.database.red[key]['KLMODES'][0].split(',')
+                if klmodes_sel is not None:
+                    klmode_index = [klmodes.index(str(i)) for i in klmodes_sel]
+                else:
+                    klmode_index = [i for i in range(data.shape[0])]
                 fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
                 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
                 mod = len(colors)
                 with plt.style.context('spaceKLIP.sk_style'):
                     fig = plt.figure(figsize=(6.4, 4.8))
                     ax = plt.gca()
-                    for k in range(len(klmodes)):
+                    for k in klmode_index:
                         ax.plot(sep_list[k], mass_sensitivity_curves[k], color=colors[k % mod], label=klmodes[k] + ' KL')
 
                     ax.set_yscale('log')
