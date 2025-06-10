@@ -172,7 +172,7 @@ class AnalysisTools():
 
                 # Get stellar magnitudes and filter zero points.
                 mstar, fzero = get_stellar_magnitudes(starfile, spectral_type, self.database.red[key]['INSTRUME'][j], output_dir=output_dir, **kwargs)  # vegamag, Jy
-                
+
                 tp_comsubst = ut.get_tp_comsubst(self.database.red[key]['INSTRUME'][j],
                                                  self.database.red[key]['SUBARRAY'][j],
                                                  self.database.red[key]['FILTER'][j])
@@ -199,8 +199,9 @@ class AnalysisTools():
                 # star.
                 filt = self.database.red[key]['FILTER'][j]
                 offsetpsf = get_offsetpsf(self.database.obs[key])
-                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.max(offsetpsf)  # MJy
-                # Get PSF subtraction strategy used, for use in plot labels below.
+                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
+
+               # Get PSF subtraction strategy used, for use in plot labels below.
                 psfsub_strategy = f"{head_pri['MODE']} with {head_pri['ANNULI']} annuli." if head_pri['ANNULI']>1 else head_pri['MODE']
 
                 # Set the inner and outer working angle and compute the
@@ -587,7 +588,7 @@ class AnalysisTools():
                                                       output_dir=output_dir,
                                                       **kwargs)  # vegamag, Jy
                 filt = self.database.red[key]['FILTER'][j]
-                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.max(offsetpsf)  # MJy
+                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
                 fstar *= ((180./np.pi)*3600.)**2/pxsc_arcsec**2 # MJy/sr
                 # Get PSF subtraction strategy used, for use in plot labels below.
                 psfsub_strategy = f"{head_pri['MODE']} with {head_pri['ANNULI']} annuli." if head_pri['ANNULI']>1 else head_pri['MODE']
@@ -789,9 +790,6 @@ class AnalysisTools():
                         plt.savefig(filename,
                                     bbox_inches='tight', dpi=300)
 
-
-
-
                 # Plot measured KLIP throughputs, for all KL modes
                 fig, ax = standardize_plots_setup()
 
@@ -868,6 +866,7 @@ class AnalysisTools():
                            klmode='max',
                            date='auto',
                            use_fm_psf=True,
+                           flip_fmpsf_xy=None,
                            highpass=False,
                            fitmethod='mcmc',
                            minmethod=None,
@@ -917,6 +916,8 @@ class AnalysisTools():
             If True, use a FM PSF generated with pyKLIP, otherwise use a more
             simple integration time-averaged model offset PSF which does not
             incorporate any KLIP throughput losses. The default is True.
+        flip_fmpsf_xy : str, optional
+            If 'x', flip the x-axis of the FM PSF. If 'y', flip the y-axis of the FM PSF. 'xy' or 'yx' for both.
         highpass : bool or float, optional
             If float, will apply a high-pass filter to the FM PSF and KLIP
             dataset. The default is False.
@@ -1212,7 +1213,7 @@ class AnalysisTools():
                     # Offset PSF that is not affected by the coronagraphic
                     # mask, but only the Lyot stop.
                     psf_no_coronmsk = offsetpsf_func.psf_off
-                    
+
                     # Initial guesses for the fit parameters.
                     guess_dx = companions[k][0] / pxsc_arcsec  # pix
                     guess_dy = companions[k][1] / pxsc_arcsec  # pix
@@ -1237,7 +1238,7 @@ class AnalysisTools():
                         # Get shift between star and coronagraphic mask
                         # position. If positive, the coronagraphic mask center
                         # is to the left/bottom of the star position.
-                        _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
+                        _, _, _, _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
                         
                         # NIRCam.
                         if maskoffs is not None:
@@ -1276,7 +1277,7 @@ class AnalysisTools():
                                                                     do_shift=False,
                                                                     quick=True,
                                                                     addV3Yidl=False)
-                        
+
                         # Coronagraphic mask throughput is not incorporated
                         # into the flux calibration of the JWST pipeline so
                         # that the companion flux from the detector pixels will
@@ -1304,12 +1305,21 @@ class AnalysisTools():
                         
                         # Apply scale factor to incorporate the coronagraphic
                         # mask througput.
+                        # NOTE: There is no need to apply a correction for the substrate
+                        # as this is accounted for by the pipeline.
                         offsetpsf *= scale_factor
-                        
-                        # Apply scale factor to incorporate the COM substrate
-                        # transmission.
-                        # offsetpsf *= tp_comsubst
-                        
+
+                        # Flip model PSF in x or y direction if requested
+                        if flip_fmpsf_xy is not None:
+                            if flip_fmpsf_xy == 'x':
+                                offsetpsf = np.fliplr(offsetpsf)
+                            elif flip_fmpsf_xy == 'y':
+                                offsetpsf = np.flipud(offsetpsf)
+                            elif flip_fmpsf_xy == 'xy' or flip_fmpsf_xy == 'yx':
+                                offsetpsf = np.flipud(np.fliplr(offsetpsf))
+                            else:
+                                raise ValueError('flip_fmpsf_xy must be "x", "y", "xy", or "yx".')
+
                         # Blur frames with a Gaussian filter.
                         if not np.isnan(self.database.obs[key]['BLURFWHM'][ww]):
                             gauss_sigma = self.database.obs[key]['BLURFWHM'][j] / np.sqrt(8. * np.log(2.))
@@ -1742,15 +1752,18 @@ class AnalysisTools():
                             evidence_ratio = fm_evidence - null_evidence
                             
                             # Plot the pymultinest fit results.
-                            fit.fit_plots()
-                            if save_figres:
+                            H1, H0 = fit.fit_plots()
+                            if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
-                                plt.savefig(path)
+                                H1.savefig(path)
+                                path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-noise_corner_c%.0f' % (k + 1) + '.pdf')
+                                H0.savefig(path)
                             plt.show()
-                            plt.close(fig)
+                            plt.close(H1)
+                            plt.close(H0)
 
-                            fit.fm_residuals()
-                            if save_figres:
+                            fig, _ = fit.fm_residuals()
+                            if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()

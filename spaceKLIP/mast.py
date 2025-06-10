@@ -6,7 +6,8 @@ import os
 
 import numpy as np
 
-import astropy, astropy.table
+import astropy
+import astropy.table
 from astroquery.mast import Mast
 import requests
 import tqdm
