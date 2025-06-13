@@ -69,9 +69,11 @@ autodoc_mock_imports = ["webbpsf", "webbpsf_ext"]
 # nbsphinx settings
 nbsphinx_allow_errors = True
 nbsphinx_execute = 'never'
+# To get widgets to work: open notebooks in Jupyterhub, make sure save widgets is enabled, run notebooks, then save.
+nbsphinx_widgets_path = "https://unpkg.com/@jupyter-widgets/html-manager@^*/dist/embed.js"
 nbsphinx_prolog = """
 {% set docname = env.doc2path(env.docname, base=None) %}
-.. note::  `Download the full notebook for this tutorial here <https://github.com/kammerje/spaceKLIP/tree/develop/docs/source/{{ docname }}>`_
+.. note::  `Download the full notebook for this tutorial here <https://github.com/spacetelescope/spaceKLIP/tree/develop/docs/source/{{ docname }}>`_
 """
 
 # The suffix(es) of source filenames.
@@ -427,6 +429,6 @@ texinfo_documents = [
 # texinfo_no_detailmenu = False
 
 html_context = {'display_github': True,
-                'github_user': 'kammerje',
+                'github_user': 'spacetelescope',
                 'github_repo': 'spaceKLIP',
                 'github_version': 'main/docs/'}
