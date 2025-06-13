@@ -4480,7 +4480,6 @@ class ImageTools():
                         erro = np.array(erro_shift)
 
                         if mask is not None:
-                            print(center_shift_mask, align_shift_mask)
                             mask_shift = center_shift_mask[j] + align_shift_mask[j]
                             mask = ut.imshift(mask, [mask_shift[0], mask_shift[1]], method='spline',
                                               pad_amount=shiftpad, kwargs={'mode':'constant'})
