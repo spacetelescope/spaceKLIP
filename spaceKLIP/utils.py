@@ -389,7 +389,7 @@ def write_fitpsf_images(fitpsf,
     # Write FITS file.
     pri = pyfits.PrimaryHDU()
     for key in row.keys():
-        if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
+        if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST','GSCALE_ERROR', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
                    'THETA_ERROR'] and np.isnan(row[key]):
             pri.header[key] = 'NONE'
         else:
