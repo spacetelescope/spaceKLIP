@@ -1825,18 +1825,6 @@ class AnalysisTools():
                         else:
                             if split_fit:
                                 # Mocking the MCMC fit results using the initial guesses and perform only the Gaussian fit.
-                                # Since we are skipping the MCMC fit, the input cootdinates might non be as accurate as we want,
-                                # so we look for the peack in the ipotehical frame we would generate for these coordinates,
-                                # tahe the delta between the peack and the actual point where the coordinates are pointing,
-                                # and apply a correction so the frame is actually centerd on the peack.
-                                # NOTE: Be aware this approach can break if there are brighter peack in the frame then the target
-                                # (cosmic ray, multiple PSFs, speackle, etc.)
-                                recentering_frame = data_frame[int(fm_centy + guess_dy) - boxsize // 2:int(fm_centy + guess_dy) + boxsize // 2 + 1,
-                                                  int(fm_centx - guess_dx) - boxsize // 2:int(fm_centx - guess_dx) + boxsize // 2 + 1]
-                                w = np.where(recentering_frame == np.max(recentering_frame))
-                                dcx, dcy = [w[1] - boxsize // 2, w[0] - boxsize // 2]
-                                guess_sep = np.sqrt((guess_dx-dcx) ** 2 + (guess_dy+dcy) ** 2)  # pix
-                                guess_pa = np.rad2deg(np.arctan2((guess_dx-dcx), (guess_dy+dcy)))
                                 log.info('  --> Skipping  mcmc and pymultinest fit, just fitting for extended source.')
                                 # Initialize pyKLIP FMAstrometry class.
                                 fma = fitpsf.FMAstrometry(guess_sep=guess_sep,
@@ -1851,8 +1839,6 @@ class AnalysisTools():
                                                         dr=dr,
                                                         exclusion_radius=exclr)
 
-                                # w = np.where(fma.data_stamp == np.max(fma.data_stamp))
-                                # w[1], w[0]
                                 fma.fit_flux = fitpsf.ParamRange(1, [0, 0])
                                 fma.fit_x  = fitpsf.ParamRange(fma.data_stamp_x_center,[0,0])
                                 fma.fit_y  = fitpsf.ParamRange(fma.data_stamp_y_center,[0,0])
@@ -2083,7 +2069,7 @@ def loss_function(params,
     convolved_image = convolve(offset_psf*10**scale, kernel)
 
     # mse = np.nanmean((target_array - convolved_image) ** 2)
-    mse = np.nanmean((target_array - convolved_image) ** 2*(target_array))
+    mse = np.nanmean((target_array - convolved_image) ** 2 *(target_array))
     return mse
 
 def best_convfit_and_residuals(fma,
