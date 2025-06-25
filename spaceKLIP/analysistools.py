@@ -921,7 +921,9 @@ class AnalysisTools():
             If float, will apply a high-pass filter to the FM PSF and KLIP
             dataset. The default is False.
         fitmethod : 'mcmc' or 'nested', optional
-            Sampling algorithm which shall be used. The default is 'mcmc'.
+            Sampling algorithm which shall be used. If None and minmethod not None, it will mock the MCMC fit results
+            using the initial guesses and perform only the Gaussian convolution fit to estimate extension.
+            The default is 'mcmc'.
         minmethod: str, optional
             scipy.optimize.minimize minimization method which shall be used to fit for the extension of the source.
             The default is None.
@@ -1107,6 +1109,8 @@ class AnalysisTools():
                                        'TP_CORONMSK',
                                        'TP_COMSUBST',
                                        'FITSFILE',
+                                       'GSCALE',
+                                       'GSCALE_ERROR',
                                        'SIGMA_X',
                                        'SIGMA_X_ERROR',
                                        'SIGMA_Y',
@@ -1137,6 +1141,8 @@ class AnalysisTools():
                                        'float',
                                        'float',
                                        'object',
+                                       'float',
+                                       'float',
                                        'float',
                                        'float',
                                        'float',
@@ -1208,7 +1214,7 @@ class AnalysisTools():
                     # Offset PSF that is not affected by the coronagraphic
                     # mask, but only the Lyot stop.
                     psf_no_coronmsk = offsetpsf_func.psf_off
-                    
+
                     # Initial guesses for the fit parameters.
                     guess_dx = companions[k][0] / pxsc_arcsec  # pix
                     guess_dy = companions[k][1] / pxsc_arcsec  # pix
@@ -1662,6 +1668,8 @@ class AnalysisTools():
                                              scale_factor_avg,
                                              tp_comsubst,
                                              fitsfile,
+                                             result.x[3],
+                                             np.nan,
                                              result.x[0],
                                              np.nan,
                                              result.x[1],
@@ -1802,7 +1810,121 @@ class AnalysisTools():
                         
                         # Otherwise.
                         else:
-                            raise NotImplementedError()
+                            if split_fit:
+                                # Mocking the MCMC fit results using the initial guesses and perform only the Gaussian fit.
+                                # Since we are skipping the MCMC fit, the input cootdinates might non be as accurate as we want,
+                                # so we look for the peack in the ipotehical frame we would generate for these coordinates,
+                                # tahe the delta between the peack and the actual point where the coordinates are pointing,
+                                # and apply a correction so the frame is actually centerd on the peack.
+                                # NOTE: Be aware this approach can break if there are brighter peack in the frame then the target
+                                # (cosmic ray, multiple PSFs, speackle, etc.)
+                                recentering_frame = data_frame[int(fm_centy + guess_dy) - boxsize // 2:int(fm_centy + guess_dy) + boxsize // 2 + 1,
+                                                  int(fm_centx - guess_dx) - boxsize // 2:int(fm_centx - guess_dx) + boxsize // 2 + 1]
+                                w = np.where(recentering_frame == np.max(recentering_frame))
+                                dcx, dcy = [w[1] - boxsize // 2, w[0] - boxsize // 2]
+                                guess_sep = np.sqrt((guess_dx-dcx) ** 2 + (guess_dy+dcy) ** 2)  # pix
+                                guess_pa = np.rad2deg(np.arctan2((guess_dx-dcx), (guess_dy+dcy)))
+                                log.info('  --> Skipping  mcmc and pymultinest fit, just fitting for extended source.')
+                                # Initialize pyKLIP FMAstrometry class.
+                                fma = fitpsf.FMAstrometry(guess_sep=guess_sep,
+                                                          guess_pa=guess_pa,
+                                                          fitboxsize=boxsize,
+                                                          )
+                                fma.generate_fm_stamp(fm_image=fm_frame,
+                                                      fm_center=[fm_centx, fm_centy],
+                                                      padding=5)
+                                fma.generate_data_stamp(data=data_frame,
+                                                        data_center=[data_centx, data_centy],
+                                                        dr=dr,
+                                                        exclusion_radius=exclr)
+
+                                # w = np.where(fma.data_stamp == np.max(fma.data_stamp))
+                                # w[1], w[0]
+                                fma.fit_flux = fitpsf.ParamRange(1, [0, 0])
+                                fma.fit_x  = fitpsf.ParamRange(fma.data_stamp_x_center,[0,0])
+                                fma.fit_y  = fitpsf.ParamRange(fma.data_stamp_y_center,[0,0])
+                                fma.raw_RA_offset = fitpsf.ParamRange(-(fma.fit_x.bestfit - fma.data_center[0]),
+                                                                        fma.fit_x.error_2sided[::-1])
+                                fma.raw_Dec_offset = fitpsf.ParamRange(fma.fit_y.bestfit - fma.data_center[1],
+                                                                       fma.fit_y.error_2sided[::-1])
+                                fma.raw_flux = fma.fit_flux
+
+                                flux_jy = fma.fit_flux.bestfit * guess_flux
+                                flux_jy *= fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
+                                flux_jy_err = fma.fit_flux.error * guess_flux
+                                flux_jy_err *= fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
+                                flux_si = fma.fit_flux.bestfit * guess_flux
+                                flux_si *= fzero_si[filt] / 10 ** (mstar[filt] / 2.5)  # erg/cm^2/s/A
+                                flux_si *= 1e-7 * 1e4 * 1e4  # W/m^2/um
+                                flux_si_err = fma.fit_flux.error * guess_flux
+                                flux_si_err *= fzero_si[filt] / 10 ** (mstar[filt] / 2.5)  # erg/cm^2/s/A
+                                flux_si_err *= 1e-7 * 1e4 * 1e4  # W/m^2/um
+                                flux_si_alt = flux_jy * 1e-26 * 299792458. / (
+                                            1e-6 * self.database.red[key]['CWAVEL'][j]) ** 2 * 1e-6  # W/m^2/um
+                                flux_si_alt_err = flux_jy_err * 1e-26 * 299792458. / (
+                                            1e-6 * self.database.red[key]['CWAVEL'][j]) ** 2 * 1e-6  # W/m^2/um
+                                delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
+                                delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
+                                if isinstance(mstar_err, dict):
+                                    mstar_err_temp = mstar_err[filt]
+                                else:
+                                    mstar_err_temp = mstar_err
+                                appmag = mstar[filt] + delmag  # vegamag
+                                appmag_err = np.sqrt(mstar_err_temp ** 2 + delmag_err ** 2)
+                                fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                                    subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
+
+                                # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
+                                fig, result = best_convfit_and_residuals(fma,
+                                                                         minmethod=minmethod,
+                                                                         initial_params=gauss_param_guesses)
+
+                                if save_figures:
+                                    path = os.path.join(output_dir_comp,
+                                                        mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                                                            subsections) + '_' + key + '-model_conv_c%.0f' % (
+                                                                    k + 1) + '.pdf')
+                                    fig.suptitle(
+                                        mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
+                                    fig.savefig(path)
+                                plt.show()
+                                plt.close(fig)
+
+                                tab.add_row((k + 1,
+                                             fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
+                                             fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
+                                             fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
+                                             fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
+                                             flux_jy,
+                                             flux_jy_err,
+                                             flux_si,
+                                             flux_si_err,
+                                             flux_si_alt,
+                                             flux_si_alt_err,
+                                             fma.raw_flux.bestfit * guess_flux,
+                                             fma.raw_flux.error * guess_flux,
+                                             delmag,  # mag
+                                             delmag_err,  # mag
+                                             appmag,  # mag
+                                             appmag_err,  # mag
+                                             mstar[filt],  # mag
+                                             mstar_err_temp,  # mag
+                                             np.nan,
+                                             np.nan,
+                                             scale_factor_avg,
+                                             tp_comsubst,
+                                             fitsfile,
+                                             result.x[3],
+                                             np.nan,
+                                             result.x[0],
+                                             np.nan,
+                                             result.x[1],
+                                             np.nan,
+                                             result.x[2],
+                                             np.nan,
+                                             ))
+                            else:
+                                raise NotImplementedError()
 
                         # Plot estimated background level.
                         if remove_background:
@@ -1947,7 +2069,8 @@ def loss_function(params,
     kernel = gaussian_kernel(sigma_x=sigma_x, sigma_y=sigma_y, theta_degrees=theta_degrees, n=6)
     convolved_image = convolve(offset_psf*10**scale, kernel)
 
-    mse = np.nanmean((target_array - convolved_image) ** 2)
+    # mse = np.nanmean((target_array - convolved_image) ** 2)
+    mse = np.nanmean((target_array - convolved_image) ** 2*(target_array))
     return mse
 
 def best_convfit_and_residuals(fma,
