@@ -29,7 +29,7 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-
+from spaceKLIP.plotting import load_plt_style
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -148,10 +148,10 @@ def get_stellar_magnitudes(starfile,
         # Fit SED to input photometry and plot SED.
         spec.fit_SED(x0=[1.], wlim=wlim, use_err=False, verbose=False)
         if output_dir is not None:
-            with plt.style.context('spaceKLIP.sk_style'):
-                spec.plot_SED()
-                plt.savefig(os.path.join(output_dir, 'sed.pdf'))
-                plt.close()
+            load_plt_style(plot_style)
+            spec.plot_SED()
+            plt.savefig(os.path.join(output_dir, 'sed.pdf'))
+            plt.close()
         
         # Convert units to photlam.
         input_flux = u.Quantity(spec.sp_model.flux, str(spec.sp_model.fluxunits).lower())
