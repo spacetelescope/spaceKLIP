@@ -53,6 +53,7 @@ from spaceKLIP.psf import get_offsetpsf
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
+from spaceKLIP.plotting import load_plt_style
 
 # pyklip imports
 import pyklip.fakes as fakes
@@ -3453,7 +3454,7 @@ class ImageTools():
                     self.database.update_obs(key, j, fitsfile, maskfile)
                     pass
 
-    @plt.style.context('spaceKLIP.sk_style')
+
     def find_nircam_centers(self,
                             data0,
                             key,
@@ -3466,7 +3467,8 @@ class ImageTools():
                             oversample=2,
                             use_coeff=False,
                             highpass=False,
-                            save_figures=True):
+                            save_figures=True,
+                            plot_style=None):
         """
         Find the star position behind the coronagraphic mask using a WebbPSF
         model.
@@ -3604,6 +3606,9 @@ class ImageTools():
 
         # Plot data, model PSF, and scene overview.
         if output_dir is not None:
+            # Intialize the matplotlib style.
+            load_plt_style(plot_style)
+
             fig, ax = plt.subplots(1, 3, figsize=(3 * 6.4, 1 * 4.8))
             ax[0].imshow(datasub, origin='lower', cmap='Reds')
             ax[0].contourf(masksub, levels=[0.00, 0.25, 0.50, 0.75], cmap='Greys_r', vmin=0., vmax=2., alpha=0.5)
@@ -3642,7 +3647,6 @@ class ImageTools():
         # Return star position.
         return xc, yc, median_xshift, median_yshift
 
-    @plt.style.context('spaceKLIP.sk_style')
     def align_frames(self,
                      method='fourier',
                      align_algo='leastsq',
@@ -3653,7 +3657,8 @@ class ImageTools():
                      scale_prior=False,
                      kwargs={},
                      subdir='aligned',
-                     save_figures=True):
+                     save_figures=True,
+                     plot_style=None):
         """
         Align all SCI and REF frames to the first SCI frame.
 
@@ -3926,6 +3931,9 @@ class ImageTools():
                                          crpix1=crpix1, crpix2=crpix2)
 
             # Plot science frame alignment.
+            # Intialize the matplotlib style.
+            load_plt_style(plot_style)
+
             colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
             fig = plt.figure(figsize=(6.4, 4.8))
             ax = plt.gca()
@@ -4013,7 +4021,7 @@ class ImageTools():
                 plt.show()
                 plt.close(fig)
 
-    @plt.style.context('spaceKLIP.sk_style')
+
     def calculate_alignment(self,
                             method='fourier',
                             align_algo='leastsq',
@@ -4024,7 +4032,8 @@ class ImageTools():
                             scale_prior=False,
                             kwargs={},
                             subdir='aligned',
-                            save_figures=True):
+                            save_figures=True,
+                            plot_style=None):
         """
         Calculate shifts necessary to align all SCI and REF frames to the first SCI frame.
 
@@ -4295,6 +4304,9 @@ class ImageTools():
                                              align_shift=align_shift, align_mask=align_mask)
 
             # Plot science frame alignment.
+            # Intialize the matplotlib style.
+            load_plt_style(plot_style)
+
             colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
             fig = plt.figure(figsize=(6.4, 4.8))
             ax = plt.gca()
@@ -4615,7 +4627,7 @@ class ImageTools():
                                          starcenx=starcenx, starceny=starceny,
                                          crpix1=crpix1, crpix2=crpix2)
 
-    @plt.style.context('spaceKLIP.sk_style')
+
     def subtract_nircam_coron_background(self,
                                          subdir='bgsub',
                                          mask_snr_threshold=2,
@@ -4629,7 +4641,8 @@ class ImageTools():
                                          use_jbt_background=False,
                                          bgmodel_dir=None,
                                          background_sb={},
-                                         restrict_to=None):
+                                         restrict_to=None,
+                                         plot_style=None):
         """
         Fits and subtracts the astrophysical background in NIRCam coronagraphic
         data following the procedure described in Lawson et al. (2024).
@@ -4952,6 +4965,9 @@ class ImageTools():
                         hdul_model.close()
 
                 if generate_plot:
+                    # Intialize the matplotlib style.
+                    load_plt_style(plot_style)
+
                     res = med - bg
                     res_psfsub = res - psf
                     low, upp = np.nanpercentile((res_psfsub)[optmask], [q_clip, 100.-q_clip])
