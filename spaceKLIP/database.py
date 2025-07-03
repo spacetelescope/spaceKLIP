@@ -521,7 +521,7 @@ class Database():
                         tt = 'SCI_TA'
                     else:
                         tt = 'REF_TA'
-                elif 'BG' in TARGPROP[ww][j].upper() or 'BACK' in TARGPROP[ww][j].upper() or 'BACKGROUND' in TARGPROP[ww][j].upper():
+                elif any(bgid in TARGPROP[ww][j].upper() for bgid in ('BG', 'BKG', 'BACK', 'BACKGROUND')):
                     if sci:
                         tt = 'SCI_BG'
                     else:
