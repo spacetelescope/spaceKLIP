@@ -67,6 +67,9 @@ for fi, FILTER in enumerate(filters):
     adj_crpix2 = center_pix[1]-0.5-7
     model_psf = imshift(model_psf, [adj_crpix1-107, adj_crpix2-107], crop_after_pad=True)
 
+    # Remove last 5 rows, as typical data is 210x215
+    model_psf = model_psf[:-5, :]
+
     # Shifting can sometimes causes NaN's, clean them up
     model_psf[np.where(np.isnan(model_psf))] = 0
 
