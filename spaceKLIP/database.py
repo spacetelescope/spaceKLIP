@@ -628,18 +628,18 @@ class Database():
                 for j in range(len(self.obs[HASH_unique[i]])):
                     if self.obs[HASH_unique[i]]['TYPE'][j] in ['SCI_TA', 'SCI_BG']:
                         targprop = self.obs[HASH_unique[i]]['TARGPROP'][self.obs[HASH_unique[i]]['TYPE'] == 'SCI']
-                        ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
+                        ww = np.array([s == self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                         if np.sum(ww) == 0:
                             targprop = self.obs[HASH_unique[i]]['TARGPROP'][self.obs[HASH_unique[i]]['TYPE'] == 'REF']
-                            ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
+                            ww = np.array([s == self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                             if np.sum(ww) != 0:
                                 self.obs[HASH_unique[i]]['TYPE'][j] = self.obs[HASH_unique[i]]['TYPE'][j].replace('SCI', 'REF')
                     if self.obs[HASH_unique[i]]['TYPE'][j] in ['REF_TA', 'REF_BG']:
                         targprop = self.obs[HASH_unique[i]]['TARGPROP'][self.obs[HASH_unique[i]]['TYPE'] == 'REF']
-                        ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
+                        ww = np.array([s == self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                         if np.sum(ww) == 0:
                             targprop = self.obs[HASH_unique[i]]['TARGPROP'][self.obs[HASH_unique[i]]['TYPE'] == 'SCI']
-                            ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
+                            ww = np.array([s == self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                             if np.sum(ww) != 0:
                                 self.obs[HASH_unique[i]]['TYPE'][j] = self.obs[HASH_unique[i]]['TYPE'][j].replace('REF', 'SCI')
 
