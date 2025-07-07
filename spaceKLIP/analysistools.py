@@ -904,7 +904,7 @@ class AnalysisTools():
             'G2V'.
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
-            default is 'massesns'.
+            default is 'masscon'.
         contrast_subdir: str, optional
             Name of the directory where the contrast curves are stored.
             The default is 'rawcon'.
