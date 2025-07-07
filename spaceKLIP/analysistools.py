@@ -867,13 +867,13 @@ class AnalysisTools():
                                                 filename=save_string + '_calcon_vs_rawcon.pdf', plot_style=plot_style)
                 plt.close(fig)
 
-    def mass_sensitivity(self,
+    def mass_contrast(self,
                          starfile,
                          iterpolator,
                          age=24,
                          distance=50,
                          spectral_type='G2V',
-                         subdir='massesns',
+                         subdir='masscon',
                          contrast_subdir='rawcon',
                          plot_xlim=[0,5],
                          plot_ylim=[0,1],
