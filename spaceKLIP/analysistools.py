@@ -1013,7 +1013,7 @@ class AnalysisTools():
                     ax.set_title(f'Mass sesitivity in {filt}, {psfsub_strategy}')
                     plt.tight_layout()
                     if save_figures:
-                        output_file = fitsfile[:-5] + '_mass_sens.pdf'
+                        output_file = fitsfile[:-5] + '_mass_con.pdf'
                         plt.savefig(output_file)
                         log.info(f" Plot saved in {output_file}")
                     plt.show()
@@ -1033,14 +1033,14 @@ class AnalysisTools():
                     #for kw in ['TELESCOP', 'INSTRUME', 'SUBARRAY', 'FILTER', 'CORONMSK', 'EXP_TYPE', 'FITSFILE']:
                     #    results_table.meta[kw] = self.database.red[key][kw][j]
 
-                    output_fn =  fitsfile[:-5]+"_masssens.ecsv"
+                    output_fn =  fitsfile[:-5]+"_masscon.ecsv"
                     results_table.write(output_fn, overwrite=True)
                     print(f"Contrast results and plots saved to {output_fn}")
                 elif output_filetype.lower()=='npy':
                     # Save outputs as numpy .npy files
                     np.save(fitsfile[:-5] + '_seps.npy', sep_list)
-                    np.save(fitsfile[:-5] + '_masssens.npy', mass_sensitivity_curves)
-                    print(f"Contrast results and plots saved to {fitsfile[:-5] + '_seps.npy'}, {fitsfile[:-5] + '_masssens.npy'}")
+                    np.save(fitsfile[:-5] + '_masscon.npy', mass_sensitivity_curves)
+                    print(f"Contrast results and plots saved to {fitsfile[:-5] + '_seps.npy'}, {fitsfile[:-5] + '_masscon.npy'}")
                 else:
                     raise ValueError('File save format not supported, options are "npy" or "ecsv".')
 
