@@ -1016,7 +1016,8 @@ class AnalysisTools():
                         output_file = fitsfile[:-5] + '_mass_con.pdf'
                         plt.savefig(output_file)
                         log.info(f" Plot saved in {output_file}")
-                    plt.show()
+                    else:
+                        plt.show()
                     plt.close(fig)
 
                 if output_filetype.lower()=='ecsv':
