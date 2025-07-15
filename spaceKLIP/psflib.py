@@ -346,6 +346,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     short_df_simbad = scistar_simbad_table.to_pandas()
     short_df_simbad['SIMBAD_ID'] = short_simbad_list
     short_df_simbad.set_index('SIMBAD_ID',inplace=True)
+    short_df_simbad['SIMBAD_ID'] = short_simbad_list # Add SIMBAD_ID as a column in addition to the index
     # Add empty rows for stars not in SIMBAD (e.g. synthetic PSFs)
     df_simbad = pd.DataFrame(index=simbad_list, columns=short_df_simbad.columns, dtype='object')
     df_simbad.loc[short_df_simbad.index] = short_df_simbad.values
@@ -357,6 +358,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
         'KMAG_ERR': 'FLUX_ERROR_K', # 'ekmag'
         'PLX': 'PLX_VALUE', # 'plx'
         'PLX_ERR': 'PLX_ERROR', # 'eplx'
+        'SIMBAD_ID': 'SIMBAD_ID'
         }
     for col,simbad_col in simbad_cols.items():
         df_simbad[col] = list(df_simbad[simbad_col])
@@ -483,15 +485,15 @@ def get_sciref_files(sci_target, refdb, idir=None,
     # Locate input target 2MASS ID 
     # (input name could be in index, TARGPROP, or SIMBAD_ID column)
     if sci_target in refdb['SIMBAD_ID'].to_list():
-        targ_2mass = sci_target
+        targname = sci_target
 
     elif sci_target in refdb.index.to_list():
-        targ_2mass = refdb.loc[sci_target,'SIMBAD_ID'].to_list()[0]
+        targname = refdb.loc[sci_target,'SIMBAD_ID'].to_list()[0]
         
     elif sci_target in refdb['TARGPROP'].to_list():
         refdb_temp = refdb.reset_index()
         refdb_temp.set_index('TARGPROP',inplace=True)
-        targ_2mass = refdb_temp.loc[sci_target,'SIMBAD_ID'].to_list()[0]
+        targname = refdb_temp.loc[sci_target,'SIMBAD_ID'].to_list()[0]
     
     else:
         log.error(f'Science target {sci_target} not found in reference database.')
@@ -501,11 +503,11 @@ def get_sciref_files(sci_target, refdb, idir=None,
     refdb_temp.set_index('FILENAME',inplace=True)
 
     # Collect all the science files
-    sci_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] == targ_2mass].to_list()
+    sci_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] == targname].to_list()
     first_scifile = sci_fnames[0]
 
     # Start list of reference files
-    ref_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] != targ_2mass].to_list()
+    ref_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] != targname].to_list()
 
     # Collect the reference files
     if spt_tolerance != None:
