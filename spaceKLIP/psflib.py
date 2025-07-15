@@ -113,7 +113,7 @@ def decode_simbad_sptype(input_sptypes):
         if not isinstance(simbad_spectype,str):
             warnings.warn('Spectral type decoder encountered a non-string spectral type. Skipping.')
             sp_classes.append('')
-            sp_subclasses.append('')
+            sp_subclasses.append(np.nan)
             sp_lclasses.append('')
             continue
 
@@ -121,7 +121,7 @@ def decode_simbad_sptype(input_sptypes):
         
         if m is None:
             sp_classes.append('')
-            sp_subclasses.append('')
+            sp_subclasses.append(np.nan)
             sp_lclasses.append('')
         else:
             res = m.group(1,2,3,4,5)
@@ -513,6 +513,7 @@ def get_sciref_files(sci_target, refdb, idir=None,
     if spt_tolerance != None:
 
         # Consider handling float subclasses (e.g. M4.5) better. Take floor for now.
+        refdb_temp['SP_SUBCLASS'] = refdb_temp['SP_SUBCLASS'].astype(float)
         refdb_temp['SP_SUBCLASS'] = np.floor(refdb_temp['SP_SUBCLASS'])
 
         targ_sp_class = refdb_temp.loc[first_scifile,'SP_CLASS']
