@@ -202,6 +202,83 @@ def update_db_sptypes(refdb):
     return refdb_copy
 
 
+def spectype2specnum(spclasses,spsubclasses,splclasses=None):
+
+    spclassnums = []
+    for spclass in spclasses:
+        try: spclassnums.append(sp_class_letters.index(spclass) * 10)
+        except ValueError: spclassnums.append(np.nan)
+
+    spclassnums = np.array(spclassnums).astype(float)
+    spsubclasses = np.array(spsubclasses).astype(float)
+
+    numerical_spclasses = spclassnums + spsubclasses
+
+    return numerical_spclasses
+
+
+def specnum2spectype(specnums):
+    if isinstance(specnums,float):
+        specnums = [specnums]
+
+    specnums = np.array(specnums)
+
+    spclassnums = (specnums // 10).astype(int)
+    spsubclasses = specnums % 10
+
+    spclasses = []
+    for spclassnum in spclassnums:
+        spclasses.append(sp_class_letters[spclassnum])
+
+    return spclasses,spsubclasses
+
+import pandas as pd
+from scipy.interpolate import LinearNDInterpolator as Interpolator
+
+def get_sensitivity_loss_interpolator(filt,mask):
+
+    # Read in correct grid for sensitivities
+
+    # TODO: Update with correct csv for each filt/mask combo
+    # df = pd.read_csv(f'sensitivity_loss_{filt}_{mask}.csv',
+    #                             index_col='SCI_SPTYPE'
+    #                             )
+    df = pd.read_csv(f'sensitivity_loss_F200W_M210R.csv',
+                                index_col='SCI_SPTYPE'
+                                )
+    
+    # Convert the reference and science spectral types to numerical values
+    ref_spectypes = list(df.columns)
+    sci_spectypes = list(df.index)
+    ref_specnums = spectype2specnum(*decode_simbad_sptype(ref_spectypes))
+    sci_specnums = spectype2specnum(*decode_simbad_sptype(sci_spectypes))
+    
+    # Flatten the values in the table so we can interpolate
+    values = np.array(df).flatten()
+    y,x = np.meshgrid(sci_specnums,ref_specnums)
+    points = list(zip(y.flatten(),x.flatten()))
+    interpolator = Interpolator(points=points,
+                                values=values
+                                )
+    
+    return interpolator
+
+def get_sensitivity_loss(df,sci_spectype,filt,mask):
+    
+    df_temp = df.copy()
+    interp = get_sensitivity_loss_interpolator(filt,mask)
+ 
+    ref_spectypes = df_temp['SPTYPE']
+    sci_spectypes = [sci_spectype] * len(ref_spectypes)
+
+    df_temp['SENSITIVITY_LOSS'] = interp(spectype2specnum(*decode_simbad_sptype(sci_spectypes)),
+                                         spectype2specnum(*decode_simbad_sptype(ref_spectypes)))
+
+    df_temp.loc[df_temp['FILTER']!=filt,'SENSITIVITY_LOSS'] = np.nan
+    df_temp.loc[df_temp['CORONMSK']!=mask,'SENSITIVITY_LOSS'] = np.nan
+
+    return df_temp['SENSITIVITY_LOSS']
+
 def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
                 prefer_SIMBAD=True):
     """
@@ -286,6 +363,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
         'MODULE',
         'CHANNEL',
         'FILTER',
+        'CORONMSK',
         'PUPIL',
     ]
 
@@ -446,6 +524,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
 
 def get_sciref_files(sci_target, refdb, idir=None, 
                      spt_tolerance=None, 
+                     spt_loss_tolerance=0.5,
                      filters=None, 
                      exclude_disks=False):
     """Construct a list of science files and reference files to input to a PSF subtraction routine.
@@ -463,8 +542,13 @@ def get_sciref_files(sci_target, refdb, idir=None,
             None (default): use all spectral types.
             'exact' : use only refs with the exact same spectral type.
             'class' : use only references with the same spectral class letter.
-            'subclass' : use only references with the same spectral class letter and subclass number. (ignores luminosity class)
+            'subclass' : use only references with the same spectral class letter and subclass number. 
+                (ignores luminosity class)
+            'loss' : use sensitivity loss grids with a threshold equal to the spt_loss_tolerance
             int : use only refs within +- N spectral subclasses, e.g. M3-5 for an M4 science target if spt_tolerance = 1.
+        spt_loss_tolerance (float):
+            Threshold for sensitivity loss when referencing the sensitivity loss grids (only used if spt_tolerance='loss', 
+            defaults to 0.5)
         filters (str or list, optional): 
             None (default) : include all filters.
             'F444W' or other filter name: include only that filter.
@@ -506,70 +590,12 @@ def get_sciref_files(sci_target, refdb, idir=None,
     sci_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] == targname].to_list()
     first_scifile = sci_fnames[0]
 
+    ### Collect the reference files
+
     # Start list of reference files
     ref_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] != targname].to_list()
 
-    # Collect the reference files
-    if spt_tolerance != None:
-
-        # Consider handling float subclasses (e.g. M4.5) better. Take floor for now.
-        refdb_temp['SP_SUBCLASS'] = refdb_temp['SP_SUBCLASS'].astype(float)
-        refdb_temp['SP_SUBCLASS'] = np.floor(refdb_temp['SP_SUBCLASS'])
-
-        targ_sp_class = refdb_temp.loc[first_scifile,'SP_CLASS']
-        targ_sp_subclass = refdb_temp.loc[first_scifile,'SP_SUBCLASS']
-        targ_sp_lclass = refdb_temp.loc[first_scifile,'SP_LCLASS']
-        
-        if isinstance(spt_tolerance,str):
-            if spt_tolerance.lower() == 'exact':
-
-                spt_fnames = refdb_temp.index[(refdb_temp['SP_CLASS'] == targ_sp_class) & 
-                                                (refdb_temp['SP_SUBCLASS'] == targ_sp_subclass) & 
-                                                (refdb_temp['SP_LCLASS'] == targ_sp_lclass)
-                                                ].to_list()
-                
-            elif spt_tolerance.lower() == 'class':
-
-                spt_fnames = refdb_temp.index[(refdb_temp['SP_CLASS'] == targ_sp_class)
-                                                ].to_list()
-
-            elif spt_tolerance.lower() == 'subclass':
-
-                spt_fnames = refdb_temp.index[(refdb_temp['SP_CLASS'] == targ_sp_class) & 
-                                                (refdb_temp['SP_SUBCLASS'] == targ_sp_subclass)
-                                                ].to_list()
-            
-            else:
-                raise Exception(f'spt_tolerance {spt_tolerance} not configured.')
-        
-        else:
-
-            assert isinstance(spt_tolerance,int)
-
-            spt_fnames = []
-            
-            for i in range(-spt_tolerance,spt_tolerance+1):
-
-                spt_tup = (targ_sp_class,targ_sp_subclass+i)
-            
-                # Carry over spectral classes and subclasses correctly
-                spt_tup = adjust_spttype(spt_tup)
-            
-                spt_fnames.extend(refdb_temp.index[(refdb_temp['SP_CLASS'] == spt_tup[0]) & 
-                                                   (refdb_temp['SP_SUBCLASS'] == spt_tup[1])
-                                                  ].to_list())
-            
-        if len(spt_fnames) == 0:
-            raise Warning(f'No observations found with specified spectral type filter.')
-        
-        sci_fnames = list(set(sci_fnames).intersection(spt_fnames))
-        ref_fnames = list(set(ref_fnames).intersection(spt_fnames))
-
-    # Remove observations with disks flagged
-    if exclude_disks:
-        disk_fnames = refdb_temp.index[refdb_temp['HAS_DISK'] == True].to_list()
-        ref_fnames = list(set(ref_fnames) - set(disk_fnames))
-    
+    ## Sort out filters
     if filters != None:
         if isinstance('filter',str):
             filters = [filters]
@@ -582,6 +608,69 @@ def get_sciref_files(sci_target, refdb, idir=None,
         sci_fnames = list(set(sci_fnames).intersection(filter_fnames))
         ref_fnames = list(set(ref_fnames).intersection(filter_fnames))
 
+    # Collect (filter, mask) pairs
+    filters = refdb_temp.loc[sci_fnames,'FILTER']
+    masks = refdb_temp.loc[sci_fnames,'CORONMSK']
+    filter_mask_pairs = list(zip(filters,masks))
+
+    ## Sort out spectral types
+
+    # Calculate numerical spectral types
+    refdb_temp['SP_NUM'] = spectype2specnum(refdb_temp['SP_CLASS'],refdb_temp['SP_SUBCLASS'],refdb_temp['SP_LCLASS'])
+    targ_sp_num = refdb_temp.loc[first_scifile,'SP_NUM']
+        
+    if spt_tolerance is None:
+        pass   
+
+    elif isinstance(spt_tolerance,float) or isinstance(spt_tolerance,int):
+        
+        spt_fnames = refdb_temp.index[(refdb_temp['SP_NUM'] >= targ_sp_num - spt_tolerance &
+                                        refdb_temp['SP_NUM'] <= targ_sp_num + spt_tolerance)
+                                        ].to_list()
+    
+    elif isinstance(spt_tolerance,str):
+        if spt_tolerance.lower() == 'exact':
+
+            spt_fnames = refdb_temp.index[(refdb_temp['SP_NUM'] == targ_sp_num)
+                                        ].to_list()
+            
+        elif spt_tolerance.lower() == 'class':
+            targ_sp_class = refdb_temp.loc[first_scifile,'SP_CLASS']
+            spt_fnames = refdb_temp.index[(refdb_temp['SP_CLASS'] == targ_sp_class)
+                                            ].to_list()
+        
+        elif spt_tolerance.lower() == 'loss':
+
+            # Need to treat each filter/mask combo separately
+
+            spt_fnames = []
+            for filt, mask in filter_mask_pairs:
+                sensitivity_loss = get_sensitivity_loss(refdb_temp,
+                                                        refdb_temp.loc[first_scifile,'SPTYPE'],
+                                                        filt,mask)
+                spt_fnames.extend(refdb_temp.index[(sensitivity_loss < spt_loss_tolerance)
+                                                    ].to_list())
+                print(refdb_temp.loc[first_scifile,'SPTYPE'],mask,filt)
+                print(refdb_temp.loc[(sensitivity_loss < spt_loss_tolerance),'SPTYPE'
+                                                    ].to_list())
+                
+        else:
+            raise Exception(f'spt_tolerance {spt_tolerance} not configured.')
+                
+    else:
+        raise Exception(f'spt_tolerance is not string, float, or int.')
+    
+    if len(spt_fnames) == 0:
+        raise Warning(f'No observations found with specified spectral type filter.')
+    
+    sci_fnames = list(set(sci_fnames).intersection(spt_fnames))
+    ref_fnames = list(set(ref_fnames).intersection(spt_fnames))
+
+    # Remove observations with disks flagged
+    if exclude_disks:
+        disk_fnames = refdb_temp.index[refdb_temp['HAS_DISK'] == True].to_list()
+        ref_fnames = list(set(ref_fnames) - set(disk_fnames))
+    
     # Make sure no observations are in both sci_fnames and ref_fnames
     if len(set(sci_fnames).intersection(ref_fnames)) > 0:
         raise Exception("One or more filenames exists in both the science and reference file list. Something is wrong.")
