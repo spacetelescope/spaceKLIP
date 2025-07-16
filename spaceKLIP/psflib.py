@@ -29,7 +29,11 @@ import re
 import mocapy
 import pandas as pd
 from astropy.io import fits
+from astropy import units as u
 from spaceKLIP import mast
+import astropy
+import stpsf
+from tqdm import tqdm
 
 from astroquery.simbad import Simbad
 import numpy as np
@@ -273,6 +277,7 @@ def get_sensitivity_loss_interpolator(filt,mask,return_df=False):
     else:
         return interpolator
 
+
 def get_sensitivity_loss(df,sci_spectype,filt,mask):
     
     df_temp = df.copy()
@@ -297,6 +302,90 @@ def get_sensitivity_loss(df,sci_spectype,filt,mask):
     
     return df_temp['SENSITIVITY_LOSS']
          
+
+def filter_opdtable_for_daterange(start_date, end_date, opdtable):
+    """Filter existing opdtable for a given time range
+    This includes the last measurement in the prior time range too (if applicable), so we can compute a delta
+    to the first one
+    """
+    # Start a little early, such that we are going to have at least 1 WFS before the start date
+    pre_start_date = astropy.time.Time(start_date) - astropy.time.TimeDelta(4 * u.day)
+    opdtable = stpsf.mast_wss.filter_opd_table(opdtable, start_time=pre_start_date, end_time=end_date)
+    if len(opdtable) == 0:
+        raise ValueError('The opdtable is empty for this date range.')
+
+    # Trim the table to have 1 and only 1 precursor measurement -
+    # we'll use this to compute the drift for the first WFS in the time period
+    is_pre = [astropy.time.Time(row['date']) < start_date for row in opdtable]
+    opdtable['is_pre'] = is_pre
+    opdtable = opdtable[np.sum(is_pre) - 1:]
+
+    return opdtable
+
+
+def get_opdtable_for_daterange(start_date, end_date):
+    """Return table of OPD measurements for date range.
+
+    This includes the last measurement preceding this date range, too, so we
+    can compute the first delta at the start of this range.
+    """
+    # Retrieve full OPD table, then trim to the selected time period
+    opdtable0 = stpsf.mast_wss.retrieve_mast_opd_table()
+    opdtable0 = stpsf.mast_wss.deduplicate_opd_table(opdtable0)
+
+    opdtable = filter_opdtable_for_daterange(start_date, end_date, opdtable0)
+    return opdtable
+
+
+def get_opd_map(date_obs,time_obs,duration,verbose=False):
+
+    time = date_obs+'T'+time_obs
+
+    startT = astropy.time.Time(astropy.time.Time(time).mjd,format='mjd') - 1*u.day
+    endT = astropy.time.Time(startT.mjd + duration/60/60/24,format='mjd') + 1*u.day
+    opdtable = get_opdtable_for_daterange(startT, endT)
+    index = np.argmin((opdtable['date_obs_mjd']-(astropy.time.Time(time).mjd + duration/60/60/24/2))**2)
+    opd_fn = opdtable['fileName'][index]
+
+    try:
+        opd, opd_hdul = stpsf.trending._read_opd(opd_fn)
+    except FileNotFoundError:
+        stpsf.mast_wss.mast_retrieve_opd(opd_fn, verbose=verbose)
+        opd, opd_hdul = stpsf.trending._read_opd(opd_fn)
+
+    if opd.shape==(128,128):
+        opd = opd.repeat(2,axis=1).repeat(2,axis=0)
+
+    return opd
+
+
+def compute_rms_OPD(ref_db,idir=''):
+
+    datesobs = np.array(ref_db['DATE-OBS'])
+    times_obs = np.array(ref_db['TIME-OBS'])
+    durations = np.array(ref_db['DURATION'])
+
+    opd_maps = []
+    for i in tqdm(range(len(ref_db)),leave=True):
+        opd_i = get_opd_map(datesobs[i],times_obs[i],durations[i])
+        opd_maps+=[opd_i]
+
+    opd_maps = np.array(opd_maps)
+    mask = opd_maps.sum(axis=0) != 0
+    rms_grid = []
+
+    for i in range(len(ref_db)):
+        delta_opds = opd_maps - opd_maps[i]
+        delta_rmses = [stpsf.utils.rms(d, mask=mask) * 1000 for d in delta_opds]
+        rms_grid+=[delta_rmses]
+
+    fnames = list(ref_db.FILENAME)
+
+    rms_df = pd.DataFrame(rms_grid,columns=fnames,index=fnames)
+    rms_df.to_csv(os.path.join(idir,'delta_opds.csv'))
+
+    return rms_df
+
 
 def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
                 prefer_SIMBAD=True):
@@ -537,7 +626,12 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     # Save dataframe
     df_out.to_csv(outpath)
     log.info(f'Database saved to {outpath}')
-    
+
+    # Compute delta OPD table
+    print('Computing delta OPDs...')
+    compute_rms_OPD(df_out,idir=idir)
+    print('Done!')
+
     return df_out
 
 
