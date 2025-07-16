@@ -274,7 +274,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         # Run step. Don't save results yet.
         step_save_orig = step_obj.save_results
         step_obj.save_results = False
-        res = step_obj(input)
+        res = step_obj.call(input)
         step_obj.save_results = step_save_orig
         
         # Check if group scale correction or gain scale correction were skipped.
