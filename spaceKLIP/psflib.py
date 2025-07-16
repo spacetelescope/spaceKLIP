@@ -633,9 +633,8 @@ def get_sciref_files(sci_target, refdb, idir=None,
         targ_sp_num = refdb_temp.loc[first_scifile,'SP_NUM']
 
         if isinstance(spt_tolerance,float) or isinstance(spt_tolerance,int):
-            
-            spt_fnames = refdb_temp.index[(refdb_temp['SP_NUM'] >= targ_sp_num - spt_tolerance &
-                                            refdb_temp['SP_NUM'] <= targ_sp_num + spt_tolerance)
+            spt_fnames = refdb_temp.index[(refdb_temp['SP_NUM'] >= (targ_sp_num - spt_tolerance)) &
+                                            (refdb_temp['SP_NUM'] <= (targ_sp_num + spt_tolerance))
                                             ].to_list()
         
         elif isinstance(spt_tolerance,str):
