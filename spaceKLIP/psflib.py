@@ -40,6 +40,8 @@ log.setLevel(logging.INFO)
 
 sp_class_letters = ['O','B','A','F','G','K','M','T','Y']
 
+sensitivitygrid_path = os.path.join(os.path.split(os.path.abspath(__file__))[0], 'resources','sensitivity_loss_grids')
+
 # Helper functions for logic with database series
 def isnone(series):
     """Helper function to determine which elements of a series
@@ -235,17 +237,19 @@ def specnum2spectype(specnums):
 import pandas as pd
 from scipy.interpolate import LinearNDInterpolator as Interpolator
 
-def get_sensitivity_loss_interpolator(filt,mask):
+def get_sensitivity_loss_interpolator(filt,mask,return_df=False):
 
     # Read in correct grid for sensitivities
-
-    # TODO: Update with correct csv for each filt/mask combo
-    # df = pd.read_csv(f'sensitivity_loss_{filt}_{mask}.csv',
-    #                             index_col='SCI_SPTYPE'
-    #                             )
-    df = pd.read_csv(f'sensitivity_loss_F200W_M210R.csv',
-                                index_col='SCI_SPTYPE'
-                                )
+    grid_path = os.path.join(sensitivitygrid_path,
+                        f'sensitivityloss_mags_{filt}_{mask}.csv')
+    
+    if not os.path.exists(grid_path):
+        warnings.warn(f'No sensitivity loss grid found for filter {filt} + mask {mask}. Skipping.')
+        return None
+    
+    df = pd.read_csv(grid_path,
+                     index_col='SCI_SPTYPE'
+                    )
     
     # Convert the reference and science spectral types to numerical values
     ref_spectypes = list(df.columns)
@@ -253,31 +257,46 @@ def get_sensitivity_loss_interpolator(filt,mask):
     ref_specnums = spectype2specnum(*decode_simbad_sptype(ref_spectypes))
     sci_specnums = spectype2specnum(*decode_simbad_sptype(sci_spectypes))
     
+    # df.columns = ref_specnums
+    # df.index = sci_specnums
+    
     # Flatten the values in the table so we can interpolate
     values = np.array(df).flatten()
-    y,x = np.meshgrid(sci_specnums,ref_specnums)
-    points = list(zip(y.flatten(),x.flatten()))
+    x,y = np.meshgrid(ref_specnums,sci_specnums)
+    points = list(zip(x.flatten(),y.flatten()))
     interpolator = Interpolator(points=points,
                                 values=values
                                 )
     
-    return interpolator
+    if return_df:
+        return interpolator, df
+    else:
+        return interpolator
 
 def get_sensitivity_loss(df,sci_spectype,filt,mask):
     
     df_temp = df.copy()
-    interp = get_sensitivity_loss_interpolator(filt,mask)
+    interp = get_sensitivity_loss_interpolator(filt,mask) # Returns None if no grid file found.
  
-    ref_spectypes = df_temp['SPTYPE']
-    sci_spectypes = [sci_spectype] * len(ref_spectypes)
+    if not interp is None:
+        ref_spectypes = df_temp['SPTYPE'].copy()
+        sci_spectypes = [sci_spectype] * len(ref_spectypes)
 
-    df_temp['SENSITIVITY_LOSS'] = interp(spectype2specnum(*decode_simbad_sptype(sci_spectypes)),
-                                         spectype2specnum(*decode_simbad_sptype(ref_spectypes)))
+        df_temp['SENSITIVITY_LOSS'] = interp(spectype2specnum(*decode_simbad_sptype(sci_spectypes)),
+                                            spectype2specnum(*decode_simbad_sptype(ref_spectypes)))
+        
+        # Override places where sptypes are the same to make sure the sensitivity loss is zero
+        df_temp.loc[(ref_spectypes==sci_spectypes),'SENSITIVITY_LOSS']
+
+    else:
+        df_temp['SENSITIVITY_LOSS'] = 0.
 
     df_temp.loc[df_temp['FILTER']!=filt,'SENSITIVITY_LOSS'] = np.nan
     df_temp.loc[df_temp['CORONMSK']!=mask,'SENSITIVITY_LOSS'] = np.nan
 
+    
     return df_temp['SENSITIVITY_LOSS']
+         
 
 def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
                 prefer_SIMBAD=True):
