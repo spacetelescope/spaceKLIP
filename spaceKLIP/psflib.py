@@ -524,7 +524,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
                                     'plx', 'plx_error')
     simbad_list = list(df_unique.index)
     short_simbad_list = []
-    for st_name in short_simbad_list:
+    for st_name in simbad_list:
         if st_name.startswith('UNKNOWN STAR'):
             warnings.warn(f'SIMBAD unable to resolve target: {st_name}')
         else:
