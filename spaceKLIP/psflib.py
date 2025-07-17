@@ -523,11 +523,12 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
                                     'flux(K)', 'flux_error(K)', 
                                     'plx', 'plx_error')
     simbad_list = list(df_unique.index)
-    short_simbad_list = list(df_unique.index)
+    short_simbad_list = []
     for st_name in short_simbad_list:
         if st_name.startswith('UNKNOWN STAR'):
             warnings.warn(f'SIMBAD unable to resolve target: {st_name}')
-            short_simbad_list.remove(st_name)
+        else:
+            short_simbad_list.append(st_name)
     scistar_simbad_table = customSimbad.query_objects(short_simbad_list)
 
     # Convert to pandas df and make SIMBAD IDs the index
