@@ -49,10 +49,6 @@ class MCMCTools():
             self.rotate = False
         else:
             self.rotate = kwargs['rotate']
-        if 'size' not in kwargs.keys():
-            self.size = 30
-        else:
-            self.size = kwargs['size']
         if 'r' in kwargs.keys():
             self.r = kwargs['r']
         else:
@@ -72,7 +68,7 @@ class MCMCTools():
         if 'size' in kwargs.keys():
             self.size = kwargs['size'] + 1 if kwargs['size'] % 2 == 0 else kwargs['size']
         else:
-            self.size = data.shape[-1]
+            self.size = 30
         if 'oversample' in kwargs.keys():
             self.oversample = kwargs['oversample']
         else:
@@ -537,7 +533,7 @@ class MCMCTools():
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=(data_masked, psf_masked, limits, centers, binarity, rotate, r)) #, moves=moves,
         # Run the MCMC sampler for a number of steps
 
-        sampler.run_mcmc(pos, nsteps, progress=verbose)
+        sampler.run_mcmc(pos, nsteps+self.burnin if self.burnin is not None else nsteps, progress=verbose)
 
         # Extract the samples and compute the best-fit parameters
         samples = sampler.get_chain(flat=True)
