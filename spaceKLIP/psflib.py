@@ -388,7 +388,9 @@ def compute_rms_OPD(ref_db,idir=''):
 
 
 def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
-                prefer_SIMBAD=True):
+                query_MOCA=True,
+                prefer_SIMBAD=True,
+                ):
     """
     Constructs a database of target-specific reference info for each
     calints file in the input directory.
@@ -552,53 +554,55 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     # Add the values we want to df_unique
     df_unique = pd.concat([df_unique,df_simbad.loc[:,simbad_cols.keys()]],axis=1)
 
-    # Query mocadb.ca for extra info
-    log.info('Querying MOCADB (this may take a minute)...')
-    names_df = pd.DataFrame(list(df_unique.index),columns=['designation'])
-    moca = mocapy.MocaEngine()
-    mdf = moca.query("SELECT tt.designation AS input_designation, sam.* FROM tmp_table AS tt LEFT JOIN mechanics_all_designations AS mad ON(mad.designation LIKE tt.designation) LEFT JOIN summary_all_objects AS sam ON(sam.moca_oid=mad.moca_oid)", tmp_table=names_df)
-    mdf.set_index('input_designation',inplace=True)
-
-    moca_cols = {
-        'SPTYPE': 'spt', # maybe use 'simple_spt' or 'complete_spt'?
-        'PLX': 'plx', # 'plx'
-        'PLX_ERR': 'eplx', # 'eplx'
-        'AGE': 'age', # 'age'
-        'AGE_ERR': 'eage', # 'eage'
-    }
-
-    # Update the column names for consistency
-    for col,moca_col in moca_cols.items():
-        mdf[col] = list(mdf[moca_col])
-
-    # Fill in values missing from SIMBAD with MOCA (or vice versa if prefer_SIMBAD==False)
+    # Sort all the dfs by index and check that they match up
+    df_unique.sort_index(inplace=True)   
+    df_simbad.sort_index(inplace=True)  
+    assert np.all(np.array(df_unique.index)==np.array(df_simbad.index)), "Index Error"
 
     df_unique['COMMENTS'] = ''
     df_unique['DB_SOURCES'] = ''
 
-    # Sort all the dfs by index and check that they match up
-    df_unique.sort_index(inplace=True)   
-    df_simbad.sort_index(inplace=True)   
-    mdf.sort_index(inplace=True)   
-    assert np.all(np.array(df_unique.index)==np.array(df_simbad.index)), "Index Error"
-    assert np.all(np.array(df_unique.index)==np.array(mdf.index)), "Index Error"
+    # Query mocadb.ca for extra info
+    if query_MOCA:
+        log.info('Querying MOCADB (this may take a minute)...')
+        names_df = pd.DataFrame(list(df_unique.index),columns=['designation'])
+        moca = mocapy.MocaEngine()
+        mdf = moca.query("SELECT tt.designation AS input_designation, sam.* FROM tmp_table AS tt LEFT JOIN mechanics_all_designations AS mad ON(mad.designation LIKE tt.designation) LEFT JOIN summary_all_objects AS sam ON(sam.moca_oid=mad.moca_oid)", tmp_table=names_df)
+        mdf.set_index('input_designation',inplace=True)
 
-    # Replace values and update DB_SOURCES column
-    cols_overlap = list(set(list(simbad_cols.keys())).intersection(list(moca_cols.keys())))
-    for col in cols_overlap:
-        if prefer_SIMBAD:
-            df_unique.loc[~isnone(df_simbad[col]),'DB_SOURCES'] += f"{col} adopted from SIMBAD. "
-            df_unique.loc[isnone(df_simbad[col]) & ~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
-            df_unique.loc[isnone(df_simbad[col]) & ~isnone(mdf[col]),col] = mdf
-        else:
+        moca_cols = {
+            'SPTYPE': 'spt', # maybe use 'simple_spt' or 'complete_spt'?
+            'PLX': 'plx', # 'plx'
+            'PLX_ERR': 'eplx', # 'eplx'
+            'AGE': 'age', # 'age'
+            'AGE_ERR': 'eage', # 'eage'
+        }
+
+        # Update the column names for consistency
+        for col,moca_col in moca_cols.items():
+            mdf[col] = list(mdf[moca_col])
+
+        mdf.sort_index(inplace=True)   
+        assert np.all(np.array(df_unique.index)==np.array(mdf.index)), "Index Error"
+
+        # Fill in values missing from SIMBAD with MOCA (or vice versa if prefer_SIMBAD==False)
+
+        # Replace values and update DB_SOURCES column
+        cols_overlap = list(set(list(simbad_cols.keys())).intersection(list(moca_cols.keys())))
+        for col in cols_overlap:
+            if prefer_SIMBAD:
+                df_unique.loc[~isnone(df_simbad[col]),'DB_SOURCES'] += f"{col} adopted from SIMBAD. "
+                df_unique.loc[isnone(df_simbad[col]) & ~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
+                df_unique.loc[isnone(df_simbad[col]) & ~isnone(mdf[col]),col] = mdf
+            else:
+                df_unique.loc[~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
+                df_unique.loc[isnone(mdf[col]) & ~isnone(df_simbad[col]),'DB_SOURCES'] += f"{col} adopted from SIMBAD. "
+                df_unique.loc[isnone(mdf[col]) & ~isnone(df_simbad[col]),col] = df_simbad
+
+        # Stellar ages only exist in MOCA database.
+        for col in ['AGE','AGE_ERR']:
+            df_unique[col] = mdf[col]
             df_unique.loc[~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
-            df_unique.loc[isnone(mdf[col]) & ~isnone(df_simbad[col]),'DB_SOURCES'] += f"{col} adopted from SIMBAD. "
-            df_unique.loc[isnone(mdf[col]) & ~isnone(df_simbad[col]),col] = df_simbad
-
-    # Stellar ages only exist in MOCA database.
-    for col in ['AGE','AGE_ERR']:
-        df_unique[col] = mdf[col]
-        df_unique.loc[~isnone(mdf[col]),'DB_SOURCES'] += f"{col} adopted from MOCA. "
 
     # Calculate distances from plx in mas
     df_unique['DIST'] = 1. / (df_unique['PLX'] / 1000)
