@@ -518,7 +518,6 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
 
     # Query SIMBAD
     log.info('Querying SIMBAD...')
-
     customSimbad = Simbad()
     customSimbad.add_votable_fields('sptype', 
                                     'flux(K)', 'flux_error(K)', 
@@ -527,6 +526,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     short_simbad_list = list(df_unique.index)
     for st_name in short_simbad_list:
         if st_name.startswith('UNKNOWN STAR'):
+            warnings.warn(f'SIMBAD unable to resolve target: {st_name}')
             short_simbad_list.remove(st_name)
     scistar_simbad_table = customSimbad.query_objects(short_simbad_list)
 
