@@ -415,12 +415,16 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     # - write tests for build_refdb() 
     #       - directory vs filelist input
     #       - nonexistent input directory
+    #       - nonexistent output directory
     #       - empty input directory 
     #       - no calints files in input directory
     #       - header kw missing
     #       - duplicate science target with different program names
     #       - synthetic PSFs 
     #       - slightly wrong SIMBAD names
+    #       - missing alignment files
+    #       - missing spectral type difference loss files 
+    #        
     # - logic for if 'HAS_DISK','HAS_CANDS' have a mix of 'unknown' and bool values
     
     # Check that you won't accidentally overwrite an existing csv.
@@ -675,6 +679,9 @@ def get_sciref_files(sci_target, refdb, idir=None,
     """
 
     # TODO:
+        # - filter by the sensitivity loss grid if available
+        # - generate mask_offset columns
+        # - filter by mask_offset columns if available 
         # - filter out manual flags
 
     if isinstance(refdb,str):
@@ -686,18 +693,20 @@ def get_sciref_files(sci_target, refdb, idir=None,
         targname = sci_target
 
     elif sci_target in refdb.index.to_list():
-        targname = refdb.loc[sci_target,'SIMBAD_ID'].to_list()[0]
-        
+        targname = refdb.loc[sci_target,'SIMBAD_ID']
+
     elif sci_target in refdb['TARGPROP'].to_list():
         refdb_temp = refdb.reset_index()
         refdb_temp.set_index('TARGPROP',inplace=True)
-        targname = refdb_temp.loc[sci_target,'SIMBAD_ID'].to_list()[0]
+        targname = refdb_temp.loc[sci_target,'SIMBAD_ID']
     
     else:
         log.error(f'Science target {sci_target} not found in reference database.')
         raise Exception(f'Science target {sci_target} not found in reference database.')
     
-    refdb_temp = refdb.reset_index()
+    if isinstance(targname, pd.Series):
+        targname = targname.to_list()[0]
+        refdb_temp = refdb.reset_index()
     refdb_temp.set_index('FILENAME',inplace=True)
 
     # Collect all the science files
