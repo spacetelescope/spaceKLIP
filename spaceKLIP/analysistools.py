@@ -2374,11 +2374,11 @@ class AnalysisTools():
                     if subtract:
                         dataset = dataset_orig
 
-                    # # Save the results table.
-                    # output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                    #     subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
-                    # tab[-1].write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
-                    # log.info(f'Table saved to {output_ecsv_path}')
+                    # Save the results table.
+                    output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                        subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                    Table(tab[-1]).write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
+                    log.info(f'Table saved to {output_ecsv_path}')
 
                 # Update source database.
                 self.database.update_src(key, j, tab)
