@@ -359,7 +359,7 @@ def get_opd_map(date_obs,time_obs,duration,verbose=False):
     return opd
 
 
-def compute_rms_OPD(ref_db,idir=''):
+def compute_rms_OPD(ref_db,odir=''):
 
     datesobs = np.array(ref_db['DATE-OBS'])
     times_obs = np.array(ref_db['TIME-OBS'])
@@ -382,7 +382,7 @@ def compute_rms_OPD(ref_db,idir=''):
     fnames = list(ref_db.FILENAME)
 
     rms_df = pd.DataFrame(rms_grid,columns=fnames,index=fnames)
-    rms_df.to_csv(os.path.join(idir,'delta_opds.csv'))
+    rms_df.to_csv(os.path.join(odir,'delta_opds.csv'))
 
     return rms_df
 
@@ -633,7 +633,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
 
     # Compute delta OPD table
     print('Computing delta OPDs...')
-    compute_rms_OPD(df_out,idir=idir)
+    compute_rms_OPD(df_out,odir=odir)
     print('Done!')
 
     return df_out
