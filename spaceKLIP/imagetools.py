@@ -236,6 +236,7 @@ class ImageTools():
                                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
                                                         imshifts, maskoffs)
                                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                                 # Update spaceKLIP database.
                                 self.database.update_obs(key, j, fitsfile, maskfile, nints=nints)
@@ -249,6 +250,7 @@ class ImageTools():
                             fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
                                                     imshifts, maskoffs)
                             maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                            nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                             # Update spaceKLIP database.
                             self.database.update_obs(key, j, fitsfile, maskfile, nints=nints)
@@ -3146,7 +3148,7 @@ class ImageTools():
                 self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile, xoffset=xoffset, yoffset=yoffset, crpix1=crpix1, crpix2=crpix2)
 
                 if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_IMAGE'] and recenter_NICAM_with_MCMC:
-                    MCMCTools.plot_data_model_residual(data, apername=apername, filt=filt, date=date,
+                    MCMCTools.plot_data_model_residual(np.median(data, axis=0).copy(), apername=apername, filt=filt, date=date,
                                                   offsetpsf_func=None, vmin=0, vmax=5000,
                                                   vminres=None, vmaxres=None, mask=True, binarity=MCMCTools.binarity,
                                                   path2fitsfile=output_dir+'/'+self.database.obs[key]['FITSFILE'][j].split('/')[-1].split('.fits')[0])
