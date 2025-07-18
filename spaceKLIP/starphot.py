@@ -66,6 +66,7 @@ def get_stellar_magnitudes(starfile,
                            instrume,
                            return_si=False,
                            output_dir=None,
+                           plot_style=None,
                            **kwargs):
     """
     Get the source brightness and zero point fluxes in each filter of the JWST
