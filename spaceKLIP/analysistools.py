@@ -1090,11 +1090,42 @@ class AnalysisTools():
                     split_fit = False
 
                 if split_fit:
-                    if not all(x in kwargs.keys() for x in ['sigma_xguess', 'sigma_yguess',  'scale_guess', 'theta_guess']):
-                        gauss_param_guesses = [0.3,0.3,0,0]
+                    if 'sigma_xguess' in kwargs.keys():
+                        sigma_xguess = kwargs['sigma_xguess']
                     else:
-                        gauss_param_guesses = [kwargs['sigma_xguess'], kwargs['sigma_yguess'], kwargs['scale_guess'], kwargs['theta_guess']]
+                        sigma_xguess = 0.1
+                    if 'sigma_yguess' in kwargs.keys():
+                        sigma_yguess = kwargs['sigma_yguess']
+                    else:
+                        sigma_yguess = 0.1
+                    if 'scale_guess' in kwargs.keys():
+                        scale_guess = kwargs['scale_guess']
+                    else:
+                        scale_guess = 0.0
+                    if 'theta_guess' in kwargs.keys():
+                        theta_guess = kwargs['theta_guess']
+                    else:
+                        theta_guess = 0.0
 
+                    if 'sigma_xrange' in kwargs.keys():
+                        sigma_xrange = kwargs['sigma_xrange']
+                    else:
+                        sigma_xrange = [0.001, 5.0]
+                    if 'sigma_yrange' in kwargs.keys():
+                        sigma_yrange = kwargs['sigma_yrange']
+                    else:
+                        sigma_yrange = [0.001, 5.0]
+                    if 'theta_range' in kwargs.keys():
+                        theta_range = kwargs['theta_range']
+                    else:
+                        theta_range = [-180, 180]
+                    if 'scale_range' in kwargs.keys():
+                        scale_range = kwargs['scale_range']
+                    else:
+                        scale_range = [-1,1]
+
+                    gauss_param_guesses = [sigma_xguess, sigma_yguess, theta_guess, scale_guess]
+                    gauss_bounds=[sigma_xrange, sigma_yrange, theta_range, scale_range]
                     # Loop through companions.
                     tab = Table(names=('ID',
                                        'RA',
@@ -1655,7 +1686,8 @@ class AnalysisTools():
                                 # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
                                 fig, result = best_convfit_and_residuals(fma,
                                                                          minmethod=minmethod,
-                                                                         initial_params=gauss_param_guesses)
+                                                                         initial_params=gauss_param_guesses,
+                                                                         bounds=gauss_bounds)
 
                                 if save_figures:
                                     path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_conv_c%.0f' % (k + 1) + '.pdf')
@@ -1688,7 +1720,7 @@ class AnalysisTools():
                                              scale_factor_avg,
                                              tp_comsubst,
                                              fitsfile,
-                                             result.x[3],
+                                             10**result.x[3],
                                              np.nan,
                                              result.x[0],
                                              np.nan,
