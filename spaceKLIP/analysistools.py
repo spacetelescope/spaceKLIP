@@ -1967,6 +1967,12 @@ class AnalysisTools():
                             else:
                                 raise NotImplementedError()
 
+                        # Save the results table.
+                        output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                            subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                        Table(tab[-1]).write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
+                        print(f'Table saved to {output_ecsv_path}')
+
                         # Plot estimated background level.
                         if remove_background:
                             f, ax = plt.subplots(1, 4, figsize=(4 * 6.4, 4.8))
@@ -2094,8 +2100,8 @@ class AnalysisTools():
                 self.database.update_src(key, j, tab)
 
                 # Save the results table.
-                output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                    subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                output_ecsv_path = os.path.join(output_dir_kl, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                    subsections) + '_' + key + '-results' + '.ecsv')
                 tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
                 print(f'Table saved to {output_ecsv_path}')
         pass
