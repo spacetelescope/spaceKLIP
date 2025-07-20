@@ -2150,7 +2150,8 @@ def loss_function(params,
     convolved_image = convolve(offset_psf*10**scale, kernel)
 
     # mse = np.nanmean((target_array - convolved_image) ** 2)
-    mse = np.nanmean((target_array - convolved_image) ** 2 *(target_array))
+    mse = np.sum((target_array - convolved_image) ** 2)/(2*target_array.shape[0]*target_array.shape[1])
+    # mse = np.nanmean((target_array - convolved_image) ** 2 *(target_array))
     return mse
 
 def best_convfit_and_residuals(fma,
