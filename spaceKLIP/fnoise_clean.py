@@ -1248,7 +1248,7 @@ def create_bkg_mask(data, bpmask=None, nsigma=3, niter=3):
         bpmask = np.zeros_like(data, dtype=np.bool_)
     else:
         # Ensure bpmask isn't all True
-        if np.alltrue(bpmask):
+        if np.all(bpmask):
             bpmask = np.zeros_like(data, dtype=np.bool_)
 
     # Excpliitly mask out NaNs
