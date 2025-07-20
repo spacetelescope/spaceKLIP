@@ -962,7 +962,7 @@ def run_obs(database,
                 steps['mask_groups']['skip'] = False
                 skip_revert = False
 
-            if (j == jtervals[-1]) and (groupmaskflag == 1):
+            if (j == nfitsfiles-1) and (groupmaskflag == 1):
                 '''This is the last file for this concatenation, and the groupmaskflag has been
                 set. This means we need to reset the mask_array back to original state, 
                 which was that it didn't exist, so that the routine is rerun. '''
