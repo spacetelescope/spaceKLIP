@@ -887,6 +887,18 @@ def run_obs(database,
         # Loop through FITS files.
         nfitsfiles = len(database.obs[key])
         jtervals = trange(nfitsfiles, desc='FITS files', leave=False) if quiet else range(nfitsfiles)
+
+        # Need to do some preparation steps if group masking is wanted before running pipeline
+        steps = apply_masking_prechecks(steps)
+
+        # Need to make sure that the database.obs[key] order deals with ref, ref_bg before sci, sci_bg files
+        # Order is specific to group masking done on reference images (only option at this time)
+        if not steps['mask_groups']['skip']:
+            # order database.obs[key] based on TYPE, i.e. REF, REF_BG, REF_TA, SCI, etc...
+            # keeping the order of reference observations based on FITSFILE
+            database.obs[key].sort(['TYPE', 'FITSFILE'])
+            print(database.obs[key])
+
         for j in jtervals:
 
             # Skip non-stage 0 files.
@@ -895,17 +907,6 @@ def run_obs(database,
             if database.obs[key]['DATAMODL'][j] != 'STAGE0':
                 if not quiet: log.info('  --> Coron1Pipeline: skipping non-stage 0 file ' + tail)
                 continue
-
-            # Need to do some preparation steps for group masking before running pipeline
-            steps['mask_groups'] = steps.setdefault('mask_groups', {})
-            if not steps['mask_groups']:
-                # If mask_groups unspecified or has no parameters, skip by default
-                steps['mask_groups']['skip'] = True
-            else:
-                # If mask_groups specified but skip isn't mentioned, set to False
-                steps['mask_groups'].setdefault('skip', False)
-            steps['mask_groups'].setdefault('mask_method', 'basic')
-            steps['mask_groups'].setdefault('types', ['REF', 'REF_BG'])
 
             # Check if we are skipping the mask_groups, if not run routine.
             if not steps['mask_groups']['skip']:
@@ -977,6 +978,20 @@ def run_obs(database,
             
             # Update spaceKLIP database.
             database.update_obs(key, j, fitsout_path)
+
+def apply_masking_prechecks(steps):
+    # Need to do some preparation steps for group masking before running pipeline
+    steps['mask_groups'] = steps.setdefault('mask_groups', {})
+    if not steps['mask_groups']:
+        # If mask_groups unspecified or has no parameters, skip by default
+        steps['mask_groups']['skip'] = True
+    else:
+        # If mask_groups specified but skip isn't mentioned, set to False
+        steps['mask_groups'].setdefault('skip', False)
+    steps['mask_groups'].setdefault('mask_method', 'basic')
+    steps['mask_groups'].setdefault('types', ['REF', 'REF_BG'])
+
+    return steps
 
 def prepare_group_masking_basic(steps, observations, quiet=False):
 
