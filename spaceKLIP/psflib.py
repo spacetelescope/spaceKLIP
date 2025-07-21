@@ -429,6 +429,10 @@ def load_alignments(ref_db,odir='.'):
 
     alignment_csvs = sorted(glob(os.path.join(odir,'mask_landings_f*.csv')))
 
+    if len(alignment_csvs)==0:
+        print(f'WARNING: No alignment .csvs found in directory {odir} !')
+        return None
+    
     for i,csv_fname in enumerate(alignment_csvs):
         if i==0:
             alignment_df = pd.read_csv(csv_fname)
@@ -695,15 +699,17 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     # Load mask offsets
     df_out.reset_index(inplace=True)
     df_out.set_index('FILENAME',inplace=True)
-    df_out = load_alignments(df_out,odir='.')
-    df_out.reset_index(inplace=True)
-    df_out.set_index('TARGNAME',inplace=True)
+    df_with_alignments = load_alignments(df_out,odir='.')
+    if df_with_alignments is None:
+        df_with_alignments = df_out
+    df_with_alignments.reset_index(inplace=True)
+    df_with_alignments.set_index('TARGNAME',inplace=True)
     
     # Save dataframe
-    df_out.to_csv(outpath)
+    df_with_alignments.to_csv(outpath)
     log.info(f'Database saved to {outpath}')
 
-    return df_out
+    return df_with_alignments
 
 
 def get_sciref_files(sci_target, refdb, 
@@ -882,59 +888,77 @@ def get_sciref_files(sci_target, refdb,
         ref_fnames = list(set(ref_fnames).intersection(opd_ref_fnames))
         
     if alignment_xthreshold != None:
-        x_refs = []
-        for sci_fpath in sci_fnames:
-            x_off = refdb_temp.loc[sci_fpath,'MASKOFF_X']
-            x_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_X'] <= x_off+alignment_xthreshold) &
-                                           (refdb_temp['MASKOFF_X'] >= x_off-alignment_xthreshold)
-                                    ].to_list())
+        if not 'MASKOFF_X' in refdb_temp.columns:
+            print(
+                'WARNING: X_OFFSET column missing from reference database, likely because alignment csvs are missing! ' \
+                'Skipping alignment restriction.'
+            )
+        else:
+            x_refs = []
+            for sci_fpath in sci_fnames:
+                x_off = refdb_temp.loc[sci_fpath,'MASKOFF_X']
+                x_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_X'] <= x_off+alignment_xthreshold) &
+                                            (refdb_temp['MASKOFF_X'] >= x_off-alignment_xthreshold)
+                                        ].to_list())
 
-        final_xrefs = set(x_refs[0])
-        if len(x_refs) > 1:
-            for ref_list in x_refs[1:]:
-                if alignment_inclusive:
-                    final_xrefs = final_xrefs.union(ref_list)
-                else:
-                    final_xrefs = final_xrefs.intersection(ref_list)
+            final_xrefs = set(x_refs[0])
+            if len(x_refs) > 1:
+                for ref_list in x_refs[1:]:
+                    if alignment_inclusive:
+                        final_xrefs = final_xrefs.union(ref_list)
+                    else:
+                        final_xrefs = final_xrefs.intersection(ref_list)
 
-        ref_fnames = list(set(ref_fnames).intersection(final_xrefs))
+            ref_fnames = list(set(ref_fnames).intersection(final_xrefs))
 
     if alignment_ythreshold != None:
-        y_refs = []
-        for sci_fpath in sci_fnames:
-            y_off = refdb_temp.loc[sci_fpath,'MASKOFF_Y']
-            y_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_Y'] <= y_off+alignment_ythreshold) &
-                                           (refdb_temp['MASKOFF_Y'] >= y_off-alignment_ythreshold)
-                                    ].to_list())
+        if not 'MASKOFF_Y' in refdb_temp.columns:
+            print(
+                'WARNING: Y_OFFSET column missing from reference database, likely because alignment csvs are missing! ' \
+                'Skipping alignment restriction.'
+            )
+        else:
+            y_refs = []
+            for sci_fpath in sci_fnames:
+                y_off = refdb_temp.loc[sci_fpath,'MASKOFF_Y']
+                y_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_Y'] <= y_off+alignment_ythreshold) &
+                                            (refdb_temp['MASKOFF_Y'] >= y_off-alignment_ythreshold)
+                                        ].to_list())
 
-        final_yrefs = set(y_refs[0])
-        if len(y_refs) > 1:
-            for ref_list in y_refs[1:]:
-                if alignment_inclusive:
-                    final_yrefs = final_yrefs.union(ref_list)
-                else:
-                    final_yrefs = final_yrefs.intersection(ref_list)
-        
-        ref_fnames = list(set(ref_fnames).intersection(final_yrefs))
+            final_yrefs = set(y_refs[0])
+            if len(y_refs) > 1:
+                for ref_list in y_refs[1:]:
+                    if alignment_inclusive:
+                        final_yrefs = final_yrefs.union(ref_list)
+                    else:
+                        final_yrefs = final_yrefs.intersection(ref_list)
+            
+            ref_fnames = list(set(ref_fnames).intersection(final_yrefs))
 
     if alignment_zthreshold != None:
-        refdb_temp['MASKOFF_Z'] = np.sqrt(refdb_temp['MASKOFF_X']**2 + refdb_temp['MASKOFF_Y']**2)
-        z_refs = []
-        for sci_fpath in sci_fnames:
-            z_off = refdb_temp.loc[sci_fpath,'MASKOFF_Z']
-            z_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_Z'] <= z_off+alignment_zthreshold) &
-                                           (refdb_temp['MASKOFF_Z'] >= z_off-alignment_zthreshold)
-                                    ].to_list())
+        if not 'MASKOFF_Y' in refdb_temp.columns:
+            print(
+                'WARNING: X/Y_OFFSET columns missing from reference database, likely because alignment csvs are missing! ' \
+                'Skipping alignment restriction.'
+            )
+        else:
+            refdb_temp['MASKOFF_Z'] = np.sqrt(refdb_temp['MASKOFF_X']**2 + refdb_temp['MASKOFF_Y']**2)
+            z_refs = []
+            for sci_fpath in sci_fnames:
+                z_off = refdb_temp.loc[sci_fpath,'MASKOFF_Z']
+                z_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_Z'] <= z_off+alignment_zthreshold) &
+                                            (refdb_temp['MASKOFF_Z'] >= z_off-alignment_zthreshold)
+                                        ].to_list())
 
-        final_zrefs = set(z_refs[0])
-        if len(z_refs) > 1:
-            for ref_list in z_refs[1:]:
-                if alignment_inclusive:
-                    final_zrefs = final_zrefs.union(ref_list)
-                else:
-                    final_zrefs = final_zrefs.intersection(ref_list)
-        
-        ref_fnames = list(set(ref_fnames).intersection(final_zrefs))
+            final_zrefs = set(z_refs[0])
+            if len(z_refs) > 1:
+                for ref_list in z_refs[1:]:
+                    if alignment_inclusive:
+                        final_zrefs = final_zrefs.union(ref_list)
+                    else:
+                        final_zrefs = final_zrefs.intersection(ref_list)
+            
+            ref_fnames = list(set(ref_fnames).intersection(final_zrefs))
     
     # Remove observations with disks flagged
     if exclude_disks:
