@@ -423,6 +423,28 @@ def filter_on_opds(sci_fpaths,
     return list(final_refs)
 
 
+def load_alignments(ref_db,odir='.'):
+
+    ref_db_out = ref_db.copy()
+
+    alignment_csvs = sorted(glob(os.path.join(odir,'mask_landings_f*.csv')))
+
+    for i,csv_fname in enumerate(alignment_csvs):
+        if i==0:
+            alignment_df = pd.read_csv(csv_fname)
+            alignment_df.columns=['FILENAME','MASKOFF_X','MASKOFF_Y']
+            alignment_df.set_index('FILENAME',inplace=True)
+        else:
+            df = pd.read_csv(csv_fname)
+            df.columns=['FILENAME','MASKOFF_X','MASKOFF_Y']
+            df.set_index('FILENAME',inplace=True)
+            alignment_df = pd.concat([alignment_df,df],axis=0)
+
+    ref_db_out = ref_db_out.join(alignment_df)
+        
+    return ref_db_out
+
+
 def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
                 query_MOCA=True,
                 prefer_SIMBAD=True,
@@ -448,7 +470,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     
     # TODO:
     # - describe each column & its units
-    # - check for alignment csvs
+    # - check for alignment csvs, print warnings for missing alignments
     # - write tests for build_refdb() 
     #       - directory vs filelist input
     #       - nonexistent input directory
@@ -490,8 +512,6 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
         if len(fpaths) == 0:
             raise Exception(f'No existing "{suffix}" files found in input file list.')
             
-
-
     # Start a dataframe with the header info we want from each file
     csv_list = []
     fits_cols = [
@@ -667,19 +687,28 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     df_unique = df_unique.reindex(df.index)
     df_out = pd.concat([df,df_unique],axis=1)
     
-    # Save dataframe
-    df_out.to_csv(outpath)
-    log.info(f'Database saved to {outpath}')
-
     # Compute delta OPD table
     print('Computing delta OPDs...')
     compute_rms_OPD(df_out,odir=odir)
     print('Done!')
 
+    # Load mask offsets
+    df_out.reset_index(inplace=True)
+    df_out.set_index('FILENAME',inplace=True)
+    df_out = load_alignments(df_out,odir='.')
+    df_out.reset_index(inplace=True)
+    df_out.set_index('TARGNAME',inplace=True)
+    
+    # Save dataframe
+    df_out.to_csv(outpath)
+    log.info(f'Database saved to {outpath}')
+
     return df_out
 
 
-def get_sciref_files(sci_target, refdb, idir=None, odir='.',
+def get_sciref_files(sci_target, refdb, 
+                     scifiles = None,
+                     idir=None, odir='.',
                      spt_tolerance=None, 
                      spt_loss_tolerance=0.5,
                      filters=None, 
@@ -687,7 +716,9 @@ def get_sciref_files(sci_target, refdb, idir=None, odir='.',
                      opd_inclusive=True,
                      alignment_xthreshold=None, # pix
                      alignment_ythreshold=None, # pix
-                     snr_threshold=None,
+                     alignment_zthreshold=None, # pix
+                     alignment_inclusive=True,
+                     snr_threshold=None, # not configured
                      exclude_disks=False):
     """Construct a list of science files and reference files to input to a PSF subtraction routine.
 
@@ -722,9 +753,11 @@ def get_sciref_files(sci_target, refdb, idir=None, odir='.',
 
     # TODO:
         # - filter by the sensitivity loss grid if available
-        # - generate mask_offset columns
         # - filter by mask_offset columns if available 
-        # - add warning if filenames are missing from opdor alignment csvs
+        # - fix the thing where mask_offset filters don't know about different
+        #   wavelength filts
+        # - skip filters when reference data is missing
+        # - add warning if filenames are missing from opd or alignment csvs
         # - filter out manual flags
         # - add capability to specify particular science filenames instead of science target name
         #   - choose filters automatically, require that all files are the same target.
@@ -755,7 +788,11 @@ def get_sciref_files(sci_target, refdb, idir=None, odir='.',
     refdb_temp.set_index('FILENAME',inplace=True)
 
     # Collect all the science files
-    sci_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] == targname].to_list()
+    if scifiles ==None:
+        sci_fnames = refdb_temp.index[refdb_temp['SIMBAD_ID'] == targname].to_list()
+    else:
+        sci_fnames = scifiles
+    
     first_scifile = sci_fnames[0]
 
     ### Collect the reference files
@@ -775,6 +812,8 @@ def get_sciref_files(sci_target, refdb, idir=None, odir='.',
         
         sci_fnames = list(set(sci_fnames).intersection(filter_fnames))
         ref_fnames = list(set(ref_fnames).intersection(filter_fnames))
+    else:
+        filters = set(refdb_temp.loc[sci_fnames,'FILTER'])
 
     ## Sort out spectral types
     if spt_tolerance != None: 
@@ -804,9 +843,9 @@ def get_sciref_files(sci_target, refdb, idir=None, odir='.',
                 # Need to treat each filter/mask combo separately
 
                 # Collect (filter, mask) pairs
-                filters = refdb_temp.loc[sci_fnames,'FILTER']
+                filts = refdb_temp.loc[sci_fnames,'FILTER']
                 masks = refdb_temp.loc[sci_fnames,'CORONMSK']
-                filter_mask_pairs = list(zip(filters,masks))
+                filter_mask_pairs = set(zip(filts,masks))
 
                 spt_fnames = []
                 for filt, mask in filter_mask_pairs:
@@ -842,6 +881,61 @@ def get_sciref_files(sci_target, refdb, idir=None, odir='.',
         
         ref_fnames = list(set(ref_fnames).intersection(opd_ref_fnames))
         
+    if alignment_xthreshold != None:
+        x_refs = []
+        for sci_fpath in sci_fnames:
+            x_off = refdb_temp.loc[sci_fpath,'MASKOFF_X']
+            x_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_X'] <= x_off+alignment_xthreshold) &
+                                           (refdb_temp['MASKOFF_X'] >= x_off-alignment_xthreshold)
+                                    ].to_list())
+
+        final_xrefs = set(x_refs[0])
+        if len(x_refs) > 1:
+            for ref_list in x_refs[1:]:
+                if alignment_inclusive:
+                    final_xrefs = final_xrefs.union(ref_list)
+                else:
+                    final_xrefs = final_xrefs.intersection(ref_list)
+
+        ref_fnames = list(set(ref_fnames).intersection(final_xrefs))
+
+    if alignment_ythreshold != None:
+        y_refs = []
+        for sci_fpath in sci_fnames:
+            y_off = refdb_temp.loc[sci_fpath,'MASKOFF_Y']
+            y_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_Y'] <= y_off+alignment_ythreshold) &
+                                           (refdb_temp['MASKOFF_Y'] >= y_off-alignment_ythreshold)
+                                    ].to_list())
+
+        final_yrefs = set(y_refs[0])
+        if len(y_refs) > 1:
+            for ref_list in y_refs[1:]:
+                if alignment_inclusive:
+                    final_yrefs = final_yrefs.union(ref_list)
+                else:
+                    final_yrefs = final_yrefs.intersection(ref_list)
+        
+        ref_fnames = list(set(ref_fnames).intersection(final_yrefs))
+
+    if alignment_zthreshold != None:
+        refdb_temp['MASKOFF_Z'] = np.sqrt(refdb_temp['MASKOFF_X']**2 + refdb_temp['MASKOFF_Y']**2)
+        z_refs = []
+        for sci_fpath in sci_fnames:
+            z_off = refdb_temp.loc[sci_fpath,'MASKOFF_Z']
+            z_refs.append(refdb_temp.index[(refdb_temp['MASKOFF_Z'] <= z_off+alignment_zthreshold) &
+                                           (refdb_temp['MASKOFF_Z'] >= z_off-alignment_zthreshold)
+                                    ].to_list())
+
+        final_zrefs = set(z_refs[0])
+        if len(z_refs) > 1:
+            for ref_list in z_refs[1:]:
+                if alignment_inclusive:
+                    final_zrefs = final_zrefs.union(ref_list)
+                else:
+                    final_zrefs = final_zrefs.intersection(ref_list)
+        
+        ref_fnames = list(set(ref_fnames).intersection(final_zrefs))
+    
     # Remove observations with disks flagged
     if exclude_disks:
         disk_fnames = refdb_temp.index[refdb_temp['HAS_DISK'] == True].to_list()
