@@ -28,7 +28,6 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -244,8 +243,6 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         save_results : bool, optional
             Save the JWST pipeline step product? None will default to the JWST
             pipeline step default. The default is None.
-        kwargs : keyword arguments
-            Default JWST pipeline step keyword arguments.
         
         Returns
         -------
@@ -253,6 +250,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             Output JWST datamodel.
         
         """
+
+        from .logging_tools import crds_logging_disabled
         
         # Determine if we're saving results for real
         if step_obj.skip:
@@ -274,7 +273,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         # Run step. Don't save results yet.
         step_save_orig = step_obj.save_results
         step_obj.save_results = False
-        res = step_obj.call(input)
+        with crds_logging_disabled():
+            res = step_obj.call(input)
         step_obj.save_results = step_save_orig
         
         # Check if group scale correction or gain scale correction were skipped.
