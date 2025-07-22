@@ -123,8 +123,12 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         # Process MIR & NIR exposures differently.
         instrument = input.meta.instrument.name
         if instrument == 'MIRI':
+            # process MIRI exposures;
+            # the steps are in a different order than NIR
+            log.debug('Processing a MIRI exposure')
             input = self.run_step(self.group_scale, input)
             input = self.run_step(self.dq_init, input)
+            input = self.run_step(self.emicorr, input)
             input = self.run_step(self.saturation, input)
             #input = self.run_step(self.ipc, input) Not run for MIRI
             input = self.run_step(self.firstframe, input)
@@ -138,6 +142,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             input = self.run_step(self.jump, input)
             input = self.run_step(self.mask_groups, input)
         else:
+            # process Near-IR exposures
+            log.debug('Processing a Near-IR exposure')
             input = self.run_step(self.group_scale, input)
             input = self.run_step(self.dq_init, input)
             input = self.do_saturation(input)
@@ -145,7 +151,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             input = self.run_step(self.superbias, input)
             input = self.do_refpix(input)
             input = self.run_step(self.linearity, input)
-            input = self.run_step(self.persistence, input)
+            if instrument != 'NIRSPEC': 
+                input = self.run_step(self.persistence, input)
             input = self.run_step(self.dark_current, input)
             input = self.run_step(self.charge_migration, input)
             input = self.run_step(self.jump, input)
@@ -153,6 +160,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             #1overf Only present in NIR data
             if 'groups' in self.stage_1overf:
                 input = self.run_step(self.subtract_1overf, input)
+            # TODO: Test clean_flicker_noise step versus subtract_1overf
+            # input = self.clean_flicker_noise(input)
         
         # save the corrected ramp data, if requested
         if self.ramp_fit.save_calibrated_ramp or self.save_calibrated_ramp or self.save_intermediates:
@@ -169,18 +178,18 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
                 warnings.simplefilter('ignore', RuntimeWarning)
                 res = self.run_step(self.experimental_jumpramp, input)
                 rate, rateints = res
-        
-        if self.rate_int_outliers and rateints is not None:
+
+        if self.rate_int_outliers and (rateints is not None):
             # Flag additional outliers by comparing rateints and refit ramp
             input = self.apply_rateint_outliers(rateints, input)
             if input is None:
-                input, ints_model = rate, rateints
+                input, ints_model = (rate, rateints)
             else:
                 res = self.run_step(self.ramp_fit, input, save_results=False)
                 input, ints_model = (res, None) if self.ramp_fit.skip else res
         else:
             # input is the rate product, ints_model is the rateints product
-            input, ints_model = rate, rateints
+            input, ints_model = (rate, rateints)
 
         if input is None:
             self.ramp_fit.log.info('NoneType returned from ramp fitting. Gain scale correction skipped')
