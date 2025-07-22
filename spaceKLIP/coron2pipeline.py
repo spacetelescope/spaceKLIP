@@ -108,11 +108,15 @@ class Coron2Pipeline_spaceKLIP(Image2Pipeline):
             all_res.append(res)
 
             # If outlier detection was run but intermediates were not request
-            # to be saved, remove the intermediate _median.fits files.
+            # to be saved, remove the intermediate files.
             if not self.save_intermediates and not self.outlier_detection.skip:
                 file_median = res.meta.filename.replace('calints', 'median')
-                if os.path.exists(file_median):
-                    os.remove(file_median)
+                file_blot = res.meta.filename.replace('calints', 'blot')
+                file_outlier = res.meta.filename.replace('calints.fits', 'outlier_i2d.fits')
+                foutlier_local = os.path.basename(file_outlier)
+                for f in [file_median, file_blot, file_outlier, foutlier_local]:
+                    if os.path.exists(f):
+                        os.remove(f)
         
         # Setup output file.
         self.output_use_model = True
