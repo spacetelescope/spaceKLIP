@@ -1471,7 +1471,7 @@ class Database():
 
 
 def create_database(output_dir,
-                    pid,
+                    pid=None,
                     obsids=None,
                     input_dir=None,
                     psflibpaths=None,
@@ -1539,7 +1539,9 @@ def create_database(output_dir,
         products. By default, only levels 0,1,2 data will be read and indexed.
     """
 
-    if input_dir is None:
+    if (pid is None) and (input_dir is None):
+        raise ValueError("Must provide either a pid or an input_dir")
+    elif input_dir is None:
         mast_dir = os.getenv('JWSTDOWNLOAD_OUTDIR')
         input_dir = os.path.join(mast_dir, f'{pid:05d}')
 
@@ -1548,7 +1550,7 @@ def create_database(output_dir,
         obsids = [obsids]
 
     # Cycle through all obsids and get the files in a single list
-    fitsfiles = [get_files(input_dir, pid, obsid=oid, **kwargs) for oid in obsids]
+    fitsfiles = [get_files(input_dir, pid=pid, obsid=oid, **kwargs) for oid in obsids]
     fitsfiles = [f for sublist in fitsfiles for f in sublist]
     datapaths = [os.path.join(input_dir, f) for f in fitsfiles]
 
