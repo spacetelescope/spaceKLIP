@@ -419,8 +419,10 @@ class Database():
                         ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
                         ww_ref = np.where(numdthpt == numdthpt_unique[1])[0]
                     else:
+                        ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
+                        ww_ref = None
                         log.warning('  --> Could not identify science and reference files based on dither pattern')
-                        raise UserWarning('Please use psflibpaths to specify reference files')
+                        raise UserWarning('Consider using psflibpaths to specify reference files')
 
             # Make Astropy tables for concatenations.
             tab = Table(names=('TYPE',
@@ -511,7 +513,8 @@ class Database():
                                'float',
                                'object',
                                'object'))
-            for j in np.append(ww_sci, ww_ref):
+            ww_all = ww_sci if ww_ref is None else np.append(ww_sci, ww_ref)
+            for j in ww_all:
                 if j in ww_sci:
                     sci = True
                 else:
@@ -546,6 +549,9 @@ class Database():
                         pipeline = Detector1Pipeline()
                         input = datamodels.open(allpaths[ww][j])
                         maskfile = pipeline.get_reference_file(input, 'psfmask')
+                        if (maskfile is None) or (not os.path.exists(maskfile)):
+                            maskfile = 'NONE'
+                            
                         config_stpipe_log(suppress=True)  # Revert to default logging.
 
                     elif EXP_TYPE[ww][j] == 'MIR_4QPM' or EXP_TYPE[ww][j] == 'MIR_LYOT':
