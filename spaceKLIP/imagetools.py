@@ -3402,6 +3402,7 @@ class ImageTools():
             os.makedirs(output_dir)
 
         # Loop through concatenations.
+        sci_good = False
         for i, key in enumerate(self.database.obs.keys()):
             # Read FITS file and PSF mask.
 
@@ -3410,7 +3411,10 @@ class ImageTools():
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             if len(ww_sci) == 0:
-                raise UserWarning('Could not find any science files')
+                # raise UserWarning('Could not find any science files')
+                print(f'Warning: Could not find any science files. Skipping {key}.')
+                continue
+            sci_good = True
             ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
             ww_all = np.append(ww_sci, ww_ref)
 
@@ -3469,7 +3473,8 @@ class ImageTools():
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile)
                     pass
-
+        if not sci_good:
+            raise(ValueError('No science frames found in database concatenations'))
 
     def find_nircam_centers(self,
                             data0,
@@ -3761,13 +3766,17 @@ class ImageTools():
 
         # Loop through concatenations.
         database_temp = deepcopy(self.database.obs)
+        sci_good = False
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Concatenation ' + key)
 
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             if len(ww_sci) == 0:
-                raise UserWarning('Could not find any science files')
+                # raise UserWarning('Could not find any science files')
+                print(f'Warning: Could not find any science files. Skipping {key}.')
+                continue
+            sci_good = True
             ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
             ww_all = np.append(ww_sci, ww_ref)
 
@@ -4037,6 +4046,9 @@ class ImageTools():
                 plt.show()
                 plt.close(fig)
 
+        if not sci_good:
+            raise(ValueError('No science frames found in database concatenations'))
+
 
     def calculate_alignment(self,
                             method='fourier',
@@ -4133,13 +4145,17 @@ class ImageTools():
 
         # Loop through concatenations.
         database_temp = deepcopy(self.database.obs)
+        sci_good = False
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Concatenation ' + key)
 
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             if len(ww_sci) == 0:
-                raise UserWarning('Could not find any science files')
+                # raise UserWarning('Could not find any science files')
+                print(f'Warning: Could not find any science files. Skipping {key}.')
+                continue
+            sci_good = True
             ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
             ww_all = np.append(ww_sci, ww_ref)
 
@@ -4409,6 +4425,9 @@ class ImageTools():
                     log.info(f" Plot saved in {output_file}")
                 plt.show()
                 plt.close(fig)
+
+        if not sci_good:
+            raise(ValueError('No science frames found in database concatenations'))
 
     def shift_frames(self,
                      method='fourier',
