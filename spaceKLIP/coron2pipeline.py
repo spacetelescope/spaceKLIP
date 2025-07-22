@@ -166,8 +166,8 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
     skip_resample : bool, optional
         Skip the resampling (drizzle) step? While the default is set
         to False, this step only applies to normal imaging modes and
-        skips coronagraphic observation. For coronagraphic observations,
-        resampling occurs in Stage 3.
+        only on rate/cal files (not rateints/calints). 
+        For coronagraphic observations, resampling occurs in Stage 3.
     skip_wcs : bool, optional
         Skip the WCS assignment step? The default is False.
     skip_flat : bool, optional
@@ -260,7 +260,9 @@ def run_obs(database,
         See here for how to use the steps parameter:
         https://jwst-pipeline.readthedocs.io/en/latest/jwst/user_documentation/running_pipeline_python.html#configuring-a-pipeline-step-in-python
         Custom step parameters are:
+
         - n/a
+
         The default is {}.
     subdir : str, optional
         Name of the directory where the data products shall be saved. The
@@ -287,8 +289,8 @@ def run_obs(database,
     skip_resample : bool, optional
         Skip the resampling (drizzle) step? While the default is set
         to False, this step only applies to normal imaging modes and
-        skips coronagraphic observation. For coronagraphic observations,
-        resampling occurs in Stage 3.
+        only on rate/cal files (not rateints/calints). 
+        For coronagraphic observations, resampling occurs in Stage 3.
     skip_wcs : bool, optional
         Skip the WCS assignment step? The default is False.
     skip_flat : bool, optional
