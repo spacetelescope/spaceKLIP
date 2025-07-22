@@ -551,8 +551,8 @@ class Database():
                         maskfile = pipeline.get_reference_file(input, 'psfmask')
                         if (maskfile is None) or (not os.path.exists(maskfile)):
                             maskfile = 'NONE'
-                            
-                        config_stpipe_log(suppress=True)  # Revert to default logging.
+
+                        config_stpipe_log(suppress=False)  # Revert to default logging.
 
                     elif EXP_TYPE[ww][j] == 'MIR_4QPM' or EXP_TYPE[ww][j] == 'MIR_LYOT':
                         if APERNAME[ww][j] == 'MIRIM_MASK1065':
