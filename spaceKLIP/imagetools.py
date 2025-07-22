@@ -252,7 +252,9 @@ class ImageTools():
 
                 # Write FITS file and PSF mask.
                 head_pri['NINTS'] = nints
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, 
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -351,7 +353,9 @@ class ImageTools():
                 head_sci['MASKCENY'] = maskceny
                 head_sci['CROP_SHIFTX'] = crop_shiftx  # Store crop shift.
                 head_sci['CROP_SHIFTY'] = crop_shifty
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -451,7 +455,9 @@ class ImageTools():
                 head_sci['STARCENY'] = starceny
                 head_sci['MASKCENX'] = maskcenx
                 head_sci['MASKCENY'] = maskceny
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -546,7 +552,9 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 head_pri['NINTS'] = nints
                 head_pri['EFFINTTM'] = effinttm
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -673,7 +681,9 @@ class ImageTools():
                     log.info('  --> Median subtraction: mean of frame median = %.2f' % np.mean(bg_median))
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -806,7 +816,9 @@ class ImageTools():
                         data_bg_sub[k] = data_improved_bgsub - np.nanmedian(data_improved_bgsub)
 
                     # Write FITS file and PSF mask.
-                    fitsfile = ut.write_obs(fitsfile, output_dir, data_bg_sub, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                    fitsfile = ut.write_obs(fitsfile, output_dir, data_bg_sub, erro, pxdq, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile)
@@ -986,7 +998,9 @@ class ImageTools():
                 pxdq = np.concatenate(pxdq_split, axis=0)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -1136,7 +1150,9 @@ class ImageTools():
                     new_dq = np.bitwise_or(pxdq.copy(), pxdq_temp).astype(np.uint32)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -1306,7 +1322,9 @@ class ImageTools():
                                                     # (the bitwise steps otherwise return np.int64 which isn't FITS compatible)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -1487,7 +1505,9 @@ class ImageTools():
                     plt.close(fig)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2177,7 +2197,9 @@ class ImageTools():
                     log.info('  --> Nan replacement: replaced %.0f nan pixel(s) with value ' % (np.sum(ww)) + str(cval) + ' -- %.2f%%' % (100. * np.sum(ww)/np.prod(ww.shape)))
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2286,7 +2308,9 @@ class ImageTools():
                     pass
                 else:
                     head_pri['BLURFWHM'] = fact_temp * np.sqrt(8. * np.log(2.))  # Factor to convert from sigma to FWHM
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2371,7 +2395,9 @@ class ImageTools():
                     pass
                 else:
                     head_pri['HPFSIZE'] = size_temp
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2625,7 +2651,8 @@ class ImageTools():
 
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
-                                        align_shift, center_shift, align_mask, center_mask, maskoffs)
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2769,7 +2796,9 @@ class ImageTools():
                     head_pri['XOFFSET'] = xoffset_new
                     head_pri['YOFFSET'] = yoffset_new
                     output_dir = os.path.dirname(self.database.obs[key]['FITSFILE'][j])
-                    fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                    fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset_new, yoffset=yoffset_new)
@@ -2829,7 +2858,7 @@ class ImageTools():
         """
 
         # DEPRECATION WARNING
-        log.warning('This function is deprecated. Use `calculate_centers` and `shift_frames` instead.')
+        raise DeprecationWarning('This function is deprecated. Use `calculate_centers` and `shift_frames` instead.')
 
         # Update NIRCam coronagraphy centers, i.e., change SIAF CRPIX position
         # to true mask center determined by Jarron
@@ -3340,7 +3369,9 @@ class ImageTools():
                 head_sci['CRPIX1'] = self.database.obs[key]['CRPIX1'][j]
                 head_sci['CRPIX2'] = self.database.obs[key]['CRPIX2'][j]
 
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -3425,7 +3456,9 @@ class ImageTools():
 
             for j in ww_all:
                 target_file = self.database.obs[key]['FITSFILE'][j]
-                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(target_file)
+                # data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(target_file)
+                (data, erro, pxdq, head_pri, head_sci, is2d,
+                 align_shift, center_shift, align_mask, center_mask, maskoffs) = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
 
@@ -3466,8 +3499,11 @@ class ImageTools():
                         mask = result.data
 
                     # Write FITS file and PSF mask.
-                    fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d, imshifts,
-                                            maskoffs)
+                    # fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d, imshifts,
+                    #                         maskoffs)
+                    fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
                     maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                     # Update spaceKLIP database.
@@ -3719,7 +3755,7 @@ class ImageTools():
 
         """
         #### DEPRECATION WARNING ####
-        log.warning('This function is deprecated. Use `calculate_alignment` and `shift_frames` instead.')
+        raise DeprecationWarning('This function is deprecated. Use `calculate_alignment` and `shift_frames` instead.')
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -4321,7 +4357,9 @@ class ImageTools():
                     head_sci['STARCENX'] = starcenx
                     head_sci['STARCENY'] = starceny
 
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -4653,7 +4691,9 @@ class ImageTools():
                 head_sci['CRPIX2'] = crpix2
 
                 # Save fits file.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
