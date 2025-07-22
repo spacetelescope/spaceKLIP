@@ -1312,7 +1312,8 @@ class ImageTools():
                          interp2d_kwargs={},
                          types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                          subdir='bpcleaned',
-                         restrict_to=None):
+                         restrict_to=None,
+                         plot=True):
         """
         Clean bad pixels.
 
@@ -1402,12 +1403,13 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
 
-                fig = plt.figure()
-                ax = plt.gca()
-                ax.hist(data.flatten(),
-                        bins=int(np.sqrt(len(data.flatten()))),
-                        histtype='step',
-                        label='Pre Cleaning')
+                if plot:
+                    fig = plt.figure()
+                    ax = plt.gca()
+                    ax.hist(data.flatten(),
+                            bins=int(np.sqrt(len(data.flatten()))),
+                            histtype='step',
+                            label='Pre Cleaning')
 
                 # Make copy of DQ array
                 pxdq_temp = pxdq.copy()
@@ -1456,20 +1458,21 @@ class ImageTools():
                                                     # (the bitwise steps otherwise return np.int64 which isn't FITS compatible)
 
                 # Finish figure for this file
-                ax.hist(data.flatten(),
-                        bins=int(np.sqrt(len(data.flatten()))),
-                        histtype='step',
-                        label='Post Cleaning')
-                ax.legend()
-                # ax.set_xscale('log')
-                ax.set_yscale('log')
-                ax.tick_params(which='both', direction='in', top=True, right=True, labelsize=12)
-                ax.set_xlabel("Pixel Value", fontsize=14)
-                ax.set_ylabel("Frequency", fontsize=12)
-                ax.set_title(f"{os.path.basename(fitsfile)} \n Original vs. Cleaned Data", fontsize=16)
-                output_file = os.path.join(output_dir, tail.replace('.fits', '_hist.png'))
-                plt.savefig(output_file)
-                plt.close(fig)
+                if plot:
+                    ax.hist(data.flatten(),
+                            bins=int(np.sqrt(len(data.flatten()))),
+                            histtype='step',
+                            label='Post Cleaning')
+                    ax.legend()
+                    # ax.set_xscale('log')
+                    ax.set_yscale('log')
+                    ax.tick_params(which='both', direction='in', top=True, right=True, labelsize=12)
+                    ax.set_xlabel("Pixel Value", fontsize=14)
+                    ax.set_ylabel("Frequency", fontsize=12)
+                    ax.set_title(f"{os.path.basename(fitsfile)} \n Original vs. Cleaned Data", fontsize=16)
+                    output_file = os.path.join(output_dir, tail.replace('.fits', '_hist.png'))
+                    plt.savefig(output_file)
+                    plt.close(fig)
 
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
