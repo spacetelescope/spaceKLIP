@@ -431,6 +431,7 @@ def load_alignments(ref_db,odir='.'):
 
     if len(alignment_csvs)==0:
         print(f'WARNING: No alignment .csvs found in directory {odir} !')
+        print(f'psflib will not be able to filter based on mask-star alignments.')
         return None
     
     for i,csv_fname in enumerate(alignment_csvs):
@@ -715,6 +716,7 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
 def get_sciref_files(sci_target, refdb, 
                      scifiles = None,
                      idir=None, odir='.',
+                     sci_dir=None,
                      spt_tolerance=None, 
                      spt_loss_tolerance=0.5,
                      filters=None, 
@@ -770,6 +772,9 @@ def get_sciref_files(sci_target, refdb,
 
     if isinstance(refdb,str):
         refdb = load_refdb(refdb)
+
+    if sci_dir is None:
+        sci_dir = idir
 
     # Locate input target 2MASS ID 
     # (input name could be in index, TARGPROP, or SIMBAD_ID column)
@@ -970,7 +975,7 @@ def get_sciref_files(sci_target, refdb,
         raise Exception("One or more filenames exists in both the science and reference file list. Something is wrong.")
 
     if not idir is None:
-        sci_fpaths = [os.path.join(idir,sci_fname) for sci_fname in sci_fnames]
+        sci_fpaths = [os.path.join(sci_dir,sci_fname) for sci_fname in sci_fnames]
         ref_fpaths = [os.path.join(idir,ref_fname) for ref_fname in ref_fnames]
     else:
         sci_fpaths = sci_fnames
