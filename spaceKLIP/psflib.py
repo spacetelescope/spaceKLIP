@@ -15,11 +15,6 @@
 #   reference db without overwriting old data
 # - Think about how to compare observations in the ref_db to science files 
 #   not in the ref_db
-# - Create a function to generate an OPD difference grid 
-#   - We want the RMS OPD differences between two given dates
-#   - How often to update this grid with new JWST observations? ~ 1/month?
-#   - How finely to sample the OPD maps in time? Every 2 days?
-#   - Estimate computation time as a function of # of dates to compare 
 
 # imports
 import os
@@ -69,7 +64,7 @@ def not_isnone(series):
     return ~ isnone(series)
 
 # Main functions
-def load_refdb(fpath):
+def load_refdb(csv_dir,db_fname):
     """
     Reads the database of target- and observation-specific reference info for 
     each observation in the PSF library.
@@ -83,11 +78,16 @@ def load_refdb(fpath):
          info for each file.
     """
 
-    refdb = pd.read_csv(fpath)
+    # Load csv
+    refdb = pd.read_csv(os.path.join(csv_dir,db_fname))
     refdb.set_index('TARGNAME',inplace=True)
 
-    return refdb
+    # Check for opd files
+    if not os.path.exists(os.path.join(csv_dir,'delta_opds.csv')):
+        print("WARNING: OPD file missing from the csv directory. " \
+        "Please run psflib.compute_rms_OPDs() to generate this reference file.")
 
+    return refdb
 
 def decode_simbad_sptype(input_sptypes):
     """Decodes the complicated SIMBAD spectral type string into simplified 
@@ -678,12 +678,14 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
 
     # Add empty columns
     manual_cols = [
-        'FLAGS',
+        'DO_NOT_USE',
         'HAS_DISK',
         'HAS_CANDS']
     
     for col in manual_cols:
-        df_unique[col] = 'unknown'
+        df_unique[col] = 0
+
+    df_unique['NOTES'] = ''
 
     # Apply dataframe of unique targets to the original file list
     df.set_index('TARGNAME',inplace=True)
@@ -964,6 +966,10 @@ def get_sciref_files(sci_target, refdb,
                         final_zrefs = final_zrefs.intersection(ref_list)
             
             ref_fnames = list(set(ref_fnames).intersection(final_zrefs))
+    
+    # Remove observations flagged as DO_NOT_USE
+    dnu_fnames = refdb_temp.index[refdb_temp['DO_NOT_USE'] == True].to_list()
+    ref_fnames = list(set(ref_fnames) - set(dnu_fnames))
     
     # Remove observations with disks flagged
     if exclude_disks:
