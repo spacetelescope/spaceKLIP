@@ -1200,7 +1200,7 @@ def gaussian_kernel(sigma_x=1, sigma_y=1, theta_degrees=0, n=6):
     return kernel
 
 
-def get_dqmask(dqarr, bitvalues):
+def get_dqmask(dqarr, bitvalues, return_bool=False):
     """ Get DQ mask from DQ array.
 
     Given some DQ array and a list of bit values, return a filtered
@@ -1217,6 +1217,15 @@ def get_dqmask(dqarr, bitvalues):
         List of bit values or mnemonics to use for DQ mask. 
         Numbered values must be powers of 2 (e.g., 1, 2, 4, 8, 16, ...),
         representing the specific DQ bit flags.
+    return_bool : bool
+        If True, return a boolean mask instead of an integer DQ mask.
+        Returns a boolean pixel mask showing which pixels have any of 
+        the specified bit values set.
+
+    Returns
+    -------
+    ndarray
+        DQ mask with only requested bit values set to True.
     """
 
     from astropy.nddata.bitmask import _is_bit_flag
@@ -1240,7 +1249,10 @@ def get_dqmask(dqarr, bitvalues):
     for bitval in bitvalues:
         dqmask = dqmask | (dqarr & bitval)
 
-    return dqmask
+    if return_bool:
+        return dqmask > 0
+    else:
+        return dqmask
 
 
 def pop_pxar_kw(filepaths):
