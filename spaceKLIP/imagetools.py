@@ -23,7 +23,7 @@ from tqdm.auto import trange
 import pysiaf
 import astropy.stats
 import astropy.io.fits as pyfits
-from astropy.io import fits
+from astropy.io import fits, ascii
 
 # plotting imports
 import matplotlib.pyplot as plt
@@ -75,17 +75,17 @@ log.setLevel(logging.INFO)
 # =============================================================================
 
 # Load NIRCam true mask centers and filter-dependent shifts from Jarron.
+curr_file_dir = os.path.split(os.path.abspath(__file__))[0]
 path = 'resources/crpix_jarron.json'
-path = os.path.join(os.path.split(os.path.abspath(__file__))[0], path)
+path = os.path.join(curr_file_dir, path)
 file = open(path, 'r')
 crpix_jarron = json.load(file)
 file.close()
 path = 'resources/filter_shifts_jarron.json'
-path = os.path.join(os.path.split(os.path.abspath(__file__))[0], path)
+path = os.path.join(curr_file_dir, path)
 file = open(path, 'r')
 filter_shifts_jarron = json.load(file)
 file.close()
-
 
 class ImageTools():
     """
@@ -94,7 +94,7 @@ class ImageTools():
     """
 
     def __init__(self,
-                 database):
+                database):
         """
         Initialize the spaceKLIP image manipulation tools class.
 
@@ -577,7 +577,7 @@ class ImageTools():
 
             - 'robust' for a robust median after masking out bright stars,
             - 'sigma_clipped' for another version of robust median using astropy
-               sigma_clipped_stats on the whole image,
+              sigma_clipped_stats on the whole image,
             - 'border' for robust median on the outer border region only, to
               ignore the bright stellar PSF in the center,
             - 'simple'  for a simple np.nanmedian.
@@ -849,8 +849,7 @@ class ImageTools():
             log.info('--> Concatenation ' + key)
 
             # Find science, reference, and background files.
-            ww = np.where((self.database.obs[key]['TYPE'] == 'SCI')
-                          | (self.database.obs[key]['TYPE'] == 'REF'))[0]
+            ww = np.where((self.database.obs[key]['TYPE'] == 'SCI') | (self.database.obs[key]['TYPE'] == 'REF'))[0]
             ww_sci_bg = np.where(self.database.obs[key]['TYPE'] == 'SCI_BG')[0]
             ww_ref_bg = np.where(self.database.obs[key]['TYPE'] == 'REF_BG')[0]
 
@@ -870,8 +869,8 @@ class ImageTools():
                     if orig_nints_per_med == None:
                         nints_per_med = nints
                     indxs = np.arange(nints)
-                    split_inds = [x+1 for x in indxs if (x+1) % nints_per_med == 0
-                                  and x < (nints-nints_per_med)]
+                    split_inds = [x+1 for x in indxs 
+                                  if ((x+1) % nints_per_med == 0) and (x < (nints-nints_per_med))]
 
                     # Compute median science background.
                     sci_bg_data += [data]
@@ -908,8 +907,8 @@ class ImageTools():
                     if orig_nints_per_med == None:
                         nints_per_med = nints
                     indxs = np.arange(nints)
-                    split_inds = [x+1 for x in indxs if (x+1) % nints_per_med == 0
-                                  and x < (nints-nints_per_med)]
+                    split_inds = [x+1 for x in indxs 
+                                  if ((x+1) % nints_per_med == 0) and (x < (nints-nints_per_med))]
                     # Compute median reference background.
                     ref_bg_data += [data]
                     ref_bg_erro += [erro]
@@ -952,8 +951,8 @@ class ImageTools():
                 if orig_nints_per_med == None:
                     nints_per_med = nints
                 indxs = np.arange(nints)
-                split_inds = [x+1 for x in indxs if (x+1) % nints_per_med == 0
-                              and x < (nints-nints_per_med)]
+                split_inds = [x+1 for x in indxs 
+                              if ((x+1) % nints_per_med == 0) and (x < (nints-nints_per_med))]
 
                 # Subtract background.
                 head, tail = os.path.split(fitsfile)
@@ -1163,7 +1162,7 @@ class ImageTools():
             - timemed: replace pixels which are only bad in some frames with
                        their median value from the good frames.
             - localmed: replace bad pixels with the median value of their
-                     surrounding good pixels.
+                        surrounding good pixels.
             - medfilt: replace bad pixels with an image plane median filter.
 
             The default is 'timemed+localmed+medfilt'.
@@ -2036,6 +2035,7 @@ class ImageTools():
         # Check input.
         if 'size' not in interp2d_kwargs.keys():
             interp2d_kwargs['size'] = 5
+        interp2d_size = interp2d_kwargs['size']
 
         # Fix bad pixels using interpolation of neighbors.
         ww = (pxdq != 0) & np.logical_not(pxdq & 512 == 512)
@@ -2050,7 +2050,7 @@ class ImageTools():
         erro_temp[ww] = np.nan
 
         rows, cols = data_temp[0].shape
-        half_box = interp2d_kwargs['size'] // 2
+        half_box = interp2d_size // 2
         for i in range(ww.shape[0]):
             for ri in range(rows):
                 for ci in range(cols):
@@ -2075,8 +2075,7 @@ class ImageTools():
                         ebox_values = ebox[~np.isnan(ebox)]
 
                         # Perform interpolation if there are valid values in the box
-                        if len(box_values) > interp2d_kwargs['size'] \
-                           and len(ebox_values) > interp2d_kwargs['size']:
+                        if (len(box_values) > interp2d_size) and (len(ebox_values) > interp2d_size):
                             # Extract x and y coordinates of valid values, same coords for
                             # data and err
                             x_coords = box_coords[:, 0]
@@ -2659,50 +2658,51 @@ class ImageTools():
             # Loop through FITS files.
             for j in range(len(self.database.obs[key])):
 
-                # Skip file types that are not NIRCam coronagraphy.
-                if self.database.obs[key]['EXP_TYPE'][j] == 'NRC_CORON':
+                # Skip files that are not NIRCam coronagraphy.
+                if self.database.obs[key]['EXP_TYPE'][j] not in ['NRC_CORON']:
+                    continue
 
-                    # Read FITS file and PSF mask.
-                    fitsfile = self.database.obs[key]['FITSFILE'][j]
-                    data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
-                    maskfile = self.database.obs[key]['MASKFILE'][j]
-                    mask = ut.read_msk(maskfile)
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
 
-                    # Update current reference pixel position.
-                    head, tail = os.path.split(fitsfile)
-                    log.info('  --> Update NIRCam coronagraphy centers: ' + tail)
+                # Update current reference pixel position.
+                head, tail = os.path.split(fitsfile)
+                log.info('  --> Update NIRCam coronagraphy centers: ' + tail)
 
-                    # Get PRD version used for the current file.
-                    file_prd_ver = head_pri['PRD_VER']
+                # Get PRD version used for the current file.
+                file_prd_ver = head_pri['PRD_VER']
 
-                    # use SIAF for reference pixel positions if its PRD is
-                    # newer or if force_siaf_center unless force_db_center.
-                    if (not force_db_center) and ((np.searchsorted(prds, file_prd_ver) < np.searchsorted(prds, pysiaf.JWST_PRD_VERSION))
-                       or force_siaf_center):
-                        log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from pysiaf')
-                        apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
-                        maskcenx = apsiaf.XSciRef
-                        maskceny = apsiaf.YSciRef
-                    else:
-                        log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from database')
-                        maskcenx = self.database.obs[key]['MASKCENX'][j]
-                        maskceny = self.database.obs[key]['MASKCENY'][j]
+                # use SIAF for reference pixel positions if its PRD is
+                # newer or if force_siaf_center unless force_db_center.
+                if (not force_db_center) and ((np.searchsorted(prds, file_prd_ver) < np.searchsorted(prds, pysiaf.JWST_PRD_VERSION))
+                    or force_siaf_center):
+                    log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from pysiaf')
+                    apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
+                    maskcenx = apsiaf.XSciRef
+                    maskceny = apsiaf.YSciRef
+                else:
+                    log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from database')
+                    maskcenx = self.database.obs[key]['MASKCENX'][j]
+                    maskceny = self.database.obs[key]['MASKCENY'][j]
 
-                    # Get filter shift from Jarron.
-                    try:
-                        xshift_jarron, yshift_jarron = filter_shifts_jarron[self.database.obs[key]['FILTER'][j]]
-                    except KeyError:
-                        log.warning('  --> Update NIRCam coronagraphy centers: no filter shift found for ' + self.database.obs[key]['FILTER'][j])
-                        xshift_jarron, yshift_jarron = 0., 0.
+                # Get filter shift from Jarron.
+                try:
+                    xshift_jarron, yshift_jarron = filter_shifts_jarron[self.database.obs[key]['FILTER'][j]]
+                except KeyError:
+                    log.warning('  --> Update NIRCam coronagraphy centers: no filter shift found for ' + self.database.obs[key]['FILTER'][j])
+                    xshift_jarron, yshift_jarron = 0., 0.
 
-                    xoff, yoff = xshift_jarron, yshift_jarron
-                    log.info('  --> Update NIRCam coronagraphy centers: old = (%.2f, %.2f), new = (%.2f, %.2f)' % (maskcenx, maskceny, maskcenx + xoff, maskceny + yoff))
-                    maskcenx += xoff
-                    maskceny += yoff
+                xoff, yoff = xshift_jarron, yshift_jarron
+                log.info('  --> Update NIRCam coronagraphy centers: old = (%.2f, %.2f), new = (%.2f, %.2f)' % (maskcenx, maskceny, maskcenx + xoff, maskceny + yoff))
+                maskcenx += xoff
+                maskceny += yoff
 
-                    # Update spaceKLIP database.
-                    # Change also CRPIX to be the same as maskcen.
-                    self.database.update_obs(key, j, fitsfile, maskfile, crpix1=maskcenx, crpix2=maskceny, maskcenx=maskcenx, maskceny=maskceny)
+                # Update spaceKLIP database.
+                # Change also CRPIX to be the same as maskcen.
+                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=maskcenx, crpix2=maskceny, maskcenx=maskcenx, maskceny=maskceny)
 
         pass
 
@@ -3272,9 +3272,7 @@ class ImageTools():
                         # which is why a subsequent integer pixel recentering
                         # is required.
                         p0 = np.array([0., 0.])
-                        pp = minimize(ut.recenterlsq,
-                                      p0,
-                                      args=(data[k], method, kwargs))['x']
+                        pp = minimize(ut.recenterlsq, p0, args=(data[k], method, kwargs))['x']
                         shifts += [np.array([pp[0], pp[1]])]
                         mask_shifts += [np.array([0., 0.])]
                         maskoffs_temp += [np.array([0., 0.])]
@@ -3342,7 +3340,7 @@ class ImageTools():
 
         Parameters
         ----------
-         subdir : str, optional
+        subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'recentered'.
 
@@ -3859,9 +3857,7 @@ class ImageTools():
                             else:
                                 args = (data[k], ref_image, mask_temp, method, kwargs)
                             # Use header values to initiate least squares fit
-                            pp = leastsq(ut.alignlsq,
-                                         p0,
-                                         args=args)[0]
+                            pp = leastsq(ut.alignlsq, p0, args=args)[0]
                         elif align_algo == 'header':
                             # Just assume the header values are correct
                             pp = p0
@@ -4222,9 +4218,7 @@ class ImageTools():
                             else:
                                 args = (data[k], ref_image, mask_temp, method, kwargs)
                             # Use header values to initiate least squares fit.
-                            pp = leastsq(ut.alignlsq,
-                                         p0,
-                                         args=args)[0]
+                            pp = leastsq(ut.alignlsq, p0, args=args)[0]
                         elif align_algo == 'header':
                             # Just assume the header values are correct.
                             pp = p0
@@ -4550,9 +4544,9 @@ class ImageTools():
                             shifts += [np.array([xshift, yshift])]
 
                             this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                                                   pad_amount=shiftpad, method=method, kwargs=kwargs)
                             this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                                                   pad_amount=shiftpad, method=method, kwargs=kwargs)
 
                             # Recenter SCI and REF frames to integer pixel
                             # precision by rolling the image.
@@ -4583,9 +4577,9 @@ class ImageTools():
                         shifts += [np.array([xshift, yshift])]
 
                         this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                                               pad_amount=shiftpad, method=method, kwargs=kwargs)
                         this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                                               pad_amount=shiftpad, method=method, kwargs=kwargs)
 
                         # Recenter TA frames to integer pixel precision by
                         # rolling the image.
@@ -4992,3 +4986,177 @@ class ImageTools():
                 mask = ut.read_msk(mask_in)
                 mask_out = ut.write_msk(mask_in, mask, f_out)
                 self.database.update_obs(key, j, f_out, mask_out)
+
+class AlignTools():
+    """
+    The spaceKLIP image manipulation tools class.
+
+    """
+
+    def __init__(self, database):
+        """
+        Initialize the spaceKLIP image manipulation tools class.
+
+        Parameters
+        ----------
+        database : spaceKLIP.Database
+            SpaceKLIP database on which the image manipulation steps shall be
+            run.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        # Make an internal alias of the spaceKLIP database class.
+        self.database = database
+
+        self._load_diffusion_table()
+        self._gen_concat_dict()
+
+    def _load_diffusion_table(self):
+        curr_file_dir = os.path.dirname(os.path.abspath(__file__))
+        path = 'resources/nrc_diffusion_jarron.txt'
+        path = os.path.join(curr_file_dir, path)
+        self._nrc_diffusion_table = ascii.read(path)
+
+    def _gen_concat_dict(self):
+        """Generate dictionary of relevant info for each concatenation."""
+        for key in self.database.obs:
+            tbl = self.database.obs[key]
+            fits_file = tbl['FITSFILE'][0]
+            hdr0 = fits.getheader(fits_file, 0)
+            hdr1 = fits.getheader(fits_file, 1)
+            self.concat_dict = {}
+            self.concat_dict[key] = {
+                'instrument': tbl['INSTRUME'][0],
+                'detector': tbl['DETECTOR'][0],
+                'subarray': tbl['SUBARRAY'][0],
+                'apername': tbl['APERNAME'][0],
+                'ap_siaf': pysiaf.Siaf(tbl['INSTRUME'][0]),
+                'has_sb_units': self._has_sb_units(hdr1),
+                'filter': tbl['FILTER'][0],
+                'pupil_mask': tbl['PUPIL'][0],
+                'image_mask': tbl['CORONMSK'][0],
+                'is_coron': self._is_coron(hdr0),
+                'kipc': self._kipc(hdr0, tbl['DETECTOR'][0]),
+                'kppc': self._kppc(tbl['DETECTOR'][0]),
+                'diffusion': self._best_diffusion(tbl['FILTER'][0], tbl['DETECTOR'][0]),
+                'filter_shift': self._get_filter_shift(tbl['FILTER'][0], tbl['CORONMSK'][0]),
+            }
+
+    def _get_output_dir(self, subdir):
+        """Utility function to get full output dir path, and create it if needed"""
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        return output_dir
+    
+    def _has_sb_units(self, hdr1):
+        """Check if flux values are in surface brightness units"""
+        is_sb = '/sr' in hdr1.get('BUNIT', 'none').lower()
+        return is_sb
+    def _is_coron(self, hdr0):
+        """Is this a coronagraphic observation?"""
+        is_coron = ('CORONMSK' in hdr0)
+        return is_coron
+    def _is_sgd(self, hdr0):
+        """Is this a SGD reference observation?"""
+        is_sgd = hdr0.get('SUBPXPAT') == 'SMALL-GRID-DITHER'
+        return is_sgd
+    def _get_sgd_pattern(self, hdr0):
+        """SGD pattern"""
+        sgd_pattern = hdr0.get('SMGRDPAT', None)
+        return sgd_pattern
+    
+    def _get_expected_pix(self, hdr0):
+        """Get the expected pixel location of stellar source based on header info"""
+        from webbpsf_ext.imreg_tools import get_expected_loc
+        xind, yind = get_expected_loc(hdr0)
+        return (xind, yind)
+
+    def _kipc(self, hdr0, sca):
+        """IPC kernel
+        
+        Returns None if IPC correcton was performed on data.
+        """
+        from webbpsf_ext.analysis_tools import ipc_info
+
+        # Check if IPC correction was performed
+        ipc_corr = hdr0.get('S_IPC', 'N/A') == 'COMPLETE'
+        if ipc_corr:
+            return None
+        else:
+            (a1, a2), kipc = ipc_info(sca)
+            return kipc
+    def _kppc(self, sca):
+        """PPC kernel"""
+        from webbpsf_ext.analysis_tools import ppc_info
+        ppc_frac, kppc = ppc_info(sca)
+        return kppc
+
+    def _best_diffusion(self, filter, sca):
+        """PSF diffusion value in pixels"""
+        tbl = self._nrc_diffusion_table
+        ind = (tbl['Filter']==filter) & (tbl['SCA']==sca)
+        diffusion = 0 if ind.sum()==0 else tbl[ind]['BestSig_sub'][0]
+        return diffusion
+
+
+    def _get_filter_shift(self, filter, image_mask, arcsec=False):
+        """Read in known offsets between the TA filter and the science filter
+        
+        Only applicable for NIRCam coronagraphic observations. Will return (0,0) if
+        filter or image mask are not recognized.
+        """
+
+        # If already in TA filter, don't need to shift
+        if filter in ['F335M', 'F210M']:
+            dx_filt = dy_filt = 0
+        elif (image_mask is None) or (image_mask == 'NONE'):
+            dx_filt = dy_filt = 0
+        elif image_mask in ['MASK210R', 'MASK335R', 'MASK430R', 'MASKSWB', 'MASKLWB']:
+            is_lwb = 'LWB' in image_mask
+            is_swb = 'SWB' in image_mask
+
+            if is_lwb:
+                filt_file = 'filter_shifts_lwb_jml.txt' 
+            elif is_swb:
+                filt_file = 'filter_shifts_swb_jml.txt'
+            else:
+                filt_file = 'filter_shifts_rnd_jml.txt'
+
+            tbl_dir = os.path.join(curr_file_dir, 'resources/nrc_filter_shifts/')
+            filt_path = filt_file if tbl_dir is None else os.path.join(tbl_dir, filt_file)
+            tbl_filts = ascii.read(filt_path)
+
+            # Pixel or arcsec columns?
+            dx_key = 'dx_asec' if arcsec else 'dx_pix'
+            dy_key = 'dy_asec' if arcsec else 'dy_pix'
+
+            # Get filter offsets from TA filter to observed filter
+            ind = np.where(tbl_filts['filter'] == filter)[0]
+            # If filter not found and is LWB or SWB, default to filter_offsets.txt
+            if len(ind) == 0 and (is_lwb or is_swb):
+                filt_path = os.path.join(tbl_dir, 'filter_offsets.txt')
+                tbl_filts = ascii.read(filt_path)
+                ind = np.where(tbl_filts['filter'] == filter)[0]
+
+            # If still not found, continue with no offset
+            if len(ind) == 0:
+                # _log.warning(f'No filter offset found for {image_mask} {filter}')
+                dx_filt = dy_filt = 0
+            elif len(ind)>1:
+                # _log.warning(f'Multiple filter offsets found for {image_mask} {filter}')
+                dx_filt = tbl_filts[dx_key][ind[0]]
+                dy_filt = tbl_filts[dy_key][ind[0]]
+            else:
+                dx_filt = tbl_filts[dx_key][ind[0]]
+                dy_filt = tbl_filts[dy_key][ind[0]]
+        else:
+            # If not a recognized image mask, assume no filter shift
+            dx_filt = dy_filt = 0
+
+        return np.array([dx_filt, dy_filt])
