@@ -9,7 +9,7 @@ scipy>=1.13.0
 stsci.stimage>=0.2.9
 stpsf>=2.0.0
 webbpsf_ext>=2.0.0
-pyklip>=2.7.1
+pyklip>=2.8.4
 ipywidgets>=8.1.5
 lmfit>1.2.2
 tqdm
