@@ -283,7 +283,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         step_save_orig = step_obj.save_results
         step_obj.save_results = False
         with crds_logging_disabled():
-            res = step_obj.call(input)
+            res = step_obj.run(input)
         step_obj.save_results = step_save_orig
         
         # Check if group scale correction or gain scale correction were skipped.
