@@ -62,6 +62,7 @@ from pyklip.instruments.JWST import JWSTData
 
 # jwst imports
 import jwst.datamodels
+from jwst.datamodels import dqflags
 from stdatamodels.jwst import datamodels
 from jwst.datamodels import ModelContainer, ModelLibrary
 from jwst.resample import resample_step
@@ -251,7 +252,9 @@ class ImageTools():
 
                 # Write FITS file and PSF mask.
                 head_pri['NINTS'] = nints
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, 
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -350,7 +353,9 @@ class ImageTools():
                 head_sci['MASKCENY'] = maskceny
                 head_sci['CROP_SHIFTX'] = crop_shiftx  # Store crop shift.
                 head_sci['CROP_SHIFTY'] = crop_shifty
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -450,7 +455,9 @@ class ImageTools():
                 head_sci['STARCENY'] = starceny
                 head_sci['MASKCENX'] = maskcenx
                 head_sci['MASKCENY'] = maskceny
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -545,7 +552,9 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 head_pri['NINTS'] = nints
                 head_pri['EFFINTTM'] = effinttm
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -614,6 +623,7 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                pxmask_donotuse = ut.get_dqmask(pxdq, 'DO_NOT_USE', return_bool=True)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -624,7 +634,7 @@ class ImageTools():
                     data_temp = data.copy()
                     # if self.database.obs[key]['TELESCOP'][j] == 'JWST' and self.database.obs[key]['INSTRUME'][j] == 'NIRCAM':
                     # data_temp[pxdq != 0] = np.nan
-                    data_temp[pxdq & 1 == 1] = np.nan
+                    data_temp[pxmask_donotuse] = np.nan
                     # else:
                     #     data_temp[pxdq & 1 == 1] = np.nan
                     if method == 'robust':
@@ -671,7 +681,9 @@ class ImageTools():
                     log.info('  --> Median subtraction: mean of frame median = %.2f' % np.mean(bg_median))
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -804,7 +816,9 @@ class ImageTools():
                         data_bg_sub[k] = data_improved_bgsub - np.nanmedian(data_improved_bgsub)
 
                     # Write FITS file and PSF mask.
-                    fitsfile = ut.write_obs(fitsfile, output_dir, data_bg_sub, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                    fitsfile = ut.write_obs(fitsfile, output_dir, data_bg_sub, erro, pxdq, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile)
@@ -888,7 +902,8 @@ class ImageTools():
                     sci_bg_data_split[k] = np.nanmedian(sci_bg_data_split[k], axis=0)
                     nsample = np.sum(np.logical_not(np.isnan(sci_bg_erro_split[k])), axis=0)
                     sci_bg_erro_split[k] = np.true_divide(np.sqrt(np.nansum(sci_bg_erro_split[k]**2, axis=0)), nsample)
-                    sci_bg_pxdq_split[k] = np.sum(sci_bg_pxdq_split[k] & 1 == 1, axis=0) != 0
+                    sci_split_donotuse = ut.get_dqmask(sci_bg_pxdq_split[k], 'DO_NOT_USE', return_bool=True)
+                    sci_bg_pxdq_split[k] = np.sum(sci_split_donotuse, axis=0) != 0
             else:
                 sci_bg_data = None
 
@@ -925,7 +940,8 @@ class ImageTools():
                     ref_bg_data_split[k] = np.nanmedian(ref_bg_data_split[k], axis=0)
                     nsample = np.sum(np.logical_not(np.isnan(ref_bg_erro_split[k])), axis=0)
                     ref_bg_erro_split[k] = np.true_divide(np.sqrt(np.nansum(ref_bg_erro_split[k]**2, axis=0)), nsample)
-                    ref_bg_pxdq_split[k] = np.sum(ref_bg_pxdq_split[k] & 1 == 1, axis=0) != 0
+                    ref_split_donotuse = ut.get_dqmask(ref_bg_pxdq_split[k], 'DO_NOT_USE', return_bool=True)
+                    ref_bg_pxdq_split[k] = np.sum(ref_split_donotuse, axis=0) != 0
             else:
                 ref_bg_data = None
 
@@ -964,24 +980,27 @@ class ImageTools():
                 pxdq_split = np.array_split(pxdq, split_inds, axis=0)
                 # For each dataset, need to decide what to use as the background and subtract
                 for k in range(len(split_inds)+1):
+                    pxmask_split_donotuse = ut.get_dqmask(pxdq_split[k], 'DO_NOT_USE', return_bool=True)
                     if (sci and sci_bg_data is not None) or (not sci and ref_bg_data is None):
                         if not sci and ref_bg_data is None:
                             log.warning('  --> Could not find reference background, attempting to use science background')
                         data_split[k] = data_split[k] - sci_bg_data_split[k]
                         erro_split[k] = np.sqrt(erro_split[k]**2 + sci_bg_erro_split[k]**2)
-                        pxdq_split[k][np.logical_not(pxdq_split[k] & 1 == 1) & (sci_bg_pxdq_split[k] != 0)] += 1
+                        pxdq_split[k][(~pxmask_split_donotuse) & (sci_bg_pxdq_split[k] != 0)] += 1
                     elif (not sci and ref_bg_data is not None) or (sci and sci_bg_data is None):
                         if sci and sci_bg_data is None:
                             log.warning('  --> Could not find science background, attempting to use reference background')
                         data_split[k] = data_split[k] - ref_bg_data_split[k]
                         erro_split[k] = np.sqrt(erro_split[k]**2 + ref_bg_erro_split[k]**2)
-                        pxdq_split[k][np.logical_not(pxdq_split[k] & 1 == 1) & (ref_bg_pxdq_split[k] != 0)] += 1
+                        pxdq_split[k][(~pxmask_split_donotuse) & (ref_bg_pxdq_split[k] != 0)] += 1
                 data = np.concatenate(data_split, axis=0)
                 erro = np.concatenate(erro_split, axis=0)
                 pxdq = np.concatenate(pxdq_split, axis=0)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -1080,6 +1099,7 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
 
                 if set_dq_zero:  # set_dq_zero
                     # Make copy of DQ array filled with zeros, i.e. all good pixels
@@ -1102,12 +1122,13 @@ class ImageTools():
                         head, tail = os.path.split(fitsfile)
                         if method_split[k] == 'dqarr':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
-                            # Flag any pixels marked as DO_NOT_USE that aren't NONSCIENCE
-                            pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1)) \
-                                & np.logical_not(pxdq_temp & 512 == 512)
+                            # Flag any pixels marked as DO_NOT_USE that aren't NON_SCIENCE
+                            temp_donotuse = ut.get_dqmask(pxdq_temp, 'DO_NOT_USE', return_bool=True)
+                            temp_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
+                            pxdq_temp = (np.isnan(data) | temp_donotuse) & (~temp_nonsci)
                         elif method_split[k] == 'sigclip':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
-                            self.find_bad_pixels_sigclip(data, erro, pxdq_temp, pxdq & 512 == 512, sigclip_kwargs)
+                            self.find_bad_pixels_sigclip(data, erro, pxdq_temp, pxmask_nonsci, sigclip_kwargs)
                         elif method_split[k] == 'custom':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             if self.database.obs[key]['TYPE'][j] not in ['SCI_TA', 'REF_TA']:
@@ -1129,7 +1150,9 @@ class ImageTools():
                     new_dq = np.bitwise_or(pxdq.copy(), pxdq_temp).astype(np.uint32)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -1247,6 +1270,7 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -1256,13 +1280,15 @@ class ImageTools():
                     # if self.database.obs[key]['TELESCOP'][j] == 'JWST' and self.database.obs[key]['INSTRUME'][j] == 'NIRCAM':
                     #     pxdq_temp = (pxdq_temp != 0) & np.logical_not(pxdq_temp & 512 == 512)
                     # else:
-                    pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1)) & np.logical_not(pxdq_temp & 512 == 512)
+                    temp_donotuse = ut.get_dqmask(pxdq_temp, 'DO_NOT_USE', return_bool=True)
+                    temp_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
+                    pxdq_temp = (np.isnan(data) | temp_donotuse) & (~temp_nonsci)
                     method_split = method.split('+')
                     for k in range(len(method_split)):
                         head, tail = os.path.split(fitsfile)
                         if method_split[k] == 'sigclip':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
-                            self.find_bad_pixels_sigclip(data, erro, pxdq_temp, pxdq & 512 == 512, sigclip_kwargs)
+                            self.find_bad_pixels_sigclip(data, erro, pxdq_temp, pxmask_nonsci, sigclip_kwargs)
                         elif method_split[k] == 'custom':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             if self.database.obs[key]['TYPE'][j] not in ['SCI_TA', 'REF_TA']:
@@ -1289,14 +1315,16 @@ class ImageTools():
                 #  The pxdq variable here is effectively just the DO_NOT_USE flag, discarding other bits.
                 #  We want to make a new dq which retains the other bits as much as possible.
                 #  first, retain all the other bits (bits greater than 1), then add in the new/cleaned DO_NOT_USE bit
-                do_not_use = jwst.datamodels.dqflags.pixel['DO_NOT_USE']
+                do_not_use = dqflags.pixel['DO_NOT_USE']
                 new_dq = np.bitwise_and(pxdq.copy(), np.invert(do_not_use))  # retain all other bits except the do_not_use bit
                 new_dq = np.bitwise_or(new_dq, pxdq_temp)  # add in the do_not_use bit from the cleaned version
                 new_dq = new_dq.astype(np.uint32)   # ensure correct output type for saving
                                                     # (the bitwise steps otherwise return np.int64 which isn't FITS compatible)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -1312,7 +1340,8 @@ class ImageTools():
                          interp2d_kwargs={},
                          types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                          subdir='bpcleaned',
-                         restrict_to=None):
+                         restrict_to=None,
+                         plot=True):
         """
         Clean bad pixels.
 
@@ -1402,18 +1431,21 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
 
-                fig = plt.figure()
-                ax = plt.gca()
-                ax.hist(data.flatten(),
-                        bins=int(np.sqrt(len(data.flatten()))),
-                        histtype='step',
-                        label='Pre Cleaning')
+                if plot:
+                    fig = plt.figure()
+                    ax = plt.gca()
+                    ax.hist(data.flatten(),
+                            bins=int(np.sqrt(len(data.flatten()))),
+                            histtype='step',
+                            label='Pre Cleaning')
 
                 # Make copy of DQ array
                 pxdq_temp = pxdq.copy()
 
                 # Don't want to clean anything that isn't bad or is a non-science pixel
-                pxdq_temp = (np.isnan(data) | (pxdq_temp & 1 == 1)) & np.logical_not(pxdq_temp & 512 == 512)
+                temp_donotuse = ut.get_dqmask(pxdq_temp, 'DO_NOT_USE', return_bool=True)
+                temp_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
+                pxdq_temp = (np.isnan(data) | temp_donotuse) & (~temp_nonsci)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -1449,30 +1481,33 @@ class ImageTools():
                 #  We want to make a new dq which retains the other bits as much as possible.
                 #  first, retain all the other bits (bits greater than 1), then add in the new/cleaned DO_NOT_USE bit
 
-                do_not_use = jwst.datamodels.dqflags.pixel['DO_NOT_USE']
+                do_not_use = dqflags.pixel['DO_NOT_USE']
                 new_dq = np.bitwise_and(pxdq.copy(), np.invert(do_not_use))  # retain all other bits except the do_not_use bit
                 new_dq = np.bitwise_or(new_dq, pxdq_temp)  # add in the do_not_use bit from the cleaned version
                 new_dq = new_dq.astype(np.uint32)   # ensure correct output type for saving
                                                     # (the bitwise steps otherwise return np.int64 which isn't FITS compatible)
 
                 # Finish figure for this file
-                ax.hist(data.flatten(),
-                        bins=int(np.sqrt(len(data.flatten()))),
-                        histtype='step',
-                        label='Post Cleaning')
-                ax.legend()
-                # ax.set_xscale('log')
-                ax.set_yscale('log')
-                ax.tick_params(which='both', direction='in', top=True, right=True, labelsize=12)
-                ax.set_xlabel("Pixel Value", fontsize=14)
-                ax.set_ylabel("Frequency", fontsize=12)
-                ax.set_title(f"{os.path.basename(fitsfile)} \n Original vs. Cleaned Data", fontsize=16)
-                output_file = os.path.join(output_dir, tail.replace('.fits', '_hist.png'))
-                plt.savefig(output_file)
-                plt.close(fig)
+                if plot:
+                    ax.hist(data.flatten(),
+                            bins=int(np.sqrt(len(data.flatten()))),
+                            histtype='step',
+                            label='Post Cleaning')
+                    ax.legend()
+                    # ax.set_xscale('log')
+                    ax.set_yscale('log')
+                    ax.tick_params(which='both', direction='in', top=True, right=True, labelsize=12)
+                    ax.set_xlabel("Pixel Value", fontsize=14)
+                    ax.set_ylabel("Frequency", fontsize=12)
+                    ax.set_title(f"{os.path.basename(fitsfile)} \n Original vs. Cleaned Data", fontsize=16)
+                    output_file = os.path.join(output_dir, tail.replace('.fits', '_hist.png'))
+                    plt.savefig(output_file)
+                    plt.close(fig)
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, new_dq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2038,7 +2073,8 @@ class ImageTools():
             interp2d_kwargs['size'] = 5
 
         # Fix bad pixels using interpolation of neighbors.
-        ww = (pxdq != 0) & np.logical_not(pxdq & 512 == 512)
+        pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
+        ww = (pxdq != 0) & (~pxmask_nonsci)
         log.info('  --> Method interp2d: fixing %.0f bad pixel(s) -- %.2f%%' % (np.sum(ww), 100. * np.sum(ww) / np.prod(ww.shape)))
 
         # NaN pixels to be replaced with interpolation
@@ -2161,7 +2197,9 @@ class ImageTools():
                     log.info('  --> Nan replacement: replaced %.0f nan pixel(s) with value ' % (np.sum(ww)) + str(cval) + ' -- %.2f%%' % (100. * np.sum(ww)/np.prod(ww.shape)))
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2233,7 +2271,7 @@ class ImageTools():
                     except:
                         fact_temp = fact
                     if self.database.obs[key]['TELESCOP'][j] == 'JWST':
-                        if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                        if self.database.obs[key]['EXP_TYPE'][j] in ['NRC_CORON', 'NRC_TACONFIRM', 'NRC_TACQ']:
                             diam = 5.2
                         else:
                             diam = JWST_CIRCUMSCRIBED_DIAMETER
@@ -2270,7 +2308,9 @@ class ImageTools():
                     pass
                 else:
                     head_pri['BLURFWHM'] = fact_temp * np.sqrt(8. * np.log(2.))  # Factor to convert from sigma to FWHM
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2355,7 +2395,9 @@ class ImageTools():
                     pass
                 else:
                     head_pri['HPFSIZE'] = size_temp
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2609,7 +2651,8 @@ class ImageTools():
 
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
-                                        align_shift, center_shift, align_mask, center_mask, maskoffs)
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -2753,7 +2796,9 @@ class ImageTools():
                     head_pri['XOFFSET'] = xoffset_new
                     head_pri['YOFFSET'] = yoffset_new
                     output_dir = os.path.dirname(self.database.obs[key]['FITSFILE'][j])
-                    fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                    fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset_new, yoffset=yoffset_new)
@@ -2813,7 +2858,7 @@ class ImageTools():
         """
 
         # DEPRECATION WARNING
-        log.warning('This function is deprecated. Use `calculate_centers` and `shift_frames` instead.')
+        raise DeprecationWarning('This function is deprecated. Use `calculate_centers` and `shift_frames` instead.')
 
         # Update NIRCam coronagraphy centers, i.e., change SIAF CRPIX position
         # to true mask center determined by Jarron
@@ -3324,7 +3369,9 @@ class ImageTools():
                 head_sci['CRPIX1'] = self.database.obs[key]['CRPIX1'][j]
                 head_sci['CRPIX2'] = self.database.obs[key]['CRPIX2'][j]
 
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -3386,6 +3433,7 @@ class ImageTools():
             os.makedirs(output_dir)
 
         # Loop through concatenations.
+        sci_good = False
         for i, key in enumerate(self.database.obs.keys()):
             # Read FITS file and PSF mask.
 
@@ -3394,7 +3442,10 @@ class ImageTools():
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             if len(ww_sci) == 0:
-                raise UserWarning('Could not find any science files')
+                # raise UserWarning('Could not find any science files')
+                print(f'Warning: Could not find any science files. Skipping {key}.')
+                continue
+            sci_good = True
             ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
             ww_all = np.append(ww_sci, ww_ref)
 
@@ -3405,7 +3456,9 @@ class ImageTools():
 
             for j in ww_all:
                 target_file = self.database.obs[key]['FITSFILE'][j]
-                data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(target_file)
+                # data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs = ut.read_obs(target_file)
+                (data, erro, pxdq, head_pri, head_sci, is2d,
+                 align_shift, center_shift, align_mask, center_mask, maskoffs) = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
 
@@ -3446,14 +3499,18 @@ class ImageTools():
                         mask = result.data
 
                     # Write FITS file and PSF mask.
-                    fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d, imshifts,
-                                            maskoffs)
+                    # fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d, imshifts,
+                    #                         maskoffs)
+                    fitsfile = ut.write_obs(target_file, output_dir, data_list, err_list, dq_list, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
                     maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile)
                     pass
-
+        if not sci_good:
+            raise(ValueError('No science frames found in database concatenations'))
 
     def find_nircam_centers(self,
                             data0,
@@ -3698,7 +3755,7 @@ class ImageTools():
 
         """
         #### DEPRECATION WARNING ####
-        log.warning('This function is deprecated. Use `calculate_alignment` and `shift_frames` instead.')
+        raise DeprecationWarning('This function is deprecated. Use `calculate_alignment` and `shift_frames` instead.')
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -3745,13 +3802,17 @@ class ImageTools():
 
         # Loop through concatenations.
         database_temp = deepcopy(self.database.obs)
+        sci_good = False
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Concatenation ' + key)
 
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             if len(ww_sci) == 0:
-                raise UserWarning('Could not find any science files')
+                # raise UserWarning('Could not find any science files')
+                print(f'Warning: Could not find any science files. Skipping {key}.')
+                continue
+            sci_good = True
             ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
             ww_all = np.append(ww_sci, ww_ref)
 
@@ -4021,6 +4082,9 @@ class ImageTools():
                 plt.show()
                 plt.close(fig)
 
+        if not sci_good:
+            raise(ValueError('No science frames found in database concatenations'))
+
 
     def calculate_alignment(self,
                             method='fourier',
@@ -4117,13 +4181,17 @@ class ImageTools():
 
         # Loop through concatenations.
         database_temp = deepcopy(self.database.obs)
+        sci_good = False
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Concatenation ' + key)
 
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             if len(ww_sci) == 0:
-                raise UserWarning('Could not find any science files')
+                # raise UserWarning('Could not find any science files')
+                print(f'Warning: Could not find any science files. Skipping {key}.')
+                continue
+            sci_good = True
             ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
             ww_all = np.append(ww_sci, ww_ref)
 
@@ -4289,7 +4357,9 @@ class ImageTools():
                     head_sci['STARCENX'] = starcenx
                     head_sci['STARCENY'] = starceny
 
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
@@ -4393,6 +4463,9 @@ class ImageTools():
                     log.info(f" Plot saved in {output_file}")
                 plt.show()
                 plt.close(fig)
+
+        if not sci_good:
+            raise(ValueError('No science frames found in database concatenations'))
 
     def shift_frames(self,
                      method='fourier',
@@ -4618,7 +4691,9 @@ class ImageTools():
                 head_sci['CRPIX2'] = crpix2
 
                 # Save fits file.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
 
                 # Update spaceKLIP database.
