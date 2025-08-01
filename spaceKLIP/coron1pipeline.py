@@ -162,6 +162,10 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
                 input = self.run_step(self.subtract_1overf, input)
             # TODO: Test clean_flicker_noise step versus subtract_1overf
             # input = self.clean_flicker_noise(input)
+
+        # If dark current step was skipped, set the cal_step to SKIPPED
+        if self.dark_current.skip:
+            input.meta.cal_step.dark_current = 'SKIPPED'
         
         # save the corrected ramp data, if requested
         if self.ramp_fit.save_calibrated_ramp or self.save_calibrated_ramp or self.save_intermediates:
@@ -634,7 +638,8 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
     skip_dark : bool, optional
         Skip dark current subtraction step? Default is True for 
         subarrays and False for full frame data.
-        Dark current cal files for subarrays are really low SNR.
+        Dark current cal files for subarrays are low SNR.
+        Also can be problematic when NGROUPx(NREAD+NDROP)>100.
     skip_ipc : bool, optional
         Skip IPC correction step? Default: False.
     skip_persistence : bool, optional
