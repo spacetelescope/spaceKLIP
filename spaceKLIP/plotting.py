@@ -225,7 +225,8 @@ def display_coron_image(filename,
                         dq_only=False,
                         zoom_center=3,
                         ax=None,
-                        plot_style=None):
+                        plot_style=None,
+                        cmap='viridis'):
     """
     Display and annotate a coronagraphic image.
     
@@ -340,7 +341,7 @@ def display_coron_image(filename,
         fig = ax.figure  # Get the figure from the provided axes.
     
     if not dq_only:
-        im = ax.imshow(image, norm=norm)
+        im = ax.imshow(image, norm=norm, cmap=cmap)
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.95)
         cb = fig.colorbar(im, ax=ax, cax=cax, label=bunit)
@@ -451,6 +452,13 @@ def display_coron_dataset(database,
     None.
 
     """
+
+    def update_image(index):
+        #plt.clf()
+        display_coron_image(filtered_files[index], vmin=vmin, vmax=vmax, stretch=stretch,
+                            zoom_center=zoom_center, dq_only=dq_only, bbox_color=bbox_color)
+        plt.show()
+
     # Intialize the matplotlib style.
     load_plt_style(plot_style)
 
@@ -481,22 +489,19 @@ def display_coron_dataset(database,
 
         filtered_files += [row['FITSFILE'] for row in table if row['TYPE'] in types]
 
-        # Loop through each file that matches the specified types.
-        for fn in filtered_files:
-            display_coron_image(fn, vmin=vmin, vmax=vmax, stretch=stretch, zoom_center=zoom_center)
-            if pdf:
-                pdf.savefig(plt.gcf())
-            if interactive:
-                plt.close()  # Close the figure to avoid displaying it.
+    # Loop through each file that matches the specified types.
+    for fn in filtered_files:
+        display_coron_image(fn, vmin=vmin, vmax=vmax, stretch=stretch, zoom_center=zoom_center)
+        if pdf:
+            pdf.savefig(plt.gcf())
+        if not interactive:
+            plt.show()
+        # if interactive:
+        plt.close()  # Close the figure to avoid displaying it.
 
     # Optional: interactively slide through the files in the database.
     if interactive:
         slider = widgets.IntSlider(value=0, min=0, max=len(filtered_files) - 1, step=1, description='Image  Index:')
-        def update_image(index):
-            #plt.clf()
-            display_coron_image(filtered_files[index], vmin=vmin, vmax=vmax, stretch=stretch,
-                                zoom_center=zoom_center, dq_only=dq_only, bbox_color=bbox_color)
-            plt.show()
         out = widgets.interactive_output(update_image, {'index': slider})
         display(slider, out)
     
@@ -553,6 +558,59 @@ def display_image_comparisons(database,
     None.
     """
 
+    def update_image(index):
+        fn = filtered_files[index]
+        root_dir = fn.split(os.sep)[0]  # Extract the root directory from the file path.
+        base_fn = os.path.basename(fn)  # Extract the base filename from the file path.
+
+        # Create figure of appropriate size.
+        num_dirs = len(base_dirs)
+        num_rows, num_cols = (1, num_dirs) if num_dirs <= 3 else (2, (num_dirs + 1) // 2)
+        fig, axes = plt.subplots(num_rows, num_cols, figsize=(num_cols * 10, num_rows * 10))
+        axes = axes.flatten() if isinstance(axes, np.ndarray) else [axes]
+
+   
+        # Iterate over each base directory and its image information.
+        for ax, (base_dir, image_info) in zip(axes, image_files.items()):
+            fn_path = os.path.join(root_dir, base_dir, base_fn)  # Full file path.
+            
+            # Count the number of bad (DO_NOT_USE) pixels in the DQ data.
+            dq = fits.getdata(fn_path, extname='DQ')
+            num_bad_pixels = np.sum((dq & 1) == 1)
+            image_info['bp_counts'].append(num_bad_pixels)
+
+            # Handle subtraction only if enabled.
+            if subtract_first:
+                # Load and subtract the first SCI frame from the current frame.
+                with tempfile.NamedTemporaryFile(suffix='_' + fn.split('_')[-1], delete=False) as tmp:
+                    shutil.copy2(fn_path, tmp.name)
+                    with fits.open(tmp.name, mode='update') as hdul:
+                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI')
+                        hdul['SCI'].data -= first_sci_frame.astype(np.float32)
+                        
+                        # Determine the center of the image.
+                        ny, nx = hdul['SCI'].data.shape[-2:]  # Handle both 2D and 3D arrays.
+                        ax.axhline(y=ny // 2, color='white', linestyle='--', linewidth=1)
+                        ax.axvline(x=nx // 2, color='white', linestyle='--', linewidth=1)
+
+                        hdul.flush()
+                    fn_path = tmp.name
+            ax = display_coron_image(fn_path, ax=ax, vmin=vmin, vmax=vmax, stretch=stretch, zoom_center=zoom_center, dq_only=dq_only)
+            ax.images[0].set_cmap('RdBu_r' if subtract_first else 'viridis')
+            plt.draw()
+
+            ax.set_title(base_dir)
+            ax.legend(handles=[patches.Patch(color='orange', label=f"DO_NOT_USE = {image_info['bp_counts'][0]} px")],
+                      loc='lower center', bbox_to_anchor=(0.5, -0.18))
+        fig.suptitle(
+            f"{os.path.basename(fn)} - {os.path.basename(image_info['first_sci_file'])}" if subtract_first else os.path.basename(fn),
+            fontsize=16)
+        
+    def update_image_show(index):
+        update_image(index)
+        plt.show()
+
+
     # Intialize the matplotlib style.
     load_plt_style(plot_style)
     
@@ -596,75 +654,34 @@ def display_image_comparisons(database,
         print("No files found. Check 'restrict_to' criteria. Exiting.")
         return 
 
-    # Create figure of appropriate size.
-    num_dirs = len(base_dirs)
-    num_rows, num_cols = (1, num_dirs) if num_dirs <= 3 else (2, (num_dirs + 1) // 2)
     
     # Iterate over the filtered files to process and display images.
-    def update_image(index):
-        fn = filtered_files[index]
-        root_dir = fn.split(os.sep)[0]  # Extract the root directory from the file path.
-        base_fn = os.path.basename(fn)  # Extract the base filename from the file path.
-        fig, axes = plt.subplots(num_rows, num_cols, figsize=(num_cols * 10, num_rows * 10))
-        axes = axes.flatten() if isinstance(axes, np.ndarray) else [axes]
-
-   
-        # Iterate over each base directory and its image information.
-        for ax, (base_dir, image_info) in zip(axes, image_files.items()):
-            fn_path = os.path.join(root_dir, base_dir, base_fn)  # Full file path.
-            
-            # Count the number of bad (DO_NOT_USE) pixels in the DQ data.
-            dq = fits.getdata(fn_path, extname='DQ')
-            num_bad_pixels = np.sum((dq & 1) == 1)
-            image_info['bp_counts'].append(num_bad_pixels)
-
-            # Handle subtraction only if enabled.
-            if subtract_first:
-                # Load and subtract the first SCI frame from the current frame.
-                with tempfile.NamedTemporaryFile(suffix='_' + fn.split('_')[-1], delete=False) as tmp:
-                    shutil.copy2(fn_path, tmp.name)
-                    with fits.open(tmp.name, mode='update') as hdul:
-                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI')
-                        hdul['SCI'].data -= first_sci_frame.astype(np.float32)
-                        
-                        # Determine the center of the image.
-                        ny, nx = hdul['SCI'].data.shape[-2:]  # Handle both 2D and 3D arrays.
-                        ax.axhline(y=ny // 2, color='white', linestyle='--', linewidth=1)
-                        ax.axvline(x=nx // 2, color='white', linestyle='--', linewidth=1)
-
-                        hdul.flush()
-                    fn_path = tmp.name
-            ax = display_coron_image(fn_path, ax=ax, vmin=vmin, vmax=vmax, stretch=stretch, zoom_center=zoom_center, dq_only=dq_only)
-            ax.images[0].set_cmap('RdBu_r' if subtract_first else 'viridis')
-            plt.draw()
-
-            ax.set_title(base_dir)
-            ax.legend(handles=[patches.Patch(color='orange', label=f"DO_NOT_USE = {image_info['bp_counts'][0]} px")],
-                      loc='lower center', bbox_to_anchor=(0.5, -0.18))
-        fig.suptitle(
-            f"{os.path.basename(fn)} - {os.path.basename(image_info['first_sci_file'])}" if subtract_first else os.path.basename(fn),
-            fontsize=16)
-        if interactive:
+    for i in range(len(filtered_files)):
+        update_image(i+1 if subtract_first else i)
+        if pdf:
+            pdf.savefig(plt.gcf(), bbox_inches='tight')
+        if not interactive:
             plt.show()
-    
+        # if interactive:
+        plt.close()  # Close the figure to avoid displaying it.
+
     # Optional: interactively slide through the files in the database.
     if interactive:
         slider = widgets.IntSlider(value=0, min=1 if subtract_first else 0, max=len(filtered_files) - 1, step=1, description='Image Index:')
-        out = widgets.interactive_output(update_image, {'index': slider})
+        out = widgets.interactive_output(update_image_show, {'index': slider})
         display(slider, out)
    
     # Static mode.
-    else:
-        for i in range(len(filtered_files)):
-            update_image(i+1 if subtract_first else i)
-            if pdf:
-                pdf.savefig(plt.gcf())
-            plt.show()
-            plt.close()
+    # else:
+    #     for i in range(len(filtered_files)):
+    #         update_image_show(i+1 if subtract_first else i)
+    #         if pdf:
+    #             pdf.savefig(plt.gcf(), bbox_inches='tight')
+    #         plt.close()
 
-        if pdf:
-            pdf.close()
-            
+    if pdf:
+        pdf.close()
+        
 
 def plot_contrast_images(meta,
                          data,
@@ -863,26 +880,30 @@ def plot_contrast_calibrated(thrput,
     load_plt_style(plot_style)
 
     f, ax = plt.subplots(1, 2, figsize=(2*6.4, 1*4.8))
-    ax[0].plot(med_thrput['seps'], med_thrput['tps'], color='mediumaquamarine', label='Median throughput')
-    ax[0].scatter(thrput['seps'], thrput['tps'], s=75, color='mediumaquamarine', alpha=0.5)
-    ax[0].plot(fit_thrput['seps'], fit_thrput['tps'], color='teal', label='Best fit model')
-    ax[0].set_xlim([fit_thrput['seps'][0], fit_thrput['seps'][-1]])
-    ax[0].set_ylim([0.0, 1.2])
-    ax[0].grid(axis='y')
-    ax[0].set_xlabel('Separation [pix]')
-    ax[0].set_ylabel('Throughput')
-    ax[0].set_title('Algo & coronmsk throughput')
-    ax[0].legend(loc='lower right')
-    ax[1].plot(con_seps, cons, color='mediumaquamarine', label='Raw contrast')
-    ax[1].plot(con_seps, corr_cons, color='teal', label='Calibrated contrast')
-    ax[1].set_yscale('log')
-    ax[1].set_xlim([0., np.max(con_seps)]) # arcsec
-    ax[1].set_ylim(top=3e-3)
-    ax[1].grid(axis='y')
-    ax[1].set_xlabel('Separation [arcsec]')
-    ax[1].set_ylabel('Contrast [5$\sigma$]')
-    ax[1].set_title('Calibrated contrast curve')
-    ax[1].legend(loc='upper right')
+    ax = ax[0]
+    ax.plot(med_thrput['seps'], med_thrput['tps'], color='mediumaquamarine', label='Median throughput')
+    ax.scatter(thrput['seps'], thrput['tps'], s=75, color='mediumaquamarine', alpha=0.5)
+    ax.plot(fit_thrput['seps'], fit_thrput['tps'], color='teal', label='Best fit model')
+    ax.set_xlim([fit_thrput['seps'][0], fit_thrput['seps'][-1]])
+    ax.set_ylim([0.0, 1.2])
+    ax.grid(axis='y')
+    ax.set_xlabel('Separation [pix]')
+    ax.set_ylabel('Throughput')
+    ax.set_title('Algo & coronmsk throughput')
+    ax.legend(loc='lower right')
+
+    ax = ax[1]
+    ax.plot(con_seps, cons, color='mediumaquamarine', label='Raw contrast')
+    ax.plot(con_seps, corr_cons, color='teal', label='Calibrated contrast')
+    ax.set_yscale('log')
+    ax.set_xlim([0., np.max(con_seps)]) # arcsec
+    ax.set_ylim(top=3e-3)
+    ax.grid(axis='y')
+    ax.set_xlabel('Separation [arcsec]')
+    ax.set_ylabel('Contrast [5$\sigma$]')
+    ax.set_title('Calibrated contrast curve')
+    ax.legend(loc='upper right')
+    
     plt.tight_layout()
     plt.savefig(savefile)
     plt.close()
