@@ -112,8 +112,8 @@ class Database():
                             cr_from_siaf=False,
                             assoc_using_targname=True):
         """
-        Read JWST stage 0 (\*uncal), 1 (\*rate or \*rateints), or 2 (\*cal or
-        \*calints) data into the Database.obs dictionary. It contains a table of
+        Read JWST stage 0 (uncal), 1 (rate or rateints), or 2 (cal or
+        calints) data into the Database.obs dictionary. It contains a table of
         metadata for each concatenation, which are identified automatically
         based on instrument, filter, pupil mask, and image mask. The tables can
         be edited by the user at any stage of the data reduction process and
@@ -419,8 +419,10 @@ class Database():
                         ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
                         ww_ref = np.where(numdthpt == numdthpt_unique[1])[0]
                     else:
+                        ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
+                        ww_ref = None
                         log.warning('  --> Could not identify science and reference files based on dither pattern')
-                        raise UserWarning('Please use psflibpaths to specify reference files')
+                        raise UserWarning('Consider using psflibpaths to specify reference files')
 
             # Make Astropy tables for concatenations.
             tab = Table(names=('TYPE',
@@ -511,7 +513,8 @@ class Database():
                                'float',
                                'object',
                                'object'))
-            for j in np.append(ww_sci, ww_ref):
+            ww_all = ww_sci if ww_ref is None else np.append(ww_sci, ww_ref)
+            for j in ww_all:
                 if j in ww_sci:
                     sci = True
                 else:
@@ -546,7 +549,10 @@ class Database():
                         pipeline = Detector1Pipeline()
                         input = datamodels.open(allpaths[ww][j])
                         maskfile = pipeline.get_reference_file(input, 'psfmask')
-                        config_stpipe_log(suppress=True)  # Revert to default logging.
+                        if (maskfile is None) or (not os.path.exists(maskfile)):
+                            maskfile = 'NONE'
+
+                        config_stpipe_log(suppress=False)  # Revert to default logging.
 
                     elif EXP_TYPE[ww][j] == 'MIR_4QPM' or EXP_TYPE[ww][j] == 'MIR_LYOT':
                         if APERNAME[ww][j] == 'MIRIM_MASK1065':
@@ -653,7 +659,7 @@ class Database():
                           datapaths,
                           cr_from_siaf=False):
         """
-        Read JWST stage 3 data (this can be \*i2d data from the official JWST
+        Read JWST stage 3 data (this can be i2d data from the official JWST
         pipeline, or data products from the pyKLIP and classical PSF
         subtraction pipelines implemented in spaceKLIP) into the Database.red
         dictionary. It contains a table of metadata for each concatenation,
@@ -1471,7 +1477,7 @@ class Database():
 
 
 def create_database(output_dir,
-                    pid,
+                    pid=None,
                     obsids=None,
                     input_dir=None,
                     psflibpaths=None,
@@ -1539,7 +1545,9 @@ def create_database(output_dir,
         products. By default, only levels 0,1,2 data will be read and indexed.
     """
 
-    if input_dir is None:
+    if (pid is None) and (input_dir is None):
+        raise ValueError("Must provide either a pid or an input_dir")
+    elif input_dir is None:
         mast_dir = os.getenv('JWSTDOWNLOAD_OUTDIR')
         input_dir = os.path.join(mast_dir, f'{pid:05d}')
 
@@ -1548,7 +1556,7 @@ def create_database(output_dir,
         obsids = [obsids]
 
     # Cycle through all obsids and get the files in a single list
-    fitsfiles = [get_files(input_dir, pid, obsid=oid, **kwargs) for oid in obsids]
+    fitsfiles = [get_files(input_dir, pid=pid, obsid=oid, **kwargs) for oid in obsids]
     fitsfiles = [f for sublist in fitsfiles for f in sublist]
     datapaths = [os.path.join(input_dir, f) for f in fitsfiles]
 

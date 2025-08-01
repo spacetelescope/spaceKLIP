@@ -6,6 +6,36 @@ _log.setLevel(logging.INFO)
 from contextlib import contextmanager
 
 @contextmanager
+def crds_logging_disabled(highest_level=-3):
+    """
+    A context manager that will prevent any logging messages
+    triggered during the body from being processed.
+
+    Usage to suppress levels up to Critical:
+
+        >>> with crds_logging_disabled(-3):
+        >>>     do_something()
+
+    Parameters
+    ----------
+    highest_level : int
+        For CRDS, logging levels are defined as:
+        -3: CRITICAL
+        -2: ERROR
+        -1: WARNING
+         0: INFO
+         1: DEBUG
+    """
+    from crds.core import log as crds_log
+    previous_level = crds_log.get_verbose()
+    crds_log.set_verbose(highest_level)
+    try:
+        yield
+    finally:
+        crds_log.set_verbose(previous_level)
+
+
+@contextmanager
 def all_logging_disabled(highest_level=logging.CRITICAL):
     """
     A context manager that will prevent any logging messages
