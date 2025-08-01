@@ -263,13 +263,14 @@ class ExperimentalJumpRampStep(Step):
         with fits.open(file) as hdul:
             full = hdul['SCI'].data
 
+        xstrt = datamodel.meta.subarray.xstart-1 #SUBSTRT1
+        ystrt = datamodel.meta.subarray.ystart-1 #SUBSTRT2
+        xsize = datamodel.meta.subarray.xsize    #SUBSIZE1
+        ysize = datamodel.meta.subarray.ysize    #SUBSIZE2
+
         if trim == True:
-            # Trim full array to subarray for this data
-            xstrt = datamodel.meta.subarray.xstart-1 #SUBSTRT1
-            ystrt = datamodel.meta.subarray.ystart-1 #SUBSTRT2
-            xsize = datamodel.meta.subarray.xsize    #SUBSIZE1
-            ysize = datamodel.meta.subarray.ysize    #SUBSIZE2
-            subref = full[ystrt:ystrt+ysize, xstrt:xstrt+xsize]
+            # Trim full array to subarray for this data if necessary
+            subref = full if full.shape == (ysize, xsize) else full[ystrt:ystrt+ysize, xstrt:xstrt+xsize]
         else:
             subref = full
 
