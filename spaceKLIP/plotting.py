@@ -879,8 +879,8 @@ def plot_contrast_calibrated(thrput,
     # Intialize the matplotlib style.
     load_plt_style(plot_style)
 
-    f, ax = plt.subplots(1, 2, figsize=(2*6.4, 1*4.8))
-    ax = ax[0]
+    f, axes = plt.subplots(1, 2, figsize=(2*6.4, 1*4.8))
+    ax = axes[0]
     ax.plot(med_thrput['seps'], med_thrput['tps'], color='mediumaquamarine', label='Median throughput')
     ax.scatter(thrput['seps'], thrput['tps'], s=75, color='mediumaquamarine', alpha=0.5)
     ax.plot(fit_thrput['seps'], fit_thrput['tps'], color='teal', label='Best fit model')
@@ -892,7 +892,7 @@ def plot_contrast_calibrated(thrput,
     ax.set_title('Algo & coronmsk throughput')
     ax.legend(loc='lower right')
 
-    ax = ax[1]
+    ax = axes[1]
     ax.plot(con_seps, cons, color='mediumaquamarine', label='Raw contrast')
     ax.plot(con_seps, corr_cons, color='teal', label='Calibrated contrast')
     ax.set_yscale('log')
@@ -903,7 +903,7 @@ def plot_contrast_calibrated(thrput,
     ax.set_ylabel('Contrast [5$\sigma$]')
     ax.set_title('Calibrated contrast curve')
     ax.legend(loc='upper right')
-    
+
     plt.tight_layout()
     plt.savefig(savefile)
     plt.close()
@@ -970,19 +970,14 @@ def plot_chains(chain, savefile):
     Plot MCMC chains from companion fitting
     '''
 
-    f, ax = plt.subplots(4, 1, figsize=(1*6.4, 2*4.8))
-    ax[0].plot(chain[:, :, 0].T, color='black', alpha=1./3.)
-    ax[0].set_xlabel('Steps')
-    ax[0].set_ylabel(r'$\Delta$RA [mas]')
-    ax[1].plot(chain[:, :, 1].T, color='black', alpha=1./3.)
-    ax[1].set_xlabel('Steps')
-    ax[1].set_ylabel(r'$\Delta$Dec [mas]')
-    ax[2].plot(chain[:, :, 2].T, color='black', alpha=1./3.)
-    ax[2].set_xlabel('Steps')
-    ax[2].set_ylabel(r'$\alpha$ [sec/pri]')
-    ax[3].plot(chain[:, :, 3].T, color='black', alpha=1./3.)
-    ax[3].set_xlabel('Steps')
-    ax[3].set_ylabel(r'$l$ [pix]')
+    labels = [r'$\Delta$RA [mas]', r'$\Delta$Dec [mas]', r'$\alpha$ [sec/pri]', r'$l$ [pix]']
+
+    f, axes = plt.subplots(4, 1, figsize=(1*6.4, 2*4.8))
+    for i, ax in enumerate(axes):
+        ax.plot(chain[:, :, i].T, color='black', alpha=1./3.)
+        ax.set_xlabel('Steps')
+        ax.set_ylabel(labels[i])
+
     plt.suptitle('MCMC chains')
     plt.tight_layout()
     plt.savefig(savefile)
