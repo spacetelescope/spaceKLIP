@@ -520,6 +520,7 @@ def display_image_comparisons(database,
                               interactive=False,
                               dq_only=False,
                               subtract_first=False,
+                              first_type='SCI',
                               plot_style=None):
     """
     Compare images before and after processing.
@@ -549,7 +550,10 @@ def display_image_comparisons(database,
     dq_only : bool, optional
         If True, only the DO_NOT_USE DQ flags are displayed, not the image data itself.
     subtract_first : bool
-        Whether to subtract the first SCI frame from subsequent frames.
+        Whether to subtract the first pointing from subsequent frames. Defaults to choosing first SCI frame in the list.
+        If no SCI image, will choose the first REF image in the list.
+    first_type : str, optional
+        The type of the first image to use for subtraction. If not provided, defaults to 'SCI'.
     interactive : bool, optional
         If `True`, the plots will be displayed interactively.
     
@@ -585,8 +589,12 @@ def display_image_comparisons(database,
                 with tempfile.NamedTemporaryFile(suffix='_' + fn.split('_')[-1], delete=False) as tmp:
                     shutil.copy2(fn_path, tmp.name)
                     with fits.open(tmp.name, mode='update') as hdul:
-                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI')
-                        hdul['SCI'].data -= first_sci_frame.astype(np.float32)
+                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI').astype(np.float32)
+                        dq_first = fits.getdata(image_info['first_sci_file'], extname='DQ')
+                        bpmask = np.isnan(first_sci_frame) | ((dq_first & 1) == 1)
+                        first_sci_frame[bpmask] = np.nan  # Set bad pixels to NaN.
+                        image = np.nanmean(first_sci_frame, axis=0) if first_sci_frame.ndim==3 else first_sci_frame
+                        hdul['SCI'].data -= image
                         
                         # Determine the center of the image.
                         ny, nx = hdul['SCI'].data.shape[-2:]  # Handle both 2D and 3D arrays.
@@ -637,18 +645,53 @@ def display_image_comparisons(database,
         
         # Filter for SCI and REF types.
         filtered_table = [row for row in table if row['TYPE'] in ['SCI', 'REF']]
-        filtered_files.extend(row['FITSFILE'] for row in filtered_table)
-
-        # Check if any SCI data remains after filtering.
-        if not any(row['TYPE'] == 'SCI' for row in filtered_table):
-            print(f"No SCI type files found in key: {key}.")
-            continue
        
         # Identify the first SCI frame for subtraction, store it for later use.
-        first_sci_file = next((row['FITSFILE'] for row in filtered_table if row['TYPE'] == 'SCI'), None)
-        root_dir = first_sci_file.split(os.sep)[0]
-        for base_dir in base_dirs:
-            image_files[base_dir]['first_sci_file'] = os.path.join(root_dir, base_dir, os.path.basename(first_sci_file))
+        if subtract_first:
+            first_sci_file = next((row['FITSFILE'] for row in filtered_table if row['TYPE'] == 'SCI'), None)
+            first_ref_file = next((row['FITSFILE'] for row in filtered_table if row['TYPE'] == 'REF'), None)
+            first_file = None
+            if first_type == 'SCI' and first_sci_file is not None:
+                first_file = first_sci_file
+            elif first_type == 'SCI' and first_sci_file is None:
+                if first_ref_file is not None:
+                    print(f"No SCI type files found in key: {key}.")
+                    print(f"Using first REF file instead.")
+                    first_file = first_ref_file
+                else:
+                    print(f"No SCI or REF type files found in key: {key}.")
+                    continue
+            elif first_type == 'REF' and first_ref_file is not None:
+                first_file = first_ref_file
+            elif first_type == 'REF' and first_ref_file is None:
+                if first_sci_file is not None:
+                    print(f"No REF type files found in key: {key}.")
+                    print(f"Using first SCI file instead.")
+                    first_file = first_sci_file
+                else:
+                    print(f"No SCI or REF type files found in key: {key}.")
+                    continue
+            elif first_type not in ['SCI', 'REF']:
+                print(f'first_type={first_type} not recognized. Must be "SCI" or "REF".')
+                continue
+
+            if first_file is None:
+                print(f"No {first_type} type files found in key: {key}.")
+                continue
+
+            root_dir = first_file.split(os.sep)[0]
+            for base_dir in base_dirs:
+                image_files[base_dir]['first_sci_file'] = os.path.join(root_dir, base_dir, os.path.basename(first_file))
+
+            # Remove the first_file from the filtered tabled
+            for i, row in enumerate(filtered_table):
+                if os.path.basename(first_file) in row['FITSFILE']:
+                    filtered_table.pop(i)
+                    break
+
+
+        # Add the FITS files from the filtered table to the final list
+        filtered_files.extend(row['FITSFILE'] for row in filtered_table)
 
     if len(filtered_files)==0:
         print("No files found. Check 'restrict_to' criteria. Exiting.")
@@ -656,8 +699,9 @@ def display_image_comparisons(database,
 
     
     # Iterate over the filtered files to process and display images.
-    for i in range(len(filtered_files)):
-        update_image(i+1 if subtract_first else i)
+    nfiles = len(filtered_files)
+    for i in range(nfiles):
+        update_image(i)
         if pdf:
             pdf.savefig(plt.gcf(), bbox_inches='tight')
         if not interactive:
@@ -667,7 +711,7 @@ def display_image_comparisons(database,
 
     # Optional: interactively slide through the files in the database.
     if interactive:
-        slider = widgets.IntSlider(value=0, min=1 if subtract_first else 0, max=len(filtered_files) - 1, step=1, description='Image Index:')
+        slider = widgets.IntSlider(value=0, min=0, max=nfiles - 1, step=1, description='Image Index:')
         out = widgets.interactive_output(update_image_show, {'index': slider})
         display(slider, out)
    
