@@ -4213,11 +4213,11 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
                 if mask_override is not None:
                     if mask_override == 'ann':
-                        mask_circ = create_annulus_mask(data[0].shape[0], data[0].shape[1], radius=msk_shp)
+                        mask_circ = create_annulus_mask(data[0].shape[0], data[0].shape[1], center=(int(self.database.obs[key]['CRPIX1'][j]),int(self.database.obs[key]['CRPIX2'][j])), radius=msk_shp)
                     elif mask_override == 'circ':
-                        mask_circ = create_circular_mask(data[0].shape[0], data[0].shape[1], radius=msk_shp)
+                        mask_circ = create_circular_mask(data[0].shape[0], data[0].shape[1], center=(int(self.database.obs[key]['CRPIX1'][j]),int(self.database.obs[key]['CRPIX2'][j])), radius=msk_shp)
                     elif mask_override == 'rec':
-                        mask_circ = create_rec_mask(data[0].shape[0], data[0].shape[1], z=msk_shp)
+                        mask_circ = create_rec_mask(data[0].shape[0], data[0].shape[1], center=(int(self.database.obs[key]['CRPIX1'][j]),int(self.database.obs[key]['CRPIX2'][j])), z=msk_shp)
                     else:
                         raise ValueError('There are `circ` and `rec` custom masks available')
                     mask_temp = data[0].copy()
