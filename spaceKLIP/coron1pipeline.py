@@ -11,7 +11,7 @@ import os
 import astropy.io.fits as fits
 import numpy as np
 
-from tqdm import trange
+from tqdm.auto import trange
 
 from jwst.stpipe import Step
 from jwst import datamodels
@@ -940,18 +940,18 @@ def run_obs(database,
                     if steps['mask_groups']['mask_method'] == 'basic':
                         steps = prepare_group_masking_basic(steps, 
                                                             database.obs[key], 
-                                                            quiet)
+                                                            quiet=quiet)
                     elif steps['mask_groups']['mask_method'] == 'advanced':
                         fitstype = database.obs[key]['TYPE'][j]
                         steps = prepare_group_masking_advanced(steps, 
                                                                database.obs[key], 
                                                                fitspath, 
                                                                fitstype,
-                                                               quiet)
+                                                               quiet=quiet)
                     elif steps['mask_groups']['mask_method'] == 'custom':
                         steps = prepare_group_masking_custom(steps,
                                                             database.obs[key], 
-                                                            quiet)
+                                                            quiet=quiet)
                 else:
                     # Even though we are using mask_groups, this particular file will not have any groups masked
                     # Instruct to skip the step, but keep a record using skip_revert so we can undo for the next file.

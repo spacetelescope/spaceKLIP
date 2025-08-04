@@ -10,7 +10,7 @@ import os
 
 import astropy.io.fits as pyfits
 
-from tqdm import trange
+from tqdm.auto import trange
 
 from jwst import datamodels
 from jwst.associations.load_as_asn import LoadAsLevel2Asn
