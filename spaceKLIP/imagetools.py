@@ -61,11 +61,14 @@ from pyklip import parallelized
 from pyklip.instruments.JWST import JWSTData
 
 # jwst imports
-import jwst.datamodels
 from jwst.datamodels import dqflags
 from stdatamodels.jwst import datamodels
 from jwst.datamodels import ModelContainer, ModelLibrary
 from jwst.resample import resample_step
+
+from webbpsf_ext.utils import get_one_siaf
+nrc_siaf = get_one_siaf(instrument='NIRCam')
+miri_siaf = get_one_siaf(instrument='MIRI')
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -2688,7 +2691,6 @@ class ImageTools():
             raise UserWarning('Both force_siaf_center and force_db_center are set to True. Only one can be True.')
 
         if not force_db_center:
-            siaf = pysiaf.Siaf('NIRCAM')
             # Use same RegEx as pysiaf to get sorted PRDS for later comparison.
             prds = [prd for i, prd in enumerate(pysiaf.prd_list) if
                     bool(re.match(r"^[A-Z]-\d+", pysiaf.prd_list[i].split("PRDOPSSOC-")[1]))
@@ -2723,7 +2725,7 @@ class ImageTools():
                 if (not force_db_center) and ((np.searchsorted(prds, file_prd_ver) < np.searchsorted(prds, pysiaf.JWST_PRD_VERSION))
                     or force_siaf_center):
                     log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from pysiaf')
-                    apsiaf = siaf[self.database.obs[key]['APERNAME'][j]]
+                    apsiaf = nrc_siaf[self.database.obs[key]['APERNAME'][j]]
                     maskcenx = apsiaf.XSciRef
                     maskceny = apsiaf.YSciRef
                 else:
@@ -5064,19 +5066,18 @@ class ImageTools():
 
 class AlignTools():
     """
-    The spaceKLIP image manipulation tools class.
+    The spaceKLIP image alignment tools class.
 
     """
 
     def __init__(self, database):
         """
-        Initialize the spaceKLIP image manipulation tools class.
+        Initialize the spaceKLIP image alignment tools class.
 
         Parameters
         ----------
         database : spaceKLIP.Database
-            SpaceKLIP database on which the image manipulation steps shall be
-            run.
+            SpaceKLIP database on which the image alignment steps shall be run.
 
         Returns
         -------
@@ -5101,15 +5102,16 @@ class AlignTools():
         for key in self.database.obs:
             tbl = self.database.obs[key]
             fits_file = tbl['FITSFILE'][0]
-            hdr0 = fits.getheader(fits_file, 0)
-            hdr1 = fits.getheader(fits_file, 1)
+            hdr0 = fits.getheader(fits_file, extname='PRIMARY')
+            hdr1 = fits.getheader(fits_file, extname='SCI')
+            siaf = nrc_siaf if tbl['INSTRUME'][0].upper() == 'NIRCAM' else miri_siaf
             self.concat_dict = {}
             self.concat_dict[key] = {
                 'instrument': tbl['INSTRUME'][0],
                 'detector': tbl['DETECTOR'][0],
                 'subarray': tbl['SUBARRAY'][0],
                 'apername': tbl['APERNAME'][0],
-                'ap_siaf': pysiaf.Siaf(tbl['INSTRUME'][0]),
+                'ap_siaf': siaf[tbl['APERNAME'][0]],
                 'has_sb_units': self._has_sb_units(hdr1),
                 'filter': tbl['FILTER'][0],
                 'pupil_mask': tbl['PUPIL'][0],
@@ -5120,6 +5122,7 @@ class AlignTools():
                 'diffusion': self._best_diffusion(tbl['FILTER'][0], tbl['DETECTOR'][0]),
                 'filter_shift': self._get_filter_shift(tbl['FILTER'][0], tbl['CORONMSK'][0]),
             }
+            
 
     def _get_output_dir(self, subdir):
         """Utility function to get full output dir path, and create it if needed"""
@@ -5151,6 +5154,43 @@ class AlignTools():
         from webbpsf_ext.imreg_tools import get_expected_loc
         xind, yind = get_expected_loc(hdr0)
         return (xind, yind)
+
+    def _get_expected_locs(self, frame='pix'):
+        """Get the expected (raw) stellar positions based on header info"""
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            concat_dict = self.concat_dict[key]
+            ap_siaf = concat_dict['ap_siaf']
+
+            # Loop through FITS files.
+            for j in range(len(self.database.obs[key])):
+
+                # Read FITS file
+                head_pri = fits.getheader(self.database.obs[key]['FITSFILE'][j], extname='PRIMARY')
+                xind, yind = self._get_expected_pix(head_pri)
+
+                # Add in filter offsets
+                xsh, ysh = concat_dict['filter_shift']
+                xind += xsh
+                yind += ysh
+
+                xsci, ysci = (xind+1, yind+1)
+                if frame == 'pix':
+                    loc = [xind, yind]
+                elif frame == 'sci':
+                    loc = [xsci, ysci]
+                elif frame == 'det':
+                    loc = ap_siaf.sci_to_det(xsci, ysci)
+                elif frame == 'tel':
+                    loc = ap_siaf.sci_to_tel(xsci, ysci)
+                elif frame == 'idl':
+                    loc = ap_siaf.sci_to_idl(xsci, ysci)
+
+                loc = np.asarray(loc)
+                log.info(f'Expected position in {frame} frame: {loc}')
 
     def _kipc(self, hdr0, sca):
         """IPC kernel
@@ -5221,12 +5261,8 @@ class AlignTools():
 
             # If still not found, continue with no offset
             if len(ind) == 0:
-                # _log.warning(f'No filter offset found for {image_mask} {filter}')
+                log.warning(f'No filter offset found for {image_mask} {filter}')
                 dx_filt = dy_filt = 0
-            elif len(ind)>1:
-                # _log.warning(f'Multiple filter offsets found for {image_mask} {filter}')
-                dx_filt = tbl_filts[dx_key][ind[0]]
-                dy_filt = tbl_filts[dy_key][ind[0]]
             else:
                 dx_filt = tbl_filts[dx_key][ind[0]]
                 dy_filt = tbl_filts[dy_key][ind[0]]
@@ -5235,3 +5271,165 @@ class AlignTools():
             dx_filt = dy_filt = 0
 
         return np.array([dx_filt, dy_filt])
+    
+
+    def update_nircam_centers(self, 
+                              force_siaf_center=False, 
+                              force_db_center=False,
+                              quiet=False):
+        """
+        Checks SIAF PRD version against FITS header PRD version and updates
+        MASKCEN if SIAF version is newer. Also accounts for filter-dependent
+        shifts of the entire image. Might not be required for simulated data.
+
+        This step uses lookup tables of information derived from NIRCam
+        commissioning activities CAR-30 and CAR-31, by J. Leisenring and J. Girard,
+        and subsequent reanalyses using additional data from PSF SGD observations.
+
+        Parameters
+        ----------
+        force_siaf_center : bool, optional
+            Force the use of the SIAF reference pixel position irrespective of
+            versions. The default is False
+        force_db_center : bool, optional
+            Force the use of the database reference pixel position irrespective
+            of versions. The default is False
+
+        Returns
+        -------
+        None.
+        """
+
+        if force_siaf_center and force_db_center:
+            raise UserWarning('Both force_siaf_center and force_db_center are set to True. Only one can be True.')
+
+        if not force_db_center:
+            # Use same RegEx as pysiaf to get sorted PRDS for later comparison.
+            prds = [ # PRDs matching format: PRODOSSOC-###
+                prd for i, prd in enumerate(pysiaf.prd_list) if
+                bool(re.match(r"^[A-Z]-\d+", pysiaf.prd_list[i].split("PRDOPSSOC-")[1]))
+                is False
+            ]  
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            if not quiet: 
+                log.info('--> Concatenation ' + key)
+
+            # Loop through FITS files.
+            for j in range(len(self.database.obs[key])):
+
+                # Skip files that are not NIRCam coronagraphy.
+                if self.database.obs[key]['EXP_TYPE'][j] not in ['NRC_CORON']:
+                    continue
+
+                # Read FITS file
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                head_pri = fits.getheader(fitsfile, extname='PRIMARY')
+
+                # Update current reference pixel position.
+                fitsdir, fitsname = os.path.split(fitsfile)
+                if not quiet: 
+                    log.info(f'  --> Update NIRCam coronagraphy centers: {fitsname}')
+
+                # Get PRD version used for the current file.
+                file_prd_ver = head_pri['PRD_VER']
+
+                # use SIAF for reference pixel positions if its PRD is
+                # newer or if force_siaf_center unless force_db_center.
+                if (not force_db_center):
+                    file_prd_int = np.searchsorted(prds, file_prd_ver)
+                    pysiaf_prd_int = np.searchsorted(prds, pysiaf.JWST_PRD_VERSION)
+                    siaf_prd_is_newer = pysiaf_prd_int > file_prd_int
+
+                if (not force_db_center) and (siaf_prd_is_newer or force_siaf_center):
+                    if not quiet: 
+                        log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from pysiaf')
+                    apsiaf = nrc_siaf[self.database.obs[key]['APERNAME'][j]]
+                    maskcenx = apsiaf.XSciRef
+                    maskceny = apsiaf.YSciRef
+                else:
+                    if not quiet: 
+                        log.info('  --> Update NIRCam coronagraphy centers: using MASKCEN from database')
+                    maskcenx = self.database.obs[key]['MASKCENX'][j]
+                    maskceny = self.database.obs[key]['MASKCENY'][j]
+
+                # Get filter shift
+                xoff, yoff = self.concat_dict[key]['filter_shift']
+                if not quiet: 
+                    log.info(f'  --> Update NIRCam coronagraphy centers: old = ({maskcenx:.2f}, {maskceny:.2f}), new = ({maskcenx + xoff:.2f}, {maskceny + yoff:.2f})')
+                maskcenx += xoff
+                maskceny += yoff
+
+                # Change also CRPIX and STARCEN to expected location based on header info.
+                starcenx = self.database.obs[key]['STARCENX'][j]
+                starceny = self.database.obs[key]['STARCENY'][j]
+                xind, yind = self._get_expected_pix(head_pri)
+                starcenx_new = xind + 1 + xoff
+                starceny_new = yind + 1 + yoff
+                if not quiet: 
+                    log.info(f'  --> Update NIRCam stellar positions: old = ({starcenx:.2f}, {starceny:.2f}), new = ({starcenx_new:.2f}, {starceny_new:.2f})')
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile, 
+                                         maskcenx=maskcenx, maskceny=maskceny,
+                                         starcenx=starcenx_new, starceny=starceny_new,
+                                         crpix1=starcenx_new, crpix2=starceny_new)
+
+    def update_miri_offsets(self, quiet=False):
+        """
+        Updates SCI frame X/Y offsets to zero for older MIRI coronagraphy datasets,
+        and updates REF frame offsets accordingly in FITS headers and the database.
+        """
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            if not quiet: 
+                log.info('--> Concatenation ' + key)
+
+            # Find science and reference files.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+            ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
+            ww_all = np.append(ww_sci, ww_ref)
+
+            # Set the SCI offsets to 0.
+            for j in ww_sci:
+                xoffset_fix = self.database.obs[key]['XOFFSET'][j]  # arcsec
+                yoffset_fix = self.database.obs[key]['YOFFSET'][j]  # arcsec
+                continue
+
+            # Loop through FITS files.
+            for j in ww_all:
+
+                # Skip file types that are not MIRI coronagraphy.
+                if self.database.obs[key]['EXP_TYPE'][j] not in ['MIR_4QPM', 'MIR_LYOT']:
+                    continue
+
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+
+                # Update MIRI mask offsets.
+                fitsdir, fitsname = os.path.split(fitsfile)
+                if not quiet: 
+                    log.info('  --> Update MIRI coronagraphy offsets: ' + fitsname)
+
+                # Apply offset fixes to SCI and REF data.
+                xoffset_old = self.database.obs[key]['XOFFSET'][j]  # arcsec
+                yoffset_old = self.database.obs[key]['YOFFSET'][j]  # arcsec
+                xoffset_new = xoffset_old - xoffset_fix  # arcsec
+                yoffset_new = yoffset_old - yoffset_fix  # arcsec
+
+                if not quiet: 
+                    log.info(f'  --> Update MIRI coronagraphy offsets: old = ({xoffset_old:.3g}, {yoffset_old:.3g}), new = ({xoffset_new:.3g}, {yoffset_new:.3g})')
+
+                # Update the data arrays with the new offsets.
+                with fits.open(fitsfile, mode="update") as hdul:
+                    hdul['PRIMARY'].header['XOFFSET'] = xoffset_new
+                    hdul['PRIMARY'].header['YOFFSET'] = yoffset_new
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset_new, yoffset=yoffset_new)
+
+
