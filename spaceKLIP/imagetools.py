@@ -117,7 +117,7 @@ class ImageTools():
         # Make an internal alias of the spaceKLIP database class.
         self.database = database
 
-        pass
+
 
     def _get_output_dir(self,
                         subdir):
@@ -263,7 +263,7 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, nints=nints)
 
-        pass
+
 
     def crop_frames(self,
                     npix=1,
@@ -368,7 +368,7 @@ class ImageTools():
                                          maskcenx=maskcenx, maskceny=maskceny,
                                          crop_shiftx=crop_shiftx, crop_shifty=crop_shifty)
 
-        pass
+
 
     def pad_frames(self,
                    npix=1,
@@ -466,7 +466,7 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2, starcenx=starcenx, starceny=starceny, maskcenx=maskcenx, maskceny=maskceny)
 
-        pass
+
 
     def coadd_frames(self,
                      nframes=None,
@@ -563,7 +563,7 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, nints=nints, effinttm=effinttm)
 
-        pass
+
 
     def subtract_median(self,
                         types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
@@ -826,7 +826,7 @@ class ImageTools():
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile)
 
-        pass
+
 
     def subtract_background(self,
                             nints_per_med=None,
@@ -1008,7 +1008,7 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
 
-        pass
+
 
     def find_bad_pixels(self,
                         method='dqarr',
@@ -1160,7 +1160,7 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
 
-        pass
+
 
     def fix_bad_pixels(self,
                        method='timemed+localmed+medfilt',
@@ -1332,7 +1332,7 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
 
-        pass
+
 
     def clean_bad_pixels(self,
                          method='timemed+localmed+medfilt',
@@ -1515,7 +1515,6 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
 
-        pass
 
     def find_bad_pixels_sigclip(self,
                                 data,
@@ -1664,10 +1663,10 @@ class ImageTools():
                 ww[i] = ww[i] | mask_new
             ww[i][NON_SCIENCE[i]] = 0
             pxdq[i][ww[i]] = 1
-        print('')
-        log.info('  --> Method sigclip: identified %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
+        nbad_new = np.sum(pxdq) - np.sum(pxdq_orig)
+        nbad_frac = 100. * nbad_new / np.prod(pxdq.shape)
+        log.info(f'  --> Method sigclip: identified {nbad_new:.0f} additional bad pixel(s) -- {nbad_frac:.2f}%')
 
-        pass
 
     def find_bad_pixels_timeints(self,
                                  data,
@@ -1734,10 +1733,10 @@ class ImageTools():
 
         ww = ww | mask_new
         pxdq[ww] = 1
-        print('')
-        log.info('  --> Method timeints: identified %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
+        nbad_new = np.sum(pxdq) - np.sum(pxdq_orig)
+        nbad_frac = 100. * nbad_new / np.prod(pxdq.shape)
+        log.info(f'  --> Method timeints: identified {nbad_new:.0f} additional bad pixel(s) -- {nbad_frac:.2f}%')
 
-        pass
 
     def find_bad_pixels_gradient(self,
                                  data,
@@ -1817,9 +1816,9 @@ class ImageTools():
             # Flag DQ array
             ww[i] = ww[i] | bad_pixels
             pxdq[i][ww[i]] = 1
-        print('')
-        log.info('  --> Method gradient: identified %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
-        pass
+        nbad_new = np.sum(pxdq) - np.sum(pxdq_orig)
+        nbad_frac = 100. * nbad_new / np.prod(pxdq.shape)
+        log.info(f'  --> Method gradient: identified {nbad_new:.0f} additional bad pixel(s) -- {nbad_frac:.2f}%')
 
     def find_bad_pixels_custom(self,
                                data,
@@ -1858,9 +1857,10 @@ class ImageTools():
         if pxdq_custom.ndim == pxdq.ndim - 1:  # Enable 3D bad pixel map to flag individual frames
             pxdq_custom = np.array([pxdq_custom] * pxdq.shape[0])
         pxdq[pxdq_custom] = 1
-        log.info('  --> Method custom: flagged %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
+        nbad_new = np.sum(pxdq) - np.sum(pxdq_orig)
+        nbad_frac = 100. * nbad_new / np.prod(pxdq.shape)
+        log.info(f'  --> Method custom: flagged {nbad_new:.0f} additional bad pixel(s) -- {nbad_frac:.2f}%')
 
-        pass
 
     def fix_bad_pixels_timemed(self,
                                data,
@@ -1901,7 +1901,6 @@ class ImageTools():
         erro[ww_not_all_bad] = np.array([np.nanmedian(erro, axis=0)] * erro.shape[0])[ww_not_all_bad]
         pxdq[ww_not_all_bad] = 0
 
-        pass
 
     def fix_bad_pixels_localmed(self,
                                 data,
@@ -1989,8 +1988,11 @@ class ImageTools():
             erro_med = np.nanmedian(erro_arr, axis=0)
             erro[i][ww[i]] = erro_med[ww[i]]
             pxdq[i][ww[i]] = 0
-        log.info('  --> Method localmed: fixing %.0f bad pixel(s) -- %.2f%%' % (np.sum(ww), 100. * np.sum(ww) / np.prod(ww.shape)))
-        pass
+
+        nfix = np.sum(ww)
+        nfrac = 100. * nfix / np.prod(ww.shape)
+        log.info(f'  --> Method localmed: fixing {nfix:.0f} bad pixel(s) -- {nfrac:.2f}%')
+
 
     def fix_bad_pixels_medfilt(self,
                                data,
@@ -2028,7 +2030,9 @@ class ImageTools():
 
         # Fix bad pixels using median filter.
         ww = pxdq != 0
-        log.info('  --> Method medfilt: fixing %.0f bad pixel(s) -- %.2f%%' % (np.sum(ww), 100. * np.sum(ww) / np.prod(ww.shape)))
+        nfix = np.sum(ww)
+        nfrac = 100. * nfix / np.prod(ww.shape)
+        log.info(f'  --> Method medfilt: fixing {nfix:.0f} bad pixel(s) -- {nfrac:.2f}%')
         data_temp = data.copy()
         data_temp[np.isnan(data_temp)] = 0.
         erro_temp = erro.copy()
@@ -2037,8 +2041,6 @@ class ImageTools():
             data[i][ww[i]] = median_filter(data_temp[i], **medfilt_kwargs)[ww[i]]
             erro[i][ww[i]] = median_filter(erro_temp[i], **medfilt_kwargs)[ww[i]]
             pxdq[i][ww[i]] = 0
-
-        pass
 
     def fix_bad_pixels_interp2d(self,
                                 data,
@@ -2061,7 +2063,10 @@ class ImageTools():
             Keyword arguments for the 'interp2d' method. Available keywords are:
 
             - size : int, optional
-                Kernel size of the median filter to be used. The default is 4.
+                Kernel size of the median filter to be used. The default is 5.
+            - method : str, optional
+                Interpolation method to be used. The default is 'linear'.
+                Other options are 'nearest' and 'cubic'.
 
             The default is {}.
 
@@ -2070,22 +2075,23 @@ class ImageTools():
         None.
         """
 
-        # Check input.
-        if 'size' not in interp2d_kwargs.keys():
-            interp2d_kwargs['size'] = 5
-        interp2d_size = interp2d_kwargs['size']
+        # Get size of interpolation kernel. Defaul to 5 pixels.
+        interp2d_size = interp2d_kwargs.get('size', 5)
+        method = interp2d_kwargs.get('method', 'linear')
 
         # Fix bad pixels using interpolation of neighbors.
         pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
         ww = (pxdq != 0) & (~pxmask_nonsci)
-        log.info('  --> Method interp2d: fixing %.0f bad pixel(s) -- %.2f%%' % (np.sum(ww), 100. * np.sum(ww) / np.prod(ww.shape)))
+        nfix = np.sum(ww)
+        nfrac = 100. * nfix / np.prod(ww.shape)
+        log.info(f'  --> Method interp2d: fixing {nfix:.0f} bad pixel(s) -- {nfrac:.2f}%')
 
         # NaN pixels to be replaced with interpolation
         data_temp = data.copy()
-        data_temp[np.where(np.isnan(data_temp))] = 0
+        data_temp[np.isnan(data_temp)] = 0
         data_temp[ww] = np.nan
         erro_temp = erro.copy()
-        erro_temp[np.where(np.isnan(erro_temp))] = 0
+        erro_temp[np.isnan(erro_temp)] = 0
         erro_temp[ww] = np.nan
 
         rows, cols = data_temp[0].shape
@@ -2095,10 +2101,10 @@ class ImageTools():
                 for ci in range(cols):
                     if np.isnan(data_temp[i][ri, ci]):
                         # Calculate the indices of the NxN box centered around the NaN pixel
-                        x_min = max(0, ci - half_box)
-                        x_max = min(cols, ci + half_box + 1)
-                        y_min = max(0, ri - half_box)
-                        y_max = min(rows, ri + half_box + 1)
+                        x_min = np.max([0, ci - half_box])
+                        x_max = np.min([cols, ci + half_box + 1])
+                        y_min = np.max([0, ri - half_box])
+                        y_max = np.min([rows, ri + half_box + 1])
 
                         # Extract a NxN box within the valid range
                         box = data_temp[i][y_min:y_max, x_min:x_max]
@@ -2126,25 +2132,24 @@ class ImageTools():
                             data_interp = griddata((x_coords, y_coords),
                                                    box_values,
                                                    (ci, ri),
-                                                   method='linear',
+                                                   method=method,
                                                    fill_value=np.nan)
 
                             # Replace data pixel with interpolated value
                             data[i][ri, ci] = data_interp
 
-                            # Perform interpolation of error
+                            # Perform interpolation on variance
                             err_interp = griddata((ex_coords, ey_coords),
-                                                  ebox_values,
+                                                  ebox_values**2,
                                                   (ci, ri),
-                                                  method='linear',
-                                                  fill_value=np.nan)
+                                                  method=method,
+                                                  fill_value=np.nan)**0.5
 
                             # Replace error pixel
                             erro[i][ri, ci] = err_interp
 
                             pxdq[i][ww[i]] = 0
 
-        pass
 
     def replace_nans(self,
                      cval=0.,
@@ -2196,7 +2201,9 @@ class ImageTools():
                     log.info('  --> Nan replacement: ' + tail)
                     ww = np.isnan(data)
                     data[ww] = cval
-                    log.info('  --> Nan replacement: replaced %.0f nan pixel(s) with value ' % (np.sum(ww)) + str(cval) + ' -- %.2f%%' % (100. * np.sum(ww)/np.prod(ww.shape)))
+                    nfix = np.sum(ww)
+                    nfrac = 100. * nfix / np.prod(ww.shape)
+                    log.info(f'  --> Nan replacement: replaced {nfix:.0f} nan pixel(s) with value {cval} -- {nfrac:.2f}%')
 
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
@@ -2207,7 +2214,6 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
 
-        pass
 
     def blur_frames(self,
                     fact='auto',
@@ -2321,8 +2327,6 @@ class ImageTools():
                 else:
                     self.database.update_obs(key, j, fitsfile, maskfile, blurfwhm=fact_temp * np.sqrt(8. * np.log(2.)))
 
-        pass
-
     def hpf(self,
             size='auto',
             types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
@@ -2404,8 +2408,6 @@ class ImageTools():
 
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile)
-
-        pass
 
     def inject_companions(self,
                           companions,
@@ -2749,7 +2751,6 @@ class ImageTools():
                 # Change also CRPIX to be the same as maskcen.
                 self.database.update_obs(key, j, fitsfile, maskfile, crpix1=maskcenx, crpix2=maskceny, maskcenx=maskcenx, maskceny=maskceny)
 
-        pass
 
     def update_miri_offsets(self):
         """
@@ -2805,7 +2806,7 @@ class ImageTools():
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset_new, yoffset=yoffset_new)
 
-        pass
+
 
     def recenter_frames(self,
                         method='fourier',
@@ -3067,7 +3068,7 @@ class ImageTools():
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile, xoffset=xoffset, yoffset=yoffset, starcenx=starcenx, starceny=starceny, maskcenx=maskcenx, maskceny=maskceny)
 
-        pass
+
 
     def calculate_centers(self,
                           method='fourier',
@@ -3381,7 +3382,7 @@ class ImageTools():
                                          maskcenx=maskcenx, maskceny=maskceny,
                                          center_shift=center_shift, center_mask=center_mask)
 
-        pass
+
 
     def resample_frames(self, subdir='resampled'):
         '''
@@ -3508,7 +3509,7 @@ class ImageTools():
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile)
-                    pass
+
         if not sci_good:
             raise(ValueError('No science frames found in database concatenations'))
 
@@ -5117,6 +5118,8 @@ class AlignTools():
                 'pupil_mask': tbl['PUPIL'][0],
                 'image_mask': tbl['CORONMSK'][0],
                 'is_coron': self._is_coron(hdr0),
+                'is_sgd': self._is_sgd(hdr0),
+                'sgd_pattern': self._get_sgd_pattern(hdr0),
                 'kipc': self._kipc(hdr0, tbl['DETECTOR'][0]),
                 'kppc': self._kppc(tbl['DETECTOR'][0]),
                 'diffusion': self._best_diffusion(tbl['FILTER'][0], tbl['DETECTOR'][0]),
@@ -5149,49 +5152,6 @@ class AlignTools():
         sgd_pattern = hdr0.get('SMGRDPAT', None)
         return sgd_pattern
     
-    def _get_expected_pix(self, hdr0):
-        """Get the expected pixel location of stellar source based on header info"""
-        from webbpsf_ext.imreg_tools import get_expected_loc
-        xind, yind = get_expected_loc(hdr0)
-        return (xind, yind)
-
-    def _get_expected_locs(self, frame='pix'):
-        """Get the expected (raw) stellar positions based on header info"""
-
-        # Loop through concatenations.
-        for i, key in enumerate(self.database.obs.keys()):
-            log.info('--> Concatenation ' + key)
-
-            concat_dict = self.concat_dict[key]
-            ap_siaf = concat_dict['ap_siaf']
-
-            # Loop through FITS files.
-            for j in range(len(self.database.obs[key])):
-
-                # Read FITS file
-                head_pri = fits.getheader(self.database.obs[key]['FITSFILE'][j], extname='PRIMARY')
-                xind, yind = self._get_expected_pix(head_pri)
-
-                # Add in filter offsets
-                xsh, ysh = concat_dict['filter_shift']
-                xind += xsh
-                yind += ysh
-
-                xsci, ysci = (xind+1, yind+1)
-                if frame == 'pix':
-                    loc = [xind, yind]
-                elif frame == 'sci':
-                    loc = [xsci, ysci]
-                elif frame == 'det':
-                    loc = ap_siaf.sci_to_det(xsci, ysci)
-                elif frame == 'tel':
-                    loc = ap_siaf.sci_to_tel(xsci, ysci)
-                elif frame == 'idl':
-                    loc = ap_siaf.sci_to_idl(xsci, ysci)
-
-                loc = np.asarray(loc)
-                log.info(f'Expected position in {frame} frame: {loc}')
-
     def _kipc(self, hdr0, sca):
         """IPC kernel
         
@@ -5272,6 +5232,49 @@ class AlignTools():
 
         return np.array([dx_filt, dy_filt])
     
+    def _get_expected_pix(self, hdr0):
+        """Get the expected pixel location of stellar source based on header info"""
+        from webbpsf_ext.imreg_tools import get_expected_loc
+        xind, yind = get_expected_loc(hdr0)
+        return (xind, yind)
+
+    def _get_expected_locs(self, frame='pix'):
+        """Get the expected (raw) stellar positions based on header info"""
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            concat_dict = self.concat_dict[key]
+            ap_siaf = concat_dict['ap_siaf']
+
+            # Loop through FITS files.
+            for j in range(len(self.database.obs[key])):
+
+                # Read FITS file
+                head_pri = fits.getheader(self.database.obs[key]['FITSFILE'][j], extname='PRIMARY')
+                xind, yind = self._get_expected_pix(head_pri)
+
+                # Add in filter offsets
+                xsh, ysh = concat_dict['filter_shift']
+                xind += xsh
+                yind += ysh
+
+                xsci, ysci = (xind+1, yind+1)
+                if frame == 'pix':
+                    loc = [xind, yind]
+                elif frame == 'sci':
+                    loc = [xsci, ysci]
+                elif frame == 'det':
+                    loc = ap_siaf.sci_to_det(xsci, ysci)
+                elif frame == 'tel':
+                    loc = ap_siaf.sci_to_tel(xsci, ysci)
+                elif frame == 'idl':
+                    loc = ap_siaf.sci_to_idl(xsci, ysci)
+
+                loc = np.asarray(loc)
+                log.info(f'Expected position in {frame} frame: {loc}')
+
 
     def update_nircam_centers(self, 
                               force_siaf_center=False, 
