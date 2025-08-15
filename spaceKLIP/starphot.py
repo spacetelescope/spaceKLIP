@@ -132,7 +132,7 @@ def get_stellar_magnitudes(starfile,
         bp_mag = 5.
         try:
             spec = webbpsf_ext.spectra.source_spectrum(name='Input Data & SED', sptype=spectral_type, 
-                                                       mag_val=bp_mag, bp=bp_k, votable_file=starfile,
+                                                       mag_val=bp_mag, bp=bp_k, votable_input=starfile,
                                                        **kwargs)
         except:
             spec = webbpsf_ext.spectra.source_spectrum(name='Input Data & SED', sptype=spectral_type, 
