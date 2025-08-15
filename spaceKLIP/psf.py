@@ -570,15 +570,28 @@ class JWST_PSF():
         # Locations in aperture ideal frame to produce PSFs
         if mode == 'rth':
             r, th = loc
-            xidl, yidl = self.rth_to_xy(r, th, PA_V3=PA_V3, frame_out='idl', 
+            xidl, yidl = self.rth_to_xy(r, th, PA_V3=PA_V3, frame_out='idl',
                                         addV3Yidl=addV3Yidl)
         elif mode == 'xy':
             xidl, yidl = loc
-        
+
         # Perform shift in idl frame then rotate to sky coords
-        psf = self.gen_psf_idl((xidl, yidl), coord_frame='idl', do_shift=do_shift, 
-                                return_oversample=True, normalize=normalize, **kwargs)
-        
+        check=False
+        while not check:
+            try:
+                psf = self.gen_psf_idl((xidl, yidl), coord_frame='idl', do_shift=do_shift,
+                                    return_oversample=True, normalize=normalize, **kwargs)
+                check=True
+            except:
+                log.warning(f'  --> This observation might be a mosaic. Coordinates {r, th} might be outside the default FOV. Trying to adjust coordinates within the nominal FOV when generating the PSF.')
+                if mode == 'rth':
+                    r-= 0.5
+                    xidl, yidl = self.rth_to_xy(r, th, PA_V3=PA_V3, frame_out='idl',
+                                                addV3Yidl=addV3Yidl)
+                elif mode == 'xy':
+                    raise ValueError("'xy' for loc correction input not implemented yet for coordinates that might be outside the default FOV.")
+
+
         if do_shift:
             # Shifting PSF, means rotate such that North is up
             psf = psf.reshape([-1,ny,nx])
