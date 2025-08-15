@@ -589,7 +589,7 @@ class JWST_PSF():
                     xidl, yidl = self.rth_to_xy(r, th, PA_V3=PA_V3, frame_out='idl',
                                                 addV3Yidl=addV3Yidl)
                 elif mode == 'xy':
-                    raise ValueError("'xy' for loc correction input not implemented yet for coordinates that might be outside the default FOV.")
+                    raise ValueError("'xy' mode correction not supported yet for coordinates that might be outside the default FOV.")
 
 
         if do_shift:
