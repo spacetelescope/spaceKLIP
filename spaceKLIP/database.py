@@ -468,7 +468,8 @@ class Database():
                                'ROLL_REF',
                                'BLURFWHM',
                                'FITSFILE',
-                               'MASKFILE'),
+                               'MASKFILE',
+                               'NANMASKFILE'),
                         dtype=('object',
                                'object',
                                'object',
@@ -511,6 +512,7 @@ class Database():
                                'float',
                                'float',
                                'float',
+                               'object',
                                'object',
                                'object'))
             ww_all = ww_sci if ww_ref is None else np.append(ww_sci, ww_ref)
@@ -566,6 +568,11 @@ class Database():
                         maskfile = os.path.join(maskbase, maskpath)
                     else:
                         maskfile = 'NONE'
+
+                nanmaskfile = allpaths[ww][j].replace('.fits', '_nanmask.fits')
+                if not os.path.exists(nanmaskfile):
+                    nanmaskfile = 'NONE'
+
                 tab.add_row((tt,
                              EXP_TYPE[ww][j],
                              DATAMODL[ww][j],
@@ -609,7 +616,8 @@ class Database():
                              ROLL_REF[ww][j] - V3I_YANG[ww][j] * VPARITY[ww][j],
                              BLURFWHM[ww][j],
                              allpaths[ww][j],
-                             maskfile))
+                             maskfile,
+                             nanmaskfile))
             self.obs[HASH_unique[i]] = tab.copy()
             del tab
 
