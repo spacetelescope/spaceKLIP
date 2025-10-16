@@ -421,8 +421,8 @@ class Database():
                     else:
                         ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
                         ww_ref = None
-                        log.warning('  --> Could not identify science and reference files based on dither pattern')
-                        raise UserWarning('Consider using psflibpaths to specify reference files')
+                        log.warning('  --> Could not identify science and reference files based on dither pattern.'
+                                    'Please use psflibpaths to specify reference files before running klip subtraction step')
 
             # Make Astropy tables for concatenations.
             tab = Table(names=('TYPE',
