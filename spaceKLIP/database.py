@@ -196,6 +196,8 @@ class Database():
         CRPIX2 = []  # pix
         MASKCENX = []  # pix
         MASKCENY = []  # pix
+        NANMASKCENX = []  # pix
+        NANMASKCENY = []
         STARCENX = []  # pix
         STARCENY = []  # pix
         CROP_SHIFTX = []  # pix
@@ -299,6 +301,8 @@ class Database():
 
             MASKCENX += [head.get('MASKCENX', float(CRPIX1[i]))]
             MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
+            NANMASKCENX += [head.get('NANMASKCENX', float(CRPIX1[i]))]
+            NANMASKCENY += [head.get('NANMASKCENY', float(CRPIX2[i]))]
             STARCENX += [head.get('STARCENX', MASKCENX[-1])]
             STARCENY += [head.get('STARCENY', MASKCENY[-1])]
             CROP_SHIFTX += [head.get('CROP_SHIFTX', np.nan)]
@@ -345,6 +349,8 @@ class Database():
         CRPIX2 = np.array(CRPIX2)
         MASKCENX = np.array(MASKCENX)
         MASKCENY = np.array(MASKCENY)
+        NANMASKCENX = np.array(NANMASKCENX)
+        NANMASKCENY = np.array(NANMASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
         CROP_SHIFTX = np.array(CROP_SHIFTX)
@@ -455,6 +461,8 @@ class Database():
                                'CRPIX2',
                                'MASKCENX',
                                'MASKCENY',
+                               'NANMASKCENX',
+                               'NANMASKCENY',
                                'STARCENX',
                                'STARCENY',
                                'CROP_SHIFTX',
@@ -496,6 +504,8 @@ class Database():
                                'float',
                                'float',
                                'object',
+                               'float',
+                               'float',
                                'float',
                                'float',
                                'float',
@@ -603,6 +613,8 @@ class Database():
                              CRPIX2[ww][j],
                              MASKCENX[ww][j],
                              MASKCENY[ww][j],
+                             NANMASKCENX[ww][j],
+                             NANMASKCENY[ww][j],
                              STARCENX[ww][j],
                              STARCENY[ww][j],
                              CROP_SHIFTX[ww][j],
@@ -724,6 +736,8 @@ class Database():
         CRPIX2 = []  # pix
         MASKCENX = []  # pix
         MASKCENY = []  # pix
+        NANMASKCENX = []  # pix
+        NANMASKCENY = []  # pix
         STARCENX = []  # pix
         STARCENY = []  # pix
         CROP_SHIFTX = []  # pix
@@ -827,6 +841,8 @@ class Database():
                 CRPIX2 += [head.get('CRPIX2', np.nan)]
             MASKCENX += [head.get('MASKCENX', CRPIX1[i])]
             MASKCENY += [head.get('MASKCENY', CRPIX2[i])]
+            NANMASKCENX += [head.get('NANMASKCENX', CRPIX1[i])]
+            NANMASKCENY += [head.get('NANMASKCENY', CRPIX2[i])]
             STARCENX += [head.get('STARCENX', np.nan)]
             STARCENY += [head.get('STARCENY', np.nan)]
             CROP_SHIFTX += [head.get('CROP_SHIFTX', 0.)]
@@ -864,6 +880,8 @@ class Database():
         CRPIX2 = np.array(CRPIX2)
         MASKCENX = np.array(MASKCENX)
         MASKCENY = np.array(MASKCENY)
+        NANMASKCENX = np.array(NANMASKCENX)
+        NANMASKCENY = np.array(NANMASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
         CROP_SHIFTX = np.array(CROP_SHIFTX)
@@ -1132,10 +1150,10 @@ class Database():
             print_tab = copy.deepcopy(self.obs[key])
             if include_fitsfiles:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER',
-                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF'])
+                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'NANMASKCENX', 'NANMASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF'])
             else:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER',
-                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
+                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'NANMASKCENX', 'NANMASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
             print_tab['XOFFSET'] *= 1e3
             print_tab['XOFFSET'] = np.round(print_tab['XOFFSET'])
             print_tab['XOFFSET'][print_tab['XOFFSET'] == 0.] = 0.
