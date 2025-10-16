@@ -1203,6 +1203,7 @@ class Database():
                    index,
                    fitsfile,
                    maskfile=None,
+                   nanmaskfile=None,
                    nints=None,
                    effinttm=None,
                    xoffset=None,
@@ -1234,6 +1235,9 @@ class Database():
             New FITS file path for the observation to be updated.
         maskfile : path, optional
             New PSF mask path for the observation to be updated. The default is
+            None.
+        nanmaskfile : path, optional
+            New NaNs mask path for the observation to be updated. The default is
             None.
         nints : int, optional
             New number of integrations for the observation to be updated. The
@@ -1338,6 +1342,8 @@ class Database():
         self.obs[key]['FITSFILE'][index] = fitsfile
         if maskfile is not None:
             self.obs[key]['MASKFILE'][index] = maskfile
+        if nanmaskfile is not None:
+            self.obs[key]['NANMASKFILE'][index] = nanmaskfile
         if update_pxar:
             try:
                 pxar = fits.getheader(self.obs[key]['FITSFILE'][index], 'SCI')['PIXAR_SR']
