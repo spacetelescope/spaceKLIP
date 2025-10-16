@@ -1220,6 +1220,8 @@ class Database():
                    crpix2=None,
                    maskcenx=None,
                    maskceny=None,
+                   nanmaskcenx=None,
+                   nanmaskceny=None,
                    starcenx=None,
                    starceny=None,
                    crop_shiftx=None,
@@ -1270,6 +1272,12 @@ class Database():
             updated. The default is None.
         maskceny : float, optional
             New mask y-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        nanmaskcenx : float, optional
+            New nanmask x-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        nanmaskceny : float, optional
+            New nanmask y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
         starcenx : float, optional
             New star x-position (pix, 1-indexed) for the observation to be
@@ -1329,6 +1337,10 @@ class Database():
             self.obs[key]['MASKCENX'][index] = maskcenx
         if maskceny is not None:
             self.obs[key]['MASKCENY'][index] = maskceny
+        if nanmaskcenx is not None:
+            self.obs[key]['NANMASKCENX'][index] = nanmaskcenx
+        if nanmaskceny is not None:
+            self.obs[key]['NANMASKCENY'][index] = nanmaskceny
         if starcenx is not None:
             self.obs[key]['STARCENX'][index] = starcenx
         if starceny is not None:
