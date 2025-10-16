@@ -1018,7 +1018,8 @@ class ImageTools():
                         gradient_kwargs={},
                         types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                         subdir='bpfound',
-                        restrict_to=None):
+                        restrict_to=None,
+                        min_nancluster = 5):
         """
         Identify bad pixels for cleaning
 
@@ -1070,12 +1071,45 @@ class ImageTools():
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'bpfound'.
+        min_nancluster: int, optional
+            minimum number of pixels required to flag cluster of NaNs pixels.
+            The default is 5.
 
         Returns
         -------
         None
 
         """
+        def nan_clusters_mask(image, min_nancluster):
+            """
+            Create a 3D boolean mask where NaN clusters larger than min_nancluster are marked as True,
+            but only checking within each 2D slice (ignoring connections along the Z-axis).
+
+            Parameters:
+            - image: 3D numpy array (with NaNs)
+            - min_nancluster: int, minimum cluster size to consider
+
+            Returns:
+            - 3D boolean numpy array with the same shape as input
+            """
+            # Initialize the output mask (same shape as image)
+            output_mask = np.zeros_like(image, dtype=bool)
+
+            # Process each 2D slice independently
+            for z in range(image.shape[0]):  # Loop over the first axis (Z)
+                nan_mask = np.isnan(image[z])  # Extract NaN mask for this slice
+                labeled_array, num_features = scipy.ndimage.label(nan_mask)  # Label clusters
+
+                slices = scipy.ndimage.find_objects(labeled_array)  # Get bounding boxes for clusters
+
+                for i, sl in enumerate(slices):
+                    if sl is not None:
+                        cluster_mask = (labeled_array[sl] == (i + 1))  # Mask for this cluster
+                        if np.sum(cluster_mask) >= min_nancluster:  # Only keep clusters larger than min_nancluster
+                            output_mask[z][sl][cluster_mask] = True
+
+            return np.nanmedian(output_mask.astype(int), axis=0)
+
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
@@ -1099,6 +1133,7 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmask = nan_clusters_mask(data, min_nancluster)
                 pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
 
                 if set_dq_zero:  # set_dq_zero
@@ -1154,9 +1189,10 @@ class ImageTools():
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
                                         center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(fitsfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -1840,10 +1876,13 @@ class ImageTools():
         key : str
             Database key of the observation to be updated.
         custom_kwargs : dict, optional
-            Keyword arguments for the 'custom' method. The dictionary keys must
-            match the keys of the observations database and the dictionary
+            Keyword arguments for the 'custom' method. The basic usage is dictionary with
+            keys that must match the keys of the observations database and the dictionary
             content must be binary bad pixel maps (1 = bad, 0 = good) with the
-            same shape as the corresponding data. The default is {}.
+            same shape as the corresponding data.
+            It also allow for a more fine treatment to flag bad pixels at specific coordinates.
+            In this case the dictionary content must be a list of [y,x] or [key,y,x] coordinates.
+            The default is {}.
 
         Returns
         -------
@@ -1852,12 +1891,31 @@ class ImageTools():
 
         # Find bad pixels using median of neighbors.
         pxdq_orig = pxdq.copy()
-        pxdq_custom = custom_kwargs[key] != 0
-        if pxdq_custom.ndim == pxdq.ndim - 1:  # Enable 3D bad pixel map to flag individual frames
-            pxdq_custom = np.array([pxdq_custom] * pxdq.shape[0])
-        pxdq[pxdq_custom] = 1
-        log.info('  --> Method custom: flagged %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
+        # pxdq_custom = custom_kwargs[key] != 0
+        # if pxdq_custom.ndim == pxdq.ndim - 1:  # Enable 3D bad pixel map to flag individual frames
+        #     pxdq_custom = np.array([pxdq_custom] * pxdq.shape[0])
+        # pxdq[pxdq_custom] = 1
+        # log.info('  --> Method custom: flagged %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
+        if key in custom_kwargs.keys():
+            if np.array(custom_kwargs[key]).shape == pxdq_orig.shape:
+                pxdq_custom = custom_kwargs[key] != 0
+            else:
+                pxqd_temp = np.zeros(pxdq.shape)
+                coordinates = np.array(custom_kwargs[key])
 
+                if coordinates.shape[-1] == 2:
+                    pxqd_temp[:, coordinates[:, 1], coordinates[:, 0]] = 1
+                elif coordinates.shape[-1] == 3:
+                    pxqd_temp[coordinates[:, 0], coordinates[:, 2], coordinates[:, 1]] = 1
+
+                pxdq_custom = pxqd_temp != 0
+
+            if pxdq_custom.ndim == pxdq.ndim - 1:  # Enable 3D bad pixel map to flag individual frames
+                pxdq_custom = np.array([pxdq_custom] * pxdq.shape[0])
+            pxdq[pxdq_custom] = 1
+        log.info(
+            '  --> Method custom: flagged %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig),
+                                                    100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
         pass
 
     def fix_bad_pixels_timemed(self,
