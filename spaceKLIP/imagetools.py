@@ -312,7 +312,9 @@ class ImageTools():
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmask = ut.read_msk(nanmaskfile)
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
                 crpix2 = self.database.obs[key]['CRPIX2'][j]
                 starcenx = self.database.obs[key]['STARCENX'][j]
@@ -332,7 +334,8 @@ class ImageTools():
                     pxdq = pxdq[:, npix[2]:-npix[3], npix[0]:-npix[1]]
                     if mask is not None:
                         mask = mask[npix[2]:-npix[3], npix[0]:-npix[1]]
-
+                    if nanmask is not None:
+                        nanmask = nanmask[npix[2]:-npix[3], npix[0]:-npix[1]]
                     crop_shiftx = npix[0]
                     crop_shifty = npix[2]
 
@@ -357,13 +360,14 @@ class ImageTools():
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
                                         center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
                 self.database.update_obs(key, j, fitsfile, maskfile,
                                          crpix1=crpix1, crpix2=crpix2,
                                          starcenx=starcenx, starceny=starceny,
                                          maskcenx=maskcenx, maskceny=maskceny,
-                                         crop_shiftx=crop_shiftx, crop_shifty=crop_shifty)
+                                         crop_shiftx=crop_shiftx, crop_shifty=crop_shifty, nanmaskfile=nanmaskfile)
 
         pass
 
