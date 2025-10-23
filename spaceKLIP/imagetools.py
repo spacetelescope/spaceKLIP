@@ -4455,7 +4455,7 @@ class ImageTools():
                         shifts += [np.array([0, 0, 0])]
 
                 # Do the same for the mask
-                if mask is not None:
+                if mask is not None or nanmask is not None:
                     if align_to_file is not None or j != ww_sci[0]:
                         temp = np.median(shifts, axis=0)
                         mask_shifts = np.array([temp[1], temp[0]])
