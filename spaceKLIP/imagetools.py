@@ -1023,7 +1023,7 @@ class ImageTools():
                         types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                         subdir='bpfound',
                         restrict_to=None,
-                        min_nancluster = 5):
+                        min_nancluster = None):
         """
         Identify bad pixels for cleaning
 
@@ -1076,8 +1076,9 @@ class ImageTools():
             Name of the directory where the data products shall be saved. The
             default is 'bpfound'.
         min_nancluster: int, optional
-            minimum number of pixels required to flag cluster of NaNs pixels.
-            The default is 5.
+            minimum number of pixels required to flag cluster of NaNs pixels. If None, the provided NaN mask
+            in the database will be used.
+            The default is None.
 
         Returns
         -------
@@ -1137,7 +1138,11 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
-                nanmask = nan_clusters_mask(data, min_nancluster)
+                if min_nancluster is not None:
+                    nanmask = nan_clusters_mask(data, min_nancluster)
+                else:
+                    nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                    nanmask = ut.read_msk(nanmaskfile)
                 pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
 
                 if set_dq_zero:  # set_dq_zero
@@ -1469,7 +1474,9 @@ class ImageTools():
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmask = ut.read_msk(nanmaskfile)
 
                 if plot:
                     fig = plt.figure()
@@ -1485,7 +1492,11 @@ class ImageTools():
                 # Don't want to clean anything that isn't bad or is a non-science pixel
                 temp_donotuse = ut.get_dqmask(pxdq_temp, 'DO_NOT_USE', return_bool=True)
                 temp_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
-                pxdq_temp = (np.isnan(data) | temp_donotuse) & (~temp_nonsci)
+
+                if nanmask is not None:
+                    pxdq_temp =(np.isnan(data) | temp_donotuse) & (~temp_nonsci) & (nanmask != 1)
+                else:
+                    pxdq_temp = (np.isnan(data) | temp_donotuse) & (~temp_nonsci)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
@@ -1549,9 +1560,10 @@ class ImageTools():
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
                                         center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(fitsfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -2182,12 +2194,15 @@ class ImageTools():
                             ex_coords = ebox_coords[:, 0]
                             ey_coords = ebox_coords[:, 1]
 
-                            # Perform interpolation of data
-                            data_interp = griddata((x_coords, y_coords),
-                                                   box_values,
-                                                   (ci, ri),
-                                                   method='linear',
-                                                   fill_value=np.nan)
+                            try:
+                                # Perform interpolation of data
+                                data_interp = griddata((x_coords, y_coords),
+                                                       box_values,
+                                                       (ci, ri),
+                                                       method='linear',
+                                                       fill_value=np.nan)
+                            except:
+                                pass
 
                             # Replace data pixel with interpolated value
                             data[i][ri, ci] = data_interp
