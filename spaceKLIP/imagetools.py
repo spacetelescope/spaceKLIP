@@ -424,7 +424,9 @@ class ImageTools():
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmask = ut.read_msk(nanmaskfile)
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
                 crpix2 = self.database.obs[key]['CRPIX2'][j]
                 starcenx = self.database.obs[key]['STARCENX'][j]
@@ -444,6 +446,9 @@ class ImageTools():
                     pxdq = np.pad(pxdq, ((0, 0), (npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=0)
                     if mask is not None:
                         mask = np.pad(mask, ((npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=np.nan)
+                    if nanmask is not None:
+                        nanmask = np.pad(nanmask, ((npix[2], npix[3]), (npix[0], npix[1])), mode='constant',
+                                      constant_values=np.nan)
                     crpix1 += npix[0]
                     crpix2 += npix[2]
                     starcenx += npix[0]
@@ -463,9 +468,10 @@ class ImageTools():
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
                                         center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2, starcenx=starcenx, starceny=starceny, maskcenx=maskcenx, maskceny=maskceny)
+                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2, starcenx=starcenx, starceny=starceny, maskcenx=maskcenx, maskceny=maskceny, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -2287,7 +2293,7 @@ class ImageTools():
 
         pass
 
-    def update_frmaes_with_nans_from_nanmask(self,
+    def update_frames_with_nans_from_nanmask(self,
                                              cval=np.nan,
                                              types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
                                              subdir='nanreplaced'):
@@ -2343,7 +2349,7 @@ class ImageTools():
                     log.info('  --> Value replacement: replaced %.0f pixel(s) with value ' % (np.sum(ww)) + str(cval) + ' -- %.2f%%' % (100. * np.sum(ww)/np.prod(ww.shape)))
 
                 # Write FITS file and PSF mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, imshifts, maskoffs)
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs )
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
                 nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
@@ -4794,28 +4800,30 @@ class ImageTools():
                             yshift = align_shift_star[j][k][1] + center_shift_star[j][k][1]
                             shifts += [np.array([xshift, yshift])]
 
-                            this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
-                            this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                            data_shift += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
+                            erro_shift += [ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
 
-                            # Recenter SCI and REF frames to integer pixel
-                            # precision by rolling the image.
-                            ww_max = np.unravel_index(np.argmax(data[k]), data[k].shape)
-                            if ww_max != (data.shape[-2] // 2, data.shape[-1] // 2):
-                                dx, dy = data.shape[-1] // 2 - ww_max[1], data.shape[-2] // 2 - ww_max[0]
-                                shifts[-1][0] += dx
-                                shifts[-1][1] += dy
-                                data_shift += [np.roll(np.roll(this_data, dx, axis=1), dy, axis=0)]
-                                erro_shift += [np.roll(np.roll(this_erro, dx, axis=1), dy, axis=0)]
-                        if nanmask is not None:
-                            nanmask_shift = center_shift_mask[j] + align_shift_mask[j]
-                            nanmask = ut.imshift(nanmask, [nanmask_shift[0], nanmask_shift[1]], method='spline',
-                                              pad_amount=shiftpad, kwargs={'mode':'constant'})
+                            # # Recenter SCI and REF frames to integer pixel
+                            # # precision by rolling the image.
+                            # ww_max = np.unravel_index(np.argmax(data[k]), data[k].shape)
+                            # if ww_max != (data.shape[-2] // 2, data.shape[-1] // 2):
+                            #     dx, dy = data.shape[-1] // 2 - ww_max[1], data.shape[-2] // 2 - ww_max[0]
+                            #     shifts[-1][0] += dx
+                            #     shifts[-1][1] += dy
+                            #     data_shift += [np.roll(np.roll(this_data, dx, axis=1), dy, axis=0)]
+                            #     erro_shift += [np.roll(np.roll(this_erro, dx, axis=1), dy, axis=0)]
+                            if nanmask is not None:
+                                # nanmask shift preservesing 0/1 and NaN values.
+                                nanmask = ut.imshift(nanmask, [shifts[k][0], shifts[k][1]], method=method,
+                                                  pad_amount=shiftpad, kwargs=kwargs)
+                                notnan = ~np.isnan(nanmask)
+                                nanmask[notnan] = (nanmask[notnan] >= 0.5).astype(np.float32)
 
-                            # Update mask center.
-                            nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j] + shifts[0][0] + shiftpad
-                            nanmaskceny = self.database.obs[key]['NANMASKCENY'][j] + shifts[0][1] + shiftpad
+                                # Update mask center.
+                                nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j] + shifts[0][0] + shiftpad
+                                nanmaskceny = self.database.obs[key]['NANMASKCENY'][j] + shifts[0][1] + shiftpad
 
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
