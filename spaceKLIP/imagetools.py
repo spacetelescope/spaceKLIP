@@ -2351,10 +2351,9 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs )
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
-                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile)
 
         pass
 
