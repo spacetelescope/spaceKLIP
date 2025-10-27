@@ -863,8 +863,8 @@ class AnalysisTools():
                     if mask is not None:
                         ax.plot(seps, maskcons_corr[si],
                                 label=f'KL = {KLmodes}', color=f'C{si}')
-                    ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
-                            color=f'C{si}')
+                        ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
+                                color=f'C{si}')
                 ax.legend(loc='upper right', ncols=3, fontsize=10,
                           title = 'Solid lines = calibrated, dotted lines = raw',
                           title_fontsize=10)
