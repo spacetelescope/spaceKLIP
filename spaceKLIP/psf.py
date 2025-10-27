@@ -206,7 +206,7 @@ class JWST_PSF():
         
         # On axis PSF
         log.info('Generating on-axis and off-axis PSFs...')
-        if image_mask[-1] == 'B':
+        if image_mask is not None and image_mask[-1] == 'B':
             # Information for bar offsetting (in arcsec)
             bar_offset = inst_on.get_bar_offset(ignore_options=True)
             bar_offset = 0 if bar_offset is None else bar_offset
