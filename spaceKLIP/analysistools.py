@@ -842,8 +842,9 @@ class AnalysisTools():
                 fig, ax = standardize_plots_setup(plot_style=plot_style)
                 for si, seps in enumerate(rawseps):
                     KLmodes = klip_args['numbasis'][si]
-                    ax.plot(seps, maskcons_corr[si],
-                            label=f'KL = {KLmodes}', color=f'C{si}')
+                    if mask is not None:
+                        ax.plot(seps, maskcons_corr[si],
+                                label=f'KL = {KLmodes}', color=f'C{si}')
                     ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='--',
                             color=f'C{si}')
                 ax.legend(loc='upper right', ncols=3, fontsize=10,
@@ -859,8 +860,9 @@ class AnalysisTools():
                 fig, ax = standardize_plots_setup(plot_style=plot_style)
                 for si, seps in enumerate(rawseps):
                     KLmodes = klip_args['numbasis'][si]
-                    ax.plot(seps, maskcons_corr[si],
-                            label=f'KL = {KLmodes}', color=f'C{si}')
+                    if mask is not None:
+                        ax.plot(seps, maskcons_corr[si],
+                                label=f'KL = {KLmodes}', color=f'C{si}')
                     ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
                             color=f'C{si}')
                 ax.legend(loc='upper right', ncols=3, fontsize=10,
