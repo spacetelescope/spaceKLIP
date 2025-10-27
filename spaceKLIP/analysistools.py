@@ -547,11 +547,13 @@ class AnalysisTools():
                 if rawcon_filetype == 'npy':
                     seps_file = file_str.replace('.fits', '_seps.npy') #Arcseconds
                     rawcons_file = file_str.replace('.fits', '_cons.npy')
-                    maskcons_file = file_str.replace('.fits', '_cons_mask.npy')
+                    if mask is not None:
+                        maskcons_file = file_str.replace('.fits', '_cons_mask.npy')
 
                     rawseps = np.load(os.path.join(rawcon_dir,seps_file))
                     rawcons = np.load(os.path.join(rawcon_dir,rawcons_file))
-                    maskcons = np.load(os.path.join(rawcon_dir,maskcons_file))
+                    if mask is not None:
+                        maskcons = np.load(os.path.join(rawcon_dir,maskcons_file))
                 elif rawcon_filetype == 'ecsv':
                     raise NotImplementedError('.ecsv save format not currently supported for \
                         calibrated contrasts. Please use .npy raw contrasts as input.')
@@ -717,7 +719,8 @@ class AnalysisTools():
                     # Get the raw separation and contrast for this KL mode
                     this_KL_rawseps = rawseps[k]
                     this_KL_rawcons = rawcons[k]
-                    this_KL_maskcons = maskcons[k]
+                    if mask is not None:
+                        this_KL_maskcons = maskcons[k]
 
                     # Get fluxes for this KL mode subtracted image
                     this_KL_retr_fluxes = all_retr_fluxes[:,k]
@@ -749,7 +752,8 @@ class AnalysisTools():
 
                     # Apply contrast correction
                     rawcons_corr.append(rawcons[k] / contrast_correction)
-                    maskcons_corr.append(maskcons[k] / contrast_correction)
+                    if mask is not None:
+                        maskcons_corr.append(maskcons[k] / contrast_correction)
                     all_corrections.append(contrast_correction)
 
                 all_corrections = np.squeeze(all_corrections) #Tidy array
@@ -760,7 +764,8 @@ class AnalysisTools():
                 # Save the corrected contrasts, as well as the separations for convenience. 
                 np.save(save_string+'_cal_seps.npy', rawseps)
                 np.save(save_string+'_cal_cons.npy', rawcons_corr)
-                np.save(save_string+'_cal_maskcons.npy', maskcons_corr)
+                if mask is not None:
+                    np.save(save_string+'_cal_maskcons.npy', maskcons_corr)
 
                 # Define some local utilty functions for plot setup.
                 # This makes the plotting code below less repetitive and more consistent
