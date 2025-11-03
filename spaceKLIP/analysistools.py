@@ -845,11 +845,14 @@ class AnalysisTools():
                     if mask is not None:
                         ax.plot(seps, maskcons_corr[si],
                                 label=f'KL = {KLmodes}', color=f'C{si}')
-                    ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='--',
-                            color=f'C{si}')
-                ax.legend(loc='upper right', ncols=3, fontsize=10,
-                          title = 'Dashed lines exclude coronagraph mask throughput',
-                          title_fontsize=10)
+                        ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='--',
+                                color=f'C{si}')
+                        ax.legend(loc='upper right', ncols=3, fontsize=10,
+                                  title = 'Dashed lines exclude coronagraph mask throughput',
+                                  title_fontsize=10)
+                    else:
+                        ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='-',
+                                color=f'C{si}')
                 standardize_plots_annotate_save(ax,
                                                 title=f'Calibrated contrast in {filt}, {psfsub_strategy}',
                                                 ylabel='Contrast',
@@ -864,6 +867,11 @@ class AnalysisTools():
                         ax.plot(seps, maskcons_corr[si],
                                 label=f'KL = {KLmodes}', color=f'C{si}')
                         ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
+                                color=f'C{si}')
+                    else:
+                        ax.plot(seps, rawcons_corr[si],
+                                label=f'KL = {KLmodes}', color=f'C{si}')
+                        ax.plot(seps, rawcons[si], alpha=0.3, ls=':',
                                 color=f'C{si}')
                 ax.legend(loc='upper right', ncols=3, fontsize=10,
                           title = 'Solid lines = calibrated, dotted lines = raw',
