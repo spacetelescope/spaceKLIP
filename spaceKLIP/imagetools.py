@@ -2144,6 +2144,129 @@ class ImageTools():
 
         pass
 
+    def clean_background(self,
+                         sigma=3.,
+                         gaussian_smoothing={'skip':True, 'sigma':1.},
+                         types=['SCI_BG', 'REF_BG'],
+                         subdir='bgcleaned'):
+        """
+        Clean data from any contaminating sources in background observations using sigma clipping.
+        Used for MIRI background observations.
+
+        Parameters
+        ----------
+        sigma : float, optional
+            Sigma clipping threshold for background cleaning. The default is 3.
+        gaussian_smoothing : dict, optional
+            Dictionary with keyword arguments to use scipy.ndimage.gaussian_filter.
+            This will smooth the backgrounds before the cleaning process. If 'skip' is True, 
+            no Gaussian smoothing will be applied. The default is {'skip':True, 'sigma':1.}.
+        types : list of str, optional
+            List of data types for which background cleaning shall be applied.
+            The default is ['SCI_BG', 'REF_BG'].
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'bgcleaned'.
+        
+        Returns
+        -------
+        None.
+        """
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            for data_type in types:
+                log.info('--> Starting cleaning process for ' + data_type + ' files')
+
+                # find science background files
+                ww_bg = np.where(self.database.obs[key]['TYPE'] == data_type)[0]
+
+                # Loop through science background files.
+                if len(ww_bg) == 2:
+                    bg_data = []
+
+                    for j in ww_bg:
+
+                        # Read FITS file.
+                        fitsfile = self.database.obs[key]['FITSFILE'][j]
+                        data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+
+                        bg_data += [data]
+
+                    bg_data = np.array(bg_data)
+
+                    img1 = np.ones_like(bg_data[0])
+                    img2 = np.ones_like(bg_data[1])
+
+                    # Calculate SNR maps per pixel
+                    snr_map1 = np.nanstd(bg_data[0], axis=0)
+                    snr_map2 = np.nanstd(bg_data[1], axis=0)
+
+                    if not gaussian_smoothing['skip']:
+                        log.info('  --> Applying Gaussian smoothing with sigma = %.2f' % gaussian_smoothing['sigma'])
+                        snr_map1 = gaussian_filter(bg_data[0], sigma=gaussian_smoothing['sigma'])
+                        snr_map2 = gaussian_filter(bg_data[1], sigma=gaussian_smoothing['sigma'])
+
+                    # Looping over integrations
+                    for i in range(bg_data.shape[1]):
+                        diff = (bg_data[0,i,:,:] - bg_data[1,i,:,:])/np.sqrt(snr_map1**2 + snr_map2**2)
+
+                        img1[i,:,:] = np.where(diff > sigma, np.nan, bg_data[0,i,:,:])
+                        img2[i,:,:] = np.where(diff < -sigma, np.nan, bg_data[1,i,:,:])
+
+                    cleaned_bg_data = np.array([img1, img2])
+
+                    # Write FITS file and PSF mask.
+                    for i,j in enumerate(ww_bg):
+
+                        # Read FITS file and PSF mask.
+                        fitsfile = self.database.obs[key]['FITSFILE'][j]
+                        data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                        maskfile = self.database.obs[key]['MASKFILE'][j]
+                        mask = ut.read_msk(maskfile)
+
+                        # Replace data with cleaned data
+                        fitsfile = ut.write_obs(fitsfile, output_dir, cleaned_bg_data[i], erro, pxdq, head_pri, head_sci, is2d,
+                                                align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                                center_mask=center_mask, maskoffs=maskoffs)
+                        maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                        # Update spaceKLIP database.
+                        self.database.update_obs(key, j, fitsfile, maskfile)
+
+                else:
+                    raise NotImplementedError('Background cleaning currently only implemented if 2 background files available.')
+            
+            # Saving unmodified files
+            log.info('--> Skipping cleaning process for non background files.')
+            nfitsfiles = len(self.database.obs[key])
+            for j in range(nfitsfiles):
+
+                # Skip file types that are in the list of types.
+                if self.database.obs[key]['TYPE'][j] not in types:
+
+                    # Read FITS file.
+                    fitsfile = self.database.obs[key]['FITSFILE'][j]
+                    data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                    maskfile = self.database.obs[key]['MASKFILE'][j]
+                    mask = ut.read_msk(maskfile)
+
+                    # Write FITS file and PSF mask.
+                    fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
+                    maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                    # Update spaceKLIP database.
+                    self.database.update_obs(key, j, fitsfile, maskfile)
+
     def replace_nans(self,
                      cval=0.,
                      types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
