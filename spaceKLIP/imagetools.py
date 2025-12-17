@@ -2266,6 +2266,112 @@ class ImageTools():
 
                     # Update spaceKLIP database.
                     self.database.update_obs(key, j, fitsfile, maskfile)
+    
+    def persistence_trimming(self,
+                             radius_pxl=4,
+                             ints_to_trim=2,
+                             types=['SCI', 'REF'],
+                             subdir='persistence_trimmed'):
+        """
+        Remove persistence artifacts from the initial N integrations by trimming
+        a circular region around the persistence location. This is useful for
+        MIRI 4QPM data where persistence artifacts from target acquisition can
+        remain in early integrations.
+
+        Note that for this function to work, TA images must be included in the 
+        database and previous data reduction steps must have been performed to
+        determine the persistence location.
+
+        Parameters
+        ----------
+        radius_pxl : int, optional
+            Radius (in pixels) of the circular region around the persistence
+            location to trim/mask. The default is 4.
+        ints_to_trim : int, optional
+            Number of initial integrations to apply the persistence trimming to.
+            The default is 2.
+        types : list of str, optional
+            List of data types for which persistence trimming shall be applied.
+            The default is ['SCI', 'REF'].
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'persistence_trimmed'.
+
+        Returns
+        -------
+        None.
+        """
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Loop through FITS files.
+            nfitsfiles = len(self.database.obs[key])
+            for j in range(nfitsfiles):
+
+                # Read FITS file.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+
+                # Skip file types that are not in the list of types.
+                if self.database.obs[key]['TYPE'][j] in types:
+                    log.info(f'  --> {self.database.obs[key]["TYPE"][j]} Persistence trimming: ' + os.path.basename(fitsfile))
+                    
+                    # Get persistence location from TA observation.
+                    ta_key = self.database.obs[key]['TYPE'][j] + '_TA'
+
+                    ww_ta = np.where(self.database.obs[key]['TYPE'] == ta_key)[0]
+
+                    pers_loc = []
+
+                    log.info(f'    --> Finding persistence location in ' + ta_key)
+                    for k in ww_ta:
+
+                        # Match ROLL angle to find correct TA observation.
+                        if round(self.database.obs[key]['ROLL_REF'][j], 2) == round(self.database.obs[key]['ROLL_REF'][k], 2):
+                            log.info(f'      --> Matching TA found: ' + os.path.basename(self.database.obs[key]['FITSFILE'][k]))
+                            # Read TA FITS file.
+                            fitsfile_ta = self.database.obs[key]['FITSFILE'][k]
+                            data_ta, erro_ta, pxdq_ta, head_pri_ta, head_sci_ta, is2d_ta, align_shift_ta, center_shift_ta, align_mask_ta, center_mask_ta, maskoffs_ta = ut.read_obs(fitsfile_ta)
+
+                            # Get persistence location from TA data.
+                            pers_loc += [np.where(data_ta == np.nanmax(data_ta))[1:]]
+
+                    if len(pers_loc) == 0:
+                        raise ValueError('No matching TA observation found for ' + os.path.basename(fitsfile) + '. Cannot determine persistence location.')
+                    elif len(pers_loc) == 1:
+                        raise ValueError('Only one matching TA observation found for ' + os.path.basename(fitsfile) + '. Need the two TA observations to find both persistence locations.')
+                    
+                    # Check for valid number of integrations to trim.
+                    if ints_to_trim >= data.shape[0]:
+                        raise ValueError(f'Number of integrations to trim ({ints_to_trim}) is greater than or equal to total number of integrations in {self.database.obs[key]["TYPE"][j]} observations ({data.shape[0]}). \n Try again with a smaller number of integrations to trim or remove persistence trimming for {self.database.obs[key]["TYPE"][j]} observations.')
+
+                    # Trim persistence region in initial integrations.
+                    for nints in range(data.shape[0]):
+                        if nints < ints_to_trim:
+                            for loc in pers_loc:
+                                for yy in range(data.shape[1]):
+                                    for xx in range(data.shape[2]):
+                                        if (yy - loc[0])**2 + (xx - loc[1])**2 < radius_pxl**2:
+                                            data[nints, yy, xx] = np.nan
+
+                # Write FITS file and PSF mask.
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile)
+
 
     def replace_nans(self,
                      cval=0.,
