@@ -16,7 +16,6 @@ import numpy as np
 import pysiaf
 import astropy.io.fits as pyfits
 from astroquery.svo_fps import SvoFps
-from astropy.nddata.bitmask import _is_bit_flag
 
 # scipy imports
 import scipy.ndimage.interpolation as sinterp
@@ -447,7 +446,7 @@ def write_fitpsf_images(fitpsf,
     # Write FITS file.
     pri = pyfits.PrimaryHDU()
     for key in row.keys():
-        if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
+        if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST','GSCALE_ERROR', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
                    'THETA_ERROR'] and np.isnan(row[key]):
             pri.header[key] = 'NONE'
         else:
@@ -1201,22 +1200,44 @@ def gaussian_kernel(sigma_x=1, sigma_y=1, theta_degrees=0, n=6):
     return kernel
 
 
-def get_dqmask(dqarr, bitvalues):
-    """
-    Get DQ mask from DQ array.
+def get_dqmask(dqarr, bitvalues, return_bool=False):
+    """ Get DQ mask from DQ array.
 
-    Given some DQ array and a list of bit values, return a mask
-    for the pixels that have any of the specified bit values.
+    Given some DQ array and a list of bit values, return a filtered
+    bit mask for the pixels that have the specified bit values.
+
+    To get a bad pixel mask of certain types, for instance:
+        bp_mask = get_dqmask(dq, ['SATURATED', 'JUMP_DET', 'RC']) > 0
 
     Parameters
     ----------
     dqarr : ndarray
         DQ array. Either 2D or 3D.
     bitvalues : list
-        List of bit values to use for DQ mask.
-        These values must be powers of 2 (e.g., 1, 2, 4, 8, 16, ...),
+        List of bit values or mnemonics to use for DQ mask. 
+        Numbered values must be powers of 2 (e.g., 1, 2, 4, 8, 16, ...),
         representing the specific DQ bit flags.
+    return_bool : bool
+        If True, return a boolean mask instead of an integer DQ mask.
+        Returns a boolean pixel mask showing which pixels have any of 
+        the specified bit values set.
+
+    Returns
+    -------
+    ndarray
+        DQ mask with only requested bit values set to True.
     """
+
+    from astropy.nddata.bitmask import _is_bit_flag
+    from jwst.datamodels import dqflags
+
+    # Ensure bitvalues is a list or ndarray
+    if not isinstance(bitvalues, (list, np.ndarray)):
+        bitvalues = [bitvalues]
+
+    # Convert any string mnemonics to bit values
+    bitvalues = [dqflags.pixel[val] if isinstance(val, str) else val 
+                 for val in bitvalues]
 
     for v in bitvalues:
         if not _is_bit_flag(v):
@@ -1228,7 +1249,10 @@ def get_dqmask(dqarr, bitvalues):
     for bitval in bitvalues:
         dqmask = dqmask | (dqarr & bitval)
 
-    return dqmask
+    if return_bool:
+        return dqmask > 0
+    else:
+        return dqmask
 
 
 def pop_pxar_kw(filepaths):

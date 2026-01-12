@@ -37,6 +37,7 @@ from scipy.ndimage import gaussian_filter, rotate, convolve
 from scipy.ndimage import shift as spline_shift
 from scipy.interpolate import interp1d
 from spaceKLIP import utils as ut
+from spaceKLIP.plotting import load_plt_style
 from spaceKLIP.psf import get_offsetpsf, JWST_PSF
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
@@ -94,6 +95,7 @@ class AnalysisTools():
                      output_filetype='npy',
                      plot_xlim=(0,10),
                      save_figures=True,
+                     plot_style=None,
                      **kwargs):
         """
         Compute the raw contrast relative to the provided host star flux.
@@ -209,7 +211,7 @@ class AnalysisTools():
                 iwa = 1  # pix
                 owa = data.shape[1] // 2  # pix
                 if self.database.red[key]['TELESCOP'][j] == 'JWST':
-                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON', 'NRC_TACONFIRM', 'NRC_TACQ']:
                         diam = 5.2
                     else:
                         diam = JWST_CIRCUMSCRIBED_DIAMETER
@@ -348,65 +350,66 @@ class AnalysisTools():
                 # Plot masked data.
                 klmodes = self.database.red[key]['KLMODES'][j].split(',')
                 fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
-                with plt.style.context('spaceKLIP.sk_style'):
-                    fig = plt.figure(figsize=(6.4, 4.8))
-                    ax = plt.gca()
-                    xx = np.arange(data.shape[2]) - center[0]  # pix
-                    yy = np.arange(data.shape[1]) - center[1]  # pix
-                    extent = (-(xx[0] - 0.5) * pxsc_arcsec, -(xx[-1] + 0.5) * pxsc_arcsec, (yy[0] - 0.5) * pxsc_arcsec, (yy[-1] + 0.5) * pxsc_arcsec)
-                    vmax = np.nanmax(data[-1])
-                    ax.imshow(data[-1], origin='lower', cmap='inferno',
-                            norm=matplotlib.colors.SymLogNorm(vmin=-vmax, vmax=vmax, linthresh=vmax/100 ),
-                            extent=extent)
-                    ax.set_xlabel(r'$\Delta$RA [arcsec]')
-                    ax.set_ylabel(r'$\Delta$Dec [arcsec]')
-                    ax.set_title(f'Masked data in {filt}, {psfsub_strategy} ({klmodes[-1]} KL)')
-                    for r in [5,10]:
-                        ax.add_patch(matplotlib.patches.Circle((0,0), r, ls='--', facecolor='none', edgecolor='cyan', clip_on=True))
-                        ax.text(r, 0, f" {r}''", color='cyan')
-                    import textwrap
-                    ax.text(0.01, 0.99, textwrap.fill(os.path.basename(fitsfile), width=40),
-                                        transform=ax.transAxes, color='black', verticalalignment='top', fontsize=9)
-                    plt.colorbar(mappable=ax.images[0], label=self.database.red[key]['BUNIT'][j])
-                    plt.tight_layout()
-                    if save_figures:
-                        output_file = fitsfile[:-5] + '_masked.pdf'
-                        plt.savefig(output_file)
-                        log.info(f" Plot saved in {output_file}")
-                    plt.show()
-                    plt.close(fig)
+
+                load_plt_style(plot_style)
+                fig = plt.figure(figsize=(6.4, 4.8))
+                ax = plt.gca()
+                xx = np.arange(data.shape[2]) - center[0]  # pix
+                yy = np.arange(data.shape[1]) - center[1]  # pix
+                extent = (-(xx[0] - 0.5) * pxsc_arcsec, -(xx[-1] + 0.5) * pxsc_arcsec, (yy[0] - 0.5) * pxsc_arcsec, (yy[-1] + 0.5) * pxsc_arcsec)
+                vmax = np.nanmax(data[-1])
+                ax.imshow(data[-1], origin='lower', cmap='inferno',
+                        norm=matplotlib.colors.SymLogNorm(vmin=-vmax, vmax=vmax, linthresh=vmax/100 ),
+                        extent=extent)
+                ax.set_xlabel(r'$\Delta$RA [arcsec]')
+                ax.set_ylabel(r'$\Delta$Dec [arcsec]')
+                ax.set_title(f'Masked data in {filt}, {psfsub_strategy} ({klmodes[-1]} KL)')
+                for r in [5,10]:
+                    ax.add_patch(matplotlib.patches.Circle((0,0), r, ls='--', facecolor='none', edgecolor='cyan', clip_on=True))
+                    ax.text(r, 0, f" {r}''", color='cyan')
+                import textwrap
+                ax.text(0.01, 0.99, textwrap.fill(os.path.basename(fitsfile), width=40),
+                                    transform=ax.transAxes, color='black', verticalalignment='top', fontsize=9)
+                plt.colorbar(mappable=ax.images[0], label=self.database.red[key]['BUNIT'][j])
+                plt.tight_layout()
+                if save_figures:
+                    output_file = fitsfile[:-5] + '_masked.pdf'
+                    plt.savefig(output_file)
+                    log.info(f" Plot saved in {output_file}")
+                plt.show()
+                plt.close(fig)
 
                 # Plot raw contrast.
                 klmodes = self.database.red[key]['KLMODES'][j].split(',')
                 fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
                 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
                 mod = len(colors)
-                with plt.style.context('spaceKLIP.sk_style'):
-                    fig = plt.figure(figsize=(6.4, 4.8))
-                    ax = plt.gca()
-                    for k in range(data.shape[0]):
-                        if mask is None:
-                            ax.plot(seps[k], cons[k], color=colors[k % mod], label=klmodes[k] + ' KL')
-                        else:
-                            ax.plot(seps[k], cons[k], color=colors[k % mod], alpha=0.3, ls='--')
-                            ax.plot(seps[k], cons_mask[k], color=colors[k % mod], label=klmodes[k] + ' KL')
-                    ax.set_yscale('log')
-                    ax.set_ylim([None,1])
-                    if plot_xlim is not None:
-                        ax.set_xlim(plot_xlim)
-                    ax.set_xlabel('Separation [arcsec]')
-                    ax.set_ylabel(r'5-$\sigma$ contrast')
-                    ax.legend(loc='upper right', ncols=3,
-                            title=None if mask is None else 'Dashed lines exclude coronagraph mask throughput',
-                            title_fontsize=10)
-                    ax.set_title(f'Raw contrast in {filt}, {psfsub_strategy}')
-                    plt.tight_layout()
-                    if save_figures:
-                        output_file = fitsfile[:-5] + '_rawcon.pdf'
-                        plt.savefig(output_file)
-                        log.info(f" Plot saved in {output_file}")
-                    plt.show()
-                    plt.close(fig)
+                load_plt_style(plot_style)
+                fig = plt.figure(figsize=(6.4, 4.8))
+                ax = plt.gca()
+                for k in range(data.shape[0]):
+                    if mask is None:
+                        ax.plot(seps[k], cons[k], color=colors[k % mod], label=klmodes[k] + ' KL')
+                    else:
+                        ax.plot(seps[k], cons[k], color=colors[k % mod], alpha=0.3, ls='--')
+                        ax.plot(seps[k], cons_mask[k], color=colors[k % mod], label=klmodes[k] + ' KL')
+                ax.set_yscale('log')
+                ax.set_ylim([None,1])
+                if plot_xlim is not None:
+                    ax.set_xlim(plot_xlim)
+                ax.set_xlabel('Separation [arcsec]')
+                ax.set_ylabel(r'5-$\sigma$ contrast')
+                ax.legend(loc='upper right', ncols=3,
+                        title=None if mask is None else 'Dashed lines exclude coronagraph mask throughput',
+                        title_fontsize=10)
+                ax.set_title(f'Raw contrast in {filt}, {psfsub_strategy}')
+                plt.tight_layout()
+                if save_figures:
+                    output_file = fitsfile[:-5] + '_rawcon.pdf'
+                    plt.savefig(output_file)
+                    log.info(f" Plot saved in {output_file}")
+                plt.show()
+                plt.close(fig)
 
                 if output_filetype.lower()=='ecsv':
                     # Save outputs as astropy ECSV text tables
@@ -451,6 +454,7 @@ class AnalysisTools():
                            use_saved=False,
                            thrput_fit_method='median',
                            plot_xlim=(0,10),
+                           plot_style=None,
                            **kwargs
                            ):
         """ 
@@ -565,7 +569,7 @@ class AnalysisTools():
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
                 pxsc_rad = pxsc_arcsec / 3600. / 180. * np.pi  # rad
                 if self.database.red[key]['TELESCOP'][j] == 'JWST':
-                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON']:
+                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON', 'NRC_TACONFIRM', 'NRC_TACQ']:
                         diam = 5.2
                     else:
                         diam = JWST_CIRCUMSCRIBED_DIAMETER
@@ -760,8 +764,11 @@ class AnalysisTools():
 
                 # Define some local utilty functions for plot setup.
                 # This makes the plotting code below less repetitive and more consistent
-                @plt.style.context('spaceKLIP.sk_style')
-                def standardize_plots_setup():
+
+                def standardize_plots_setup(plot_style=None):
+                    # Intialize the matplotlib style.
+                    load_plt_style(plot_style)
+
                     fig = plt.figure(figsize=(6.4, 4.8))
                     ax = plt.gca()
                     color = plt.cm.tab10(np.linspace(0, 1, 10))
@@ -769,11 +776,14 @@ class AnalysisTools():
                     ax.set_prop_cycle(cc)
                     return fig, ax
 
-                @plt.style.context('spaceKLIP.sk_style')
                 def standardize_plots_annotate_save(ax, title="",
                                                     ylabel='Throughput',
                                                     xlim=plot_xlim,
-                                                    filename=None):
+                                                    filename=None,
+                                                    plot_style=None):
+                    # Intialize the matplotlib style.
+                    load_plt_style(plot_style)
+
                     ax.set_xlabel('Separation (")')
                     ax.set_title(title, fontsize=11)
                     if ylabel=='Throughput':
@@ -791,19 +801,19 @@ class AnalysisTools():
                                     bbox_inches='tight', dpi=300)
 
                 # Plot measured KLIP throughputs, for all KL modes
-                fig, ax = standardize_plots_setup()
+                fig, ax = standardize_plots_setup(plot_style=plot_style)
 
                 for ci, corr in enumerate(all_corrections):
                     KLmodes = klip_args['numbasis'][ci]
                     ax.plot(rawseps[ci], corr, label='KL = {}'.format(KLmodes))
                 ax.legend(ncol=3, fontsize=10)
                 standardize_plots_annotate_save(ax, title=f'Injected companions in {filt}, {psfsub_strategy}, all KL modes', ylabel='Throughput',
-                    filename=save_string + '_allKL_throughput.pdf')
+                    filename=save_string + '_allKL_throughput.pdf', plot_style=plot_style)
                 plt.close(fig)
 
 
                 # Plot individual measurements for median KL mode
-                fig, ax = standardize_plots_setup()
+                fig, ax = standardize_plots_setup(plot_style=plot_style)
 
                 ax.plot(rawseps[median_KL_index], 
                         all_corrections[median_KL_index],
@@ -819,12 +829,12 @@ class AnalysisTools():
                 standardize_plots_annotate_save(ax,
                                                 title=f"Injected companions in {filt}, {psfsub_strategy}, for KL={klip_args['numbasis'][median_KL_index]}",
                                                 ylabel='Throughput',
-                                                filename=save_string + '_medKL_throughput.pdf')
+                                                filename=save_string + '_medKL_throughput.pdf', plot_style=plot_style)
                 plt.close(fig)
 
 
                 # Plot calibrated contrast curves
-                fig, ax = standardize_plots_setup()
+                fig, ax = standardize_plots_setup(plot_style=plot_style)
                 for si, seps in enumerate(rawseps):
                     KLmodes = klip_args['numbasis'][si]
                     ax.plot(seps, maskcons_corr[si],
@@ -837,11 +847,11 @@ class AnalysisTools():
                 standardize_plots_annotate_save(ax,
                                                 title=f'Calibrated contrast in {filt}, {psfsub_strategy}',
                                                 ylabel='Contrast',
-                                                filename=save_string + '_calcon.pdf')
+                                                filename=save_string + '_calcon.pdf', plot_style=plot_style)
                 plt.close(fig)
 
                 # Plot calibrated contrast curves compared to raw
-                fig, ax = standardize_plots_setup()
+                fig, ax = standardize_plots_setup(plot_style=plot_style)
                 for si, seps in enumerate(rawseps):
                     KLmodes = klip_args['numbasis'][si]
                     ax.plot(seps, maskcons_corr[si],
@@ -854,7 +864,7 @@ class AnalysisTools():
                 standardize_plots_annotate_save(ax,
                                                 title=f'Calibrated contrast vs Raw contrast in {filt}, {psfsub_strategy}',
                                                 ylabel='Contrast',
-                                                filename=save_string + '_calcon_vs_rawcon.pdf')
+                                                filename=save_string + '_calcon_vs_rawcon.pdf', plot_style=plot_style)
                 plt.close(fig)
 
     def extract_companions(self,
@@ -922,7 +932,9 @@ class AnalysisTools():
             If float, will apply a high-pass filter to the FM PSF and KLIP
             dataset. The default is False.
         fitmethod : 'mcmc' or 'nested', optional
-            Sampling algorithm which shall be used. The default is 'mcmc'.
+            Sampling algorithm which shall be used. If None and minmethod not None, it will mock the MCMC fit results
+            using the initial guesses and perform only the Gaussian convolution fit to estimate extension.
+            The default is 'mcmc'.
         minmethod: str, optional
             scipy.optimize.minimize minimization method which shall be used to fit for the extension of the source.
             The default is None.
@@ -1108,7 +1120,8 @@ class AnalysisTools():
                                        'TP_CORONMSK',
                                        'TP_COMSUBST',
                                        'FITSFILE',
-                                       'FILTER',
+                                       'GSCALE',
+                                       'GSCALE_ERROR',
                                        'SIGMA_X',
                                        'SIGMA_X_ERROR',
                                        'SIGMA_Y',
@@ -1139,7 +1152,8 @@ class AnalysisTools():
                                        'float',
                                        'float',
                                        'object',
-                                       'str',
+                                       'float',
+                                       'float',
                                        'float',
                                        'float',
                                        'float',
@@ -1171,8 +1185,7 @@ class AnalysisTools():
                                        'LN(Z/Z0)',
                                        'TP_CORONMSK',
                                        'TP_COMSUBST',
-                                       'FITSFILE',
-                                       'FILTER'),
+                                       'FITSFILE'),
                                 dtype=('int',
                                        'float',
                                        'float',
@@ -1196,8 +1209,7 @@ class AnalysisTools():
                                        'float',
                                        'float',
                                        'float',
-                                       'object',
-                                       'str'))
+                                       'object'))
                 for k in range(len(companions)):
                     output_dir_comp = os.path.join(output_dir_kl, 'C%.0f' % (k + 1))
                     if not os.path.exists(output_dir_comp):
@@ -1676,7 +1688,8 @@ class AnalysisTools():
                                              scale_factor_avg,
                                              tp_comsubst,
                                              fitsfile,
-                                             filt,
+                                             result.x[3],
+                                             np.nan,
                                              result.x[0],
                                              np.nan,
                                              result.x[1],
@@ -1708,8 +1721,7 @@ class AnalysisTools():
                                              np.nan,
                                              scale_factor_avg,
                                              tp_comsubst,
-                                             fitsfile,
-                                             filt))
+                                             fitsfile))
                             
                             # Write the FM PSF to a file for future plotting.
                             ut.write_fitpsf_images(fma, fitsfile, tab[-1])
@@ -1814,15 +1826,114 @@ class AnalysisTools():
                                          evidence_ratio,
                                          scale_factor_avg,
                                          tp_comsubst,
-                                         fitsfile,
-                                         filt))
+                                         fitsfile))
                             
                             # Write the FM PSF to a file for future plotting.
                             ut.write_fitpsf_images(fit, fitsfile, tab[-1])
                         
                         # Otherwise.
                         else:
-                            raise NotImplementedError()
+                            if split_fit:
+                                # Mocking the MCMC fit results using the initial guesses and perform only the Gaussian fit.
+                                log.info('  --> Skipping  mcmc and pymultinest fit, just fitting for extended source.')
+                                # Initialize pyKLIP FMAstrometry class.
+                                fma = fitpsf.FMAstrometry(guess_sep=guess_sep,
+                                                          guess_pa=guess_pa,
+                                                          fitboxsize=boxsize,
+                                                          )
+                                fma.generate_fm_stamp(fm_image=fm_frame,
+                                                      fm_center=[fm_centx, fm_centy],
+                                                      padding=5)
+                                fma.generate_data_stamp(data=data_frame,
+                                                        data_center=[data_centx, data_centy],
+                                                        dr=dr,
+                                                        exclusion_radius=exclr)
+
+                                fma.fit_flux = fitpsf.ParamRange(1, [0, 0])
+                                fma.fit_x  = fitpsf.ParamRange(fma.data_stamp_x_center,[0,0])
+                                fma.fit_y  = fitpsf.ParamRange(fma.data_stamp_y_center,[0,0])
+                                fma.raw_RA_offset = fitpsf.ParamRange(-(fma.fit_x.bestfit - fma.data_center[0]),
+                                                                        fma.fit_x.error_2sided[::-1])
+                                fma.raw_Dec_offset = fitpsf.ParamRange(fma.fit_y.bestfit - fma.data_center[1],
+                                                                       fma.fit_y.error_2sided[::-1])
+                                fma.raw_flux = fma.fit_flux
+
+                                flux_jy = fma.fit_flux.bestfit * guess_flux
+                                flux_jy *= fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
+                                flux_jy_err = fma.fit_flux.error * guess_flux
+                                flux_jy_err *= fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
+                                flux_si = fma.fit_flux.bestfit * guess_flux
+                                flux_si *= fzero_si[filt] / 10 ** (mstar[filt] / 2.5)  # erg/cm^2/s/A
+                                flux_si *= 1e-7 * 1e4 * 1e4  # W/m^2/um
+                                flux_si_err = fma.fit_flux.error * guess_flux
+                                flux_si_err *= fzero_si[filt] / 10 ** (mstar[filt] / 2.5)  # erg/cm^2/s/A
+                                flux_si_err *= 1e-7 * 1e4 * 1e4  # W/m^2/um
+                                flux_si_alt = flux_jy * 1e-26 * 299792458. / (
+                                            1e-6 * self.database.red[key]['CWAVEL'][j]) ** 2 * 1e-6  # W/m^2/um
+                                flux_si_alt_err = flux_jy_err * 1e-26 * 299792458. / (
+                                            1e-6 * self.database.red[key]['CWAVEL'][j]) ** 2 * 1e-6  # W/m^2/um
+                                delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
+                                delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
+                                if isinstance(mstar_err, dict):
+                                    mstar_err_temp = mstar_err[filt]
+                                else:
+                                    mstar_err_temp = mstar_err
+                                appmag = mstar[filt] + delmag  # vegamag
+                                appmag_err = np.sqrt(mstar_err_temp ** 2 + delmag_err ** 2)
+                                fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                                    subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
+
+                                # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
+                                fig, result = best_convfit_and_residuals(fma,
+                                                                         minmethod=minmethod,
+                                                                         initial_params=gauss_param_guesses)
+
+                                if save_figures:
+                                    path = os.path.join(output_dir_comp,
+                                                        mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                                                            subsections) + '_' + key + '-model_conv_c%.0f' % (
+                                                                    k + 1) + '.pdf')
+                                    fig.suptitle(
+                                        mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
+                                    fig.savefig(path)
+                                plt.show()
+                                plt.close(fig)
+
+                                tab.add_row((k + 1,
+                                             fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
+                                             fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
+                                             fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
+                                             fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
+                                             flux_jy,
+                                             flux_jy_err,
+                                             flux_si,
+                                             flux_si_err,
+                                             flux_si_alt,
+                                             flux_si_alt_err,
+                                             fma.raw_flux.bestfit * guess_flux,
+                                             fma.raw_flux.error * guess_flux,
+                                             delmag,  # mag
+                                             delmag_err,  # mag
+                                             appmag,  # mag
+                                             appmag_err,  # mag
+                                             mstar[filt],  # mag
+                                             mstar_err_temp,  # mag
+                                             np.nan,
+                                             np.nan,
+                                             scale_factor_avg,
+                                             tp_comsubst,
+                                             fitsfile,
+                                             result.x[3],
+                                             np.nan,
+                                             result.x[0],
+                                             np.nan,
+                                             result.x[1],
+                                             np.nan,
+                                             result.x[2],
+                                             np.nan,
+                                             ))
+                            else:
+                                raise NotImplementedError()
 
                         # Plot estimated background level.
                         if remove_background:
@@ -1967,7 +2078,8 @@ def loss_function(params,
     kernel = gaussian_kernel(sigma_x=sigma_x, sigma_y=sigma_y, theta_degrees=theta_degrees, n=6)
     convolved_image = convolve(offset_psf*10**scale, kernel)
 
-    mse = np.nanmean((target_array - convolved_image) ** 2)
+    # mse = np.nanmean((target_array - convolved_image) ** 2)
+    mse = np.nanmean((target_array - convolved_image) ** 2 *(target_array))
     return mse
 
 def best_convfit_and_residuals(fma,

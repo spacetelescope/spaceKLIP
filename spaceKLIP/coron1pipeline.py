@@ -28,7 +28,6 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -63,7 +62,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         
         Parameters
         ----------
-        \*\*kwargs : keyword arguments
+        kwargs : keyword arguments
             Default JWST stage 1 detector pipeline keyword arguments.
         
         Returns
@@ -124,8 +123,12 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         # Process MIR & NIR exposures differently.
         instrument = input.meta.instrument.name
         if instrument == 'MIRI':
+            # process MIRI exposures;
+            # the steps are in a different order than NIR
+            log.debug('Processing a MIRI exposure')
             input = self.run_step(self.group_scale, input)
             input = self.run_step(self.dq_init, input)
+            input = self.run_step(self.emicorr, input)
             input = self.run_step(self.saturation, input)
             #input = self.run_step(self.ipc, input) Not run for MIRI
             input = self.run_step(self.firstframe, input)
@@ -139,6 +142,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             input = self.run_step(self.jump, input)
             input = self.run_step(self.mask_groups, input)
         else:
+            # process Near-IR exposures
+            log.debug('Processing a Near-IR exposure')
             input = self.run_step(self.group_scale, input)
             input = self.run_step(self.dq_init, input)
             input = self.do_saturation(input)
@@ -146,7 +151,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             input = self.run_step(self.superbias, input)
             input = self.do_refpix(input)
             input = self.run_step(self.linearity, input)
-            input = self.run_step(self.persistence, input)
+            if instrument != 'NIRSPEC': 
+                input = self.run_step(self.persistence, input)
             input = self.run_step(self.dark_current, input)
             input = self.run_step(self.charge_migration, input)
             input = self.run_step(self.jump, input)
@@ -154,6 +160,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             #1overf Only present in NIR data
             if 'groups' in self.stage_1overf:
                 input = self.run_step(self.subtract_1overf, input)
+            # TODO: Test clean_flicker_noise step versus subtract_1overf
+            # input = self.clean_flicker_noise(input)
         
         # save the corrected ramp data, if requested
         if self.ramp_fit.save_calibrated_ramp or self.save_calibrated_ramp or self.save_intermediates:
@@ -170,18 +178,18 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
                 warnings.simplefilter('ignore', RuntimeWarning)
                 res = self.run_step(self.experimental_jumpramp, input)
                 rate, rateints = res
-        
-        if self.rate_int_outliers and rateints is not None:
+
+        if self.rate_int_outliers and (rateints is not None):
             # Flag additional outliers by comparing rateints and refit ramp
             input = self.apply_rateint_outliers(rateints, input)
             if input is None:
-                input, ints_model = rate, rateints
+                input, ints_model = (rate, rateints)
             else:
                 res = self.run_step(self.ramp_fit, input, save_results=False)
                 input, ints_model = (res, None) if self.ramp_fit.skip else res
         else:
             # input is the rate product, ints_model is the rateints product
-            input, ints_model = rate, rateints
+            input, ints_model = (rate, rateints)
 
         if input is None:
             self.ramp_fit.log.info('NoneType returned from ramp fitting. Gain scale correction skipped')
@@ -244,8 +252,6 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         save_results : bool, optional
             Save the JWST pipeline step product? None will default to the JWST
             pipeline step default. The default is None.
-        \*\*kwargs : keyword arguments
-            Default JWST pipeline step keyword arguments.
         
         Returns
         -------
@@ -253,6 +259,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
             Output JWST datamodel.
         
         """
+
+        from .logging_tools import crds_logging_disabled
         
         # Determine if we're saving results for real
         if step_obj.skip:
@@ -274,7 +282,8 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         # Run step. Don't save results yet.
         step_save_orig = step_obj.save_results
         step_obj.save_results = False
-        res = step_obj(input)
+        with crds_logging_disabled():
+            res = step_obj.run(input)
         step_obj.save_results = step_save_orig
         
         # Check if group scale correction or gain scale correction were skipped.
@@ -306,7 +315,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        \*\*kwargs : keyword arguments
+        kwargs : keyword arguments
             Default JWST stage 1 saturation step keyword arguments.
         
         Returns
@@ -425,7 +434,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        \*\*kwargs : keyword arguments
+        kwargs : keyword arguments
             Default JWST stage 1 refpix step keyword arguments.
         
         Returns
@@ -465,7 +474,7 @@ class Coron1Pipeline_spaceKLIP(Detector1Pipeline):
         ----------
         input : jwst.datamodel
             Input JWST datamodel to be processed.
-        \*\*kwargs : keyword arguments
+        kwargs : keyword arguments
             Default JWST stage 1 refpix step keyword arguments.
         
         Returns
@@ -887,6 +896,18 @@ def run_obs(database,
         # Loop through FITS files.
         nfitsfiles = len(database.obs[key])
         jtervals = trange(nfitsfiles, desc='FITS files', leave=False) if quiet else range(nfitsfiles)
+
+        # Need to do some preparation steps if group masking is wanted before running pipeline
+        steps = apply_masking_prechecks(steps)
+
+        # Need to make sure that the database.obs[key] order deals with ref, ref_bg before sci, sci_bg files
+        # Order is specific to group masking done on reference images (only option at this time)
+        if not steps['mask_groups']['skip']:
+            # order database.obs[key] based on TYPE, i.e. REF, REF_BG, REF_TA, SCI, etc...
+            # keeping the order of reference observations based on FITSFILE
+            database.obs[key].sort(['TYPE', 'FITSFILE'])
+            print(database.obs[key])
+
         for j in jtervals:
 
             # Skip non-stage 0 files.
@@ -895,17 +916,6 @@ def run_obs(database,
             if database.obs[key]['DATAMODL'][j] != 'STAGE0':
                 if not quiet: log.info('  --> Coron1Pipeline: skipping non-stage 0 file ' + tail)
                 continue
-
-            # Need to do some preparation steps for group masking before running pipeline
-            steps['mask_groups'] = steps.setdefault('mask_groups', {})
-            if not steps['mask_groups']:
-                # If mask_groups unspecified or has no parameters, skip by default
-                steps['mask_groups']['skip'] = True
-            else:
-                # If mask_groups specified but skip isn't mentioned, set to False
-                steps['mask_groups'].setdefault('skip', False)
-            steps['mask_groups'].setdefault('mask_method', 'basic')
-            steps['mask_groups'].setdefault('types', ['REF', 'REF_BG'])
 
             # Check if we are skipping the mask_groups, if not run routine.
             if not steps['mask_groups']['skip']:
@@ -962,7 +972,7 @@ def run_obs(database,
                 steps['mask_groups']['skip'] = False
                 skip_revert = False
 
-            if (j == jtervals[-1]) and (groupmaskflag == 1):
+            if (j == nfitsfiles-1) and (groupmaskflag == 1):
                 '''This is the last file for this concatenation, and the groupmaskflag has been
                 set. This means we need to reset the mask_array back to original state, 
                 which was that it didn't exist, so that the routine is rerun. '''
@@ -977,6 +987,20 @@ def run_obs(database,
             
             # Update spaceKLIP database.
             database.update_obs(key, j, fitsout_path)
+
+def apply_masking_prechecks(steps):
+    # Need to do some preparation steps for group masking before running pipeline
+    steps['mask_groups'] = steps.setdefault('mask_groups', {})
+    if not steps['mask_groups']:
+        # If mask_groups unspecified or has no parameters, skip by default
+        steps['mask_groups']['skip'] = True
+    else:
+        # If mask_groups specified but skip isn't mentioned, set to False
+        steps['mask_groups'].setdefault('skip', False)
+    steps['mask_groups'].setdefault('mask_method', 'basic')
+    steps['mask_groups'].setdefault('types', ['REF', 'REF_BG'])
+
+    return steps
 
 def prepare_group_masking_basic(steps, observations, quiet=False):
 
