@@ -465,7 +465,7 @@ class ImageTools():
 
         pass
 
-    def mask_NDsqaures(self,
+    def mask_NDsquares(self,
                         npix=0,
                         bbox=[50, 250],
                         cval=np.nan,
@@ -517,8 +517,7 @@ class ImageTools():
             for j in range(nfitsfiles):
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
-                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(
-                    fitsfile)
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 crpix1 = self.database.obs[key]['CRPIX1'][j]
