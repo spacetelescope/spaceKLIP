@@ -466,7 +466,7 @@ class ImageTools():
         pass
 
     def mask_NDsquares(self,
-                        npix=5,
+                        npix=1,
                         cval=np.nan,
                         minval=0.1,
                         types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
@@ -477,7 +477,7 @@ class ImageTools():
         Parameters
         ----------
         npix : int or list of four int, optional
-            Number of pixels to be added around the square masks. The default is 5.
+            Number of pixels to be added around the square masks. The default is 1.
         cval : float, optional
             Fill value for the maked pixels. The default is nan.
         minval: float, optional
@@ -543,7 +543,7 @@ class ImageTools():
                     rows, cols = np.where(np.isfinite(data[0]))
                     bbox = [np.min(cols), np.max(cols)]
                     # only mask where psfmask indicates bad pixels (e.g. psfmask[0] < 1)
-                    NDmask = (mask < minval) & ((xx < bbox[0] + 32) | (xx > bbox[1] - 51))
+                    NDmask = (mask < minval) & ((xx < bbox[0] + 30) | (xx > bbox[1] - 50))
 
                     # apply to data (assumes data.shape == (n_frames, ny, nx))
                     data[:, dilate_squares(NDmask,n=npix)] = cval
