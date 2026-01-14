@@ -466,10 +466,9 @@ class ImageTools():
         pass
 
     def mask_NDsquares(self,
-                        npix=0,
-                        bbox=[50, 250],
+                        npix=5,
                         cval=np.nan,
-                        minval=0.01,
+                        minval=0.1,
                         types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
                         subdir='ndmasked'):
         """
@@ -478,18 +477,12 @@ class ImageTools():
         Parameters
         ----------
         npix : int or list of four int, optional
-            Number of pixels to be padded around the frames. If int, the same
-            number of pixels will be padded on each side. If list of four int,
-            a different number of pixels can be padded on the [left, right,
-            bottom, top] of the frames. The default is 1.
-        bboх : list of two int, optional
-            Bounding box [x_min, x_max] in pixels defining the region where
-            the ND squares are located. The default is [50, 250].
+            Number of pixels to be added around the square masks. The default is 5.
         cval : float, optional
-            Fill value for the padded pixels. The default is nan.
+            Fill value for the maked pixels. The default is nan.
         minval: float, optional
             Minimum value in the PSF mask to consider a pixel as
-            part of the ND square. The default is 0.01.
+            part of the ND square. The default is 0.1.
         types : list of str, optional
             List of data types from which the frames shall be padded. The
             default is ['SCI', 'SCI_BG', 'REF', 'REF_BG'].
@@ -502,6 +495,19 @@ class ImageTools():
         None.
 
         """
+
+        def dilate_squares(mask, n):
+            """
+            Expand masks by n pixels in every direction.
+            mask : 2D array of 0/1 (or bool)
+            n : non-negative int
+            returns : 2D array (same dtype as input) with expanded clusters
+            """
+            if n <= 0:
+                return mask.copy()
+            struct = np.ones((2 * n + 1, 2 * n + 1), dtype=bool)
+            out = scipy.ndimage.binary_dilation(mask.astype(bool), structure=struct)
+            return out.astype(mask.dtype)
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -534,11 +540,13 @@ class ImageTools():
                     ny, nx = mask.shape
                     yy, xx = np.indices((ny, nx))
 
-                    # optionally only mask where psfmask indicates bad pixels (e.g. psfmask[0] < 1)
-                    NDmask = (mask <= minval) & ((xx < bbox[0] + npix) | (xx > bbox[1] + npix))
+                    rows, cols = np.where(np.isfinite(data[0]))
+                    bbox = [np.min(cols), np.max(cols)]
+                    # only mask where psfmask indicates bad pixels (e.g. psfmask[0] < 1)
+                    NDmask = (mask < minval) & ((xx < bbox[0] + 32) | (xx > bbox[1] - 51))
 
                     # apply to data (assumes data.shape == (n_frames, ny, nx))
-                    data[:, NDmask] = cval
+                    data[:, dilate_squares(NDmask,n=npix)] = cval
 
                 # Write new FITS file and mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
