@@ -3381,8 +3381,12 @@ class ImageTools():
             ww_all = np.append(ww_all, ww_sci_ta)
             ww_all = np.append(ww_all, ww_ref_ta)
             shifts_all = []
-            for j in ww_all:
 
+            # Need to preserve the ww_sci[0] offsets in case we are operating only on first_sci_only
+            xoffset_orig = np.copy(self.database.obs[key]['XOFFSET'][ww_sci[0]])
+            yoffset_orig = np.copy(self.database.obs[key]['YOFFSET'][ww_sci[0]])
+
+            for j in ww_all:
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 (data, erro, pxdq, head_pri, head_sci, is2d,
@@ -3416,7 +3420,6 @@ class ImageTools():
                             # For the first SCI/REF frame, get the star position
                             # and the shift between the star and coronagraphic
                             # mask position.
-
                             if (not first_sci_only or j == ww_sci[0]) and k == 0:
 
                                 # Use TA data to determine the star position behind the coronagraphic mask.
@@ -3445,8 +3448,11 @@ class ImageTools():
                             maskoffs_temp += [np.array([xshift, yshift])]  # pixels
 
                         if first_sci_only:
-                            xoffset -= self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
-                            yoffset -= self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
+                            # Adjust centers based on first science frame. Typically these should be zero, but in some
+                            # cases manual offsets have been applied in APT to ensure better coronagraph alignment.
+                            # As such, these aren't "true" offsets from the coronagraph, and need to be removed.
+                            xoffset -= xoffset_orig  # arcsec
+                            yoffset -= yoffset_orig  # arcsec
                             log.info('  --> Calculate centers: adjusted XOFFSET/YOFFSET relative to first SCI frame.')
                         else:
                             # XOFFSET/YOFFSET remain the same.
@@ -3498,8 +3504,8 @@ class ImageTools():
                             maskoffs_temp += [np.array([xshift, yshift])]
 
                         if first_sci_only:
-                            xoffset -= self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
-                            yoffset -= self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
+                            xoffset -= xoffset_orig  # arcsec
+                            yoffset -= yoffset_orig  # arcsec
                             log.info('  --> Calculate centers: adjusted XOFFSET/YOFFSET relative to first SCI frame.')
                         else:
                             # XOFFSET/YOFFSET remain the same.
