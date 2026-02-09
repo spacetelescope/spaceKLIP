@@ -465,6 +465,101 @@ class ImageTools():
 
         pass
 
+    def mask_NDsquares(self,
+                        npix=1,
+                        cval=np.nan,
+                        minval=0.1,
+                        types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
+                        subdir='ndmasked'):
+        """
+        Mask the ND squares in the frames by setting the pixel values to NaN.
+
+        Parameters
+        ----------
+        npix : int or list of four int, optional
+            Number of pixels to be added around the square masks. The default is 1.
+        cval : float, optional
+            Fill value for the maked pixels. The default is nan.
+        minval: float, optional
+            Minimum value in the PSF mask to consider a pixel as
+            part of the ND square. The default is 0.1.
+        types : list of str, optional
+            List of data types from which the frames shall be padded. The
+            default is ['SCI', 'SCI_BG', 'REF', 'REF_BG'].
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'padded'.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        def dilate_squares(mask, n):
+            """
+            Expand masks by n pixels in every direction.
+            mask : 2D array of 0/1 (or bool)
+            n : non-negative int
+            returns : 2D array (same dtype as input) with expanded clusters
+            """
+            if n <= 0:
+                return mask.copy()
+            struct = np.ones((2 * n + 1, 2 * n + 1), dtype=bool)
+            out = scipy.ndimage.binary_dilation(mask.astype(bool), structure=struct)
+            return out.astype(mask.dtype)
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Loop through FITS files.
+            nfitsfiles = len(self.database.obs[key])
+            for j in range(nfitsfiles):
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+                crpix1 = self.database.obs[key]['CRPIX1'][j]
+                crpix2 = self.database.obs[key]['CRPIX2'][j]
+                starcenx = self.database.obs[key]['STARCENX'][j]
+                starceny = self.database.obs[key]['STARCENY'][j]
+                maskcenx = self.database.obs[key]['MASKCENX'][j]
+                maskceny = self.database.obs[key]['MASKCENY'][j]
+
+                if self.database.obs[key]['TYPE'][j] in types:
+                    head, tail = os.path.split(fitsfile)
+                    log.info('  --> Frame ND square masking: ' + tail)
+                    # Get data shape.
+                    ny, nx = mask.shape
+                    yy, xx = np.indices((ny, nx))
+
+                    rows, cols = np.where(np.isfinite(data[0]))
+                    bbox = [np.min(cols), np.max(cols)]
+                    # only mask where psfmask indicates bad pixels (e.g. psfmask[0] < 1)
+                    NDmask = (mask < minval) & ((xx < bbox[0] + 30) | (xx > bbox[1] - 50))
+
+                    # apply to data (assumes data.shape == (n_frames, ny, nx))
+                    data[:, dilate_squares(NDmask,n=npix)] = cval
+
+                # Write new FITS file and mask.
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2, starcenx=starcenx,
+                                         starceny=starceny, maskcenx=maskcenx, maskceny=maskceny)
+
+        pass
+
     def coadd_frames(self,
                      nframes=None,
                      types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
