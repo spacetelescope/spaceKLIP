@@ -625,6 +625,12 @@ def alignlsq(shift,
     imres : 1D-array
         Residual image collapsed into one dimension.
     """
+    
+    # Ensure data type if float64.
+    image = np.asarray(image, dtype=np.float64)
+    ref_image = np.asarray(ref_image, dtype=np.float64)
+    if mask is not None:
+        mask = np.asarray(mask, dtype=np.float64)
 
     if mask is None:
         return (ref_image - shift[2] * imshift(image, shift[:2], method=method, pad=False, kwargs=kwargs)).ravel()
