@@ -626,7 +626,7 @@ def alignlsq(shift,
         Residual image collapsed into one dimension.
     """
     
-    # Ensure data type if float64.
+    # Ensure data type is float64.
     image = np.asarray(image, dtype=np.float64)
     ref_image = np.asarray(ref_image, dtype=np.float64)
     if mask is not None:
