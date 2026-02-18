@@ -1204,7 +1204,7 @@ class ImageTools():
                 crpix1 = self.database.obs[key]['CRPIX1'][j] - 1
                 crpix2 = self.database.obs[key]['CRPIX2'][j] - 1
 
-                full_fits_path = os.path.abspath(fitsfile)  # ✅ Get full absolute path
+                full_fits_path = os.path.abspath(fitsfile)
 
                 if set_dq_zero:  # set_dq_zero
                     # Make copy of DQ array filled with zeros, i.e. all good pixels
@@ -1634,6 +1634,35 @@ class ImageTools():
         """
         Use an iterative sigma clipping algorithm to identify additional bad
         pixels in the data.
+        
+        Parameters
+        ----------
+        data : 3D-array
+            Input images.
+        erro : 3D-array
+            Input image uncertainties.
+        pxdq : 3D-array
+            Input binary bad pixel maps (1 = bad, 0 = good). Will be updated by
+            the routine to include the newly identified bad pixels.
+        NON_SCIENCE : 3D-array
+            Input binary non-science pixel maps (1 = bad, 0 = good). Will not
+            be modified by the routine.
+        sigclip_kwargs : dict, optional
+            Keyword arguments for the 'sigclip' method. Available keywords are:
+            - sigma : float, optional
+                Sigma clipping threshold. The default is 5.
+            - neg_sigma : float, optional
+                Sigma clipping threshold for negative outliers. The default is 1.
+            - shift_x : list of int, optional
+                Pixels in x-direction to which each pixel shall be compared to.
+                The default is [-1, 0, 1].
+            - shift_y : list of int, optional
+                Pixels in y-direction to which each pixel shall be compared to.
+                The default is [-1, 0, 1].
+            The default is {}.
+        Returns
+        -------
+        None.
         """
         # Optional PSF mask.
         psf_mask = None
@@ -1750,7 +1779,29 @@ class ImageTools():
                                  pxdq,
                                  NON_SCIENCE,
                                  timeints_kwargs={}):
-        
+        """
+        Identify bad pixels from temporal variations across integrations.
+        Parameters
+        ----------
+        data : 3D-array
+            Input images.
+        erro : 3D-array
+            Input image uncertainties.
+        pxdq : 3D-array
+            Input binary bad pixel maps (1 = bad, 0 = good). Will be updated by
+            the routine to include the newly identified bad pixels.
+        NON_SCIENCE : 3D-array
+            Input binary non-science pixel maps (1 = bad, 0 = good). Will not
+            be modified by the routine.
+        timeints_kwargs : dict, optional
+            Keyword arguments for the 'timeints' method. Available keywords are:
+            - sigma : float, optional
+                Sigma clipping threshold. The default is 5.
+            The default is {}.
+        Returns
+        -------
+        None.
+        """
         # Check inputs.
         method = timeints_kwargs.get("method", "group")
         if method not in ("group", "pixel", "pixel_klip"):
