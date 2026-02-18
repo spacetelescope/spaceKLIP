@@ -1622,27 +1622,26 @@ class ImageTools():
         
         
     def find_bad_pixels_sigclip(self,
-                                    data,
-                                    erro,
-                                    pxdq,
-                                    NON_SCIENCE,
-                                    sigclip_kwargs={},
-                                    mode='klip',
-                                    mask_psf=False,
-                                    crpix1=None,
-                                    crpix2=None
-                                    ):
+                                data,
+                                erro,
+                                pxdq,
+                                NON_SCIENCE,
+                                sigclip_kwargs={},
+                                mode='klip',
+                                mask_psf=False,
+                                crpix1=None,
+                                crpix2=None):
         """
         Use an iterative sigma clipping algorithm to identify additional bad
         pixels in the data.
         """
-        # Optional PSF mask
+        # Optional PSF mask.
         psf_mask = None
         if mask_psf:
             if crpix1 is not None and crpix2 is not None:
                 ny, nx = data.shape[1:]
                 Y, X = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
-                psf_radius = 50 # adjust if needed
+                psf_radius = 50  # Just setting to a general value for radius.
                 psf_mask = ((X - crpix1)**2 + (Y - crpix2)**2) < psf_radius**2
 
         # Check input.
@@ -1684,15 +1683,15 @@ class ImageTools():
                 data_temp[i][ww[i]] = np.nan
                 erro_temp[i][ww[i]] = np.nan
 
-                # Shift data and calculate median and standard deviation of neighbours
+                # Shift data and calculate median and standard deviation of neighbours.
                 pad_data = np.pad(data_temp[i], pad_vals, mode='edge')
                 data_arr = []
                 for ix in sigclip_kwargs['shift_x']:
                     for iy in sigclip_kwargs['shift_y']:
                         if ix != 0 or iy != 0:
-                            # Using np.roll on padded data
+                            # Using np.roll on padded data.
                             shifted = np.roll(pad_data, (iy, ix), axis=(0, 1))
-                            # Slice back to original dimensions
+                            # Slice back to original dimensions.
                             data_arr.append(shifted[pad_bottom:top, pad_left:right])
                 
                 data_arr = np.array(data_arr)
@@ -1703,7 +1702,7 @@ class ImageTools():
                 den = np.sqrt(data_std**2 + erro[i]**2)
                 z = diff / den
 
-                # Find values N standard deviations above the mean of neighbors
+                # Find values N standard deviations above the mean of neighbors.
                 mask_neg = np.zeros_like(ww[i]) # Default empty mask
                 
                 if mode == 'klip':
@@ -1713,7 +1712,7 @@ class ImageTools():
                     mask_pos = z > sigclip_kwargs['sigma']
                     mask_neg = z < -sigclip_kwargs['neg_sigma']
                 
-                # Apply PSF protection
+                # Apply PSF protection.
                 if psf_mask is not None:
                     mask_pos[psf_mask] = False
                     mask_neg[psf_mask] = False
@@ -1744,10 +1743,6 @@ class ImageTools():
         print(f' --> Method sigclip: identified {added_pixels} additional bad pixel(s) -- {percent_added:.2f}%')
         
         return (pxdq != 0) & (pxdq_orig == 0)
-
-
-    
-        
 
     def find_bad_pixels_timeints(self,
                                  data,
