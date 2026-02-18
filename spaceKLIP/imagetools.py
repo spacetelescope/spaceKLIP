@@ -466,6 +466,101 @@ class ImageTools():
 
         pass
 
+    def mask_NDsquares(self,
+                        npix=1,
+                        cval=np.nan,
+                        minval=0.1,
+                        types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
+                        subdir='ndmasked'):
+        """
+        Mask the ND squares in the frames by setting the pixel values to NaN.
+
+        Parameters
+        ----------
+        npix : int or list of four int, optional
+            Number of pixels to be added around the square masks. The default is 1.
+        cval : float, optional
+            Fill value for the maked pixels. The default is nan.
+        minval: float, optional
+            Minimum value in the PSF mask to consider a pixel as
+            part of the ND square. The default is 0.1.
+        types : list of str, optional
+            List of data types from which the frames shall be padded. The
+            default is ['SCI', 'SCI_BG', 'REF', 'REF_BG'].
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'padded'.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        def dilate_squares(mask, n):
+            """
+            Expand masks by n pixels in every direction.
+            mask : 2D array of 0/1 (or bool)
+            n : non-negative int
+            returns : 2D array (same dtype as input) with expanded clusters
+            """
+            if n <= 0:
+                return mask.copy()
+            struct = np.ones((2 * n + 1, 2 * n + 1), dtype=bool)
+            out = scipy.ndimage.binary_dilation(mask.astype(bool), structure=struct)
+            return out.astype(mask.dtype)
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Loop through FITS files.
+            nfitsfiles = len(self.database.obs[key])
+            for j in range(nfitsfiles):
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+                crpix1 = self.database.obs[key]['CRPIX1'][j]
+                crpix2 = self.database.obs[key]['CRPIX2'][j]
+                starcenx = self.database.obs[key]['STARCENX'][j]
+                starceny = self.database.obs[key]['STARCENY'][j]
+                maskcenx = self.database.obs[key]['MASKCENX'][j]
+                maskceny = self.database.obs[key]['MASKCENY'][j]
+
+                if self.database.obs[key]['TYPE'][j] in types:
+                    head, tail = os.path.split(fitsfile)
+                    log.info('  --> Frame ND square masking: ' + tail)
+                    # Get data shape.
+                    ny, nx = mask.shape
+                    yy, xx = np.indices((ny, nx))
+
+                    rows, cols = np.where(np.isfinite(data[0]))
+                    bbox = [np.min(cols), np.max(cols)]
+                    # only mask where psfmask indicates bad pixels (e.g. psfmask[0] < 1)
+                    NDmask = (mask < minval) & ((xx < bbox[0] + 30) | (xx > bbox[1] - 50))
+
+                    # apply to data (assumes data.shape == (n_frames, ny, nx))
+                    data[:, dilate_squares(NDmask,n=npix)] = cval
+
+                # Write new FITS file and mask.
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2, starcenx=starcenx,
+                                         starceny=starceny, maskcenx=maskcenx, maskceny=maskceny)
+
+        pass
+
     def coadd_frames(self,
                      nframes=None,
                      types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
@@ -2268,6 +2363,235 @@ class ImageTools():
 
         pass
 
+    def clean_background(self,
+                         sigma=3.,
+                         gaussian_smoothing={'skip':True, 'sigma':1.},
+                         types=['SCI_BG', 'REF_BG'],
+                         subdir='bgcleaned'):
+        """
+        Clean data from any contaminating sources in background observations using sigma clipping.
+        Used for MIRI background observations.
+
+        Parameters
+        ----------
+        sigma : float, optional
+            Sigma clipping threshold for background cleaning. The default is 3.
+        gaussian_smoothing : dict, optional
+            Dictionary with keyword arguments to use scipy.ndimage.gaussian_filter.
+            This will smooth the backgrounds before the cleaning process. If 'skip' is True, 
+            no Gaussian smoothing will be applied. The default is {'skip':True, 'sigma':1.}.
+        types : list of str, optional
+            List of data types for which background cleaning shall be applied.
+            The default is ['SCI_BG', 'REF_BG'].
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'bgcleaned'.
+        
+        Returns
+        -------
+        None.
+        """
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            for data_type in types:
+                log.info('--> Starting cleaning process for ' + data_type + ' files')
+
+                # find science background files
+                ww_bg = np.where(self.database.obs[key]['TYPE'] == data_type)[0]
+
+                # Loop through science background files.
+                if len(ww_bg) == 2:
+                    bg_data = []
+
+                    for j in ww_bg:
+
+                        # Read FITS file.
+                        fitsfile = self.database.obs[key]['FITSFILE'][j]
+                        data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+
+                        bg_data += [data]
+
+                    bg_data = np.array(bg_data)
+
+                    img1 = np.ones_like(bg_data[0])
+                    img2 = np.ones_like(bg_data[1])
+
+                    # Calculate SNR maps per pixel
+                    snr_map1 = np.nanstd(bg_data[0], axis=0)
+                    snr_map2 = np.nanstd(bg_data[1], axis=0)
+
+                    if not gaussian_smoothing['skip']:
+                        log.info('  --> Applying Gaussian smoothing with sigma = %.2f' % gaussian_smoothing['sigma'])
+                        snr_map1 = gaussian_filter(bg_data[0], sigma=gaussian_smoothing['sigma'])
+                        snr_map2 = gaussian_filter(bg_data[1], sigma=gaussian_smoothing['sigma'])
+
+                    # Looping over integrations
+                    for i in range(bg_data.shape[1]):
+                        diff = (bg_data[0,i,:,:] - bg_data[1,i,:,:])/np.sqrt(snr_map1**2 + snr_map2**2)
+
+                        img1[i,:,:] = np.where(diff > sigma, np.nan, bg_data[0,i,:,:])
+                        img2[i,:,:] = np.where(diff < -sigma, np.nan, bg_data[1,i,:,:])
+
+                    cleaned_bg_data = np.array([img1, img2])
+
+                    # Write FITS file and PSF mask.
+                    for i,j in enumerate(ww_bg):
+
+                        # Read FITS file and PSF mask.
+                        fitsfile = self.database.obs[key]['FITSFILE'][j]
+                        data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                        maskfile = self.database.obs[key]['MASKFILE'][j]
+                        mask = ut.read_msk(maskfile)
+
+                        # Replace data with cleaned data
+                        fitsfile = ut.write_obs(fitsfile, output_dir, cleaned_bg_data[i], erro, pxdq, head_pri, head_sci, is2d,
+                                                align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                                center_mask=center_mask, maskoffs=maskoffs)
+                        maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                        # Update spaceKLIP database.
+                        self.database.update_obs(key, j, fitsfile, maskfile)
+
+                else:
+                    raise NotImplementedError('Background cleaning currently only implemented if 2 background files available.')
+            
+            # Saving unmodified files
+            log.info('--> Skipping cleaning process for non background files.')
+            nfitsfiles = len(self.database.obs[key])
+            for j in range(nfitsfiles):
+
+                # Skip file types that are in the list of types.
+                if self.database.obs[key]['TYPE'][j] not in types:
+
+                    # Read FITS file.
+                    fitsfile = self.database.obs[key]['FITSFILE'][j]
+                    data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                    maskfile = self.database.obs[key]['MASKFILE'][j]
+                    mask = ut.read_msk(maskfile)
+
+                    # Write FITS file and PSF mask.
+                    fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
+                    maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                    # Update spaceKLIP database.
+                    self.database.update_obs(key, j, fitsfile, maskfile)
+    
+    def persistence_trimming(self,
+                             radius_pxl=4,
+                             ints_to_trim=2,
+                             types=['SCI', 'REF'],
+                             subdir='persistence_trimmed'):
+        """
+        Remove persistence artifacts from the initial N integrations by trimming
+        a circular region around the persistence location. This is useful for
+        MIRI 4QPM data where persistence artifacts from target acquisition can
+        remain in early integrations.
+
+        Note that for this function to work, TA images must be included in the 
+        database and previous data reduction steps must have been performed to
+        determine the persistence location.
+
+        Parameters
+        ----------
+        radius_pxl : int, optional
+            Radius (in pixels) of the circular region around the persistence
+            location to trim/mask. The default is 4.
+        ints_to_trim : int, optional
+            Number of initial integrations to apply the persistence trimming to.
+            The default is 2.
+        types : list of str, optional
+            List of data types for which persistence trimming shall be applied.
+            The default is ['SCI', 'REF'].
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'persistence_trimmed'.
+
+        Returns
+        -------
+        None.
+        """
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Loop through FITS files.
+            nfitsfiles = len(self.database.obs[key])
+            for j in range(nfitsfiles):
+
+                # Read FITS file.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+
+                # Skip file types that are not in the list of types.
+                if self.database.obs[key]['TYPE'][j] in types:
+                    log.info(f'  --> {self.database.obs[key]["TYPE"][j]} Persistence trimming: ' + os.path.basename(fitsfile))
+                    
+                    # Get persistence location from TA observation.
+                    ta_key = self.database.obs[key]['TYPE'][j] + '_TA'
+
+                    ww_ta = np.where(self.database.obs[key]['TYPE'] == ta_key)[0]
+
+                    pers_loc = []
+
+                    log.info(f'    --> Finding persistence location in ' + ta_key)
+                    for k in ww_ta:
+
+                        # Match ROLL angle to find correct TA observation.
+                        if round(self.database.obs[key]['ROLL_REF'][j], 2) == round(self.database.obs[key]['ROLL_REF'][k], 2):
+                            log.info(f'      --> Matching TA found: ' + os.path.basename(self.database.obs[key]['FITSFILE'][k]))
+                            # Read TA FITS file.
+                            fitsfile_ta = self.database.obs[key]['FITSFILE'][k]
+                            data_ta, erro_ta, pxdq_ta, head_pri_ta, head_sci_ta, is2d_ta, align_shift_ta, center_shift_ta, align_mask_ta, center_mask_ta, maskoffs_ta = ut.read_obs(fitsfile_ta)
+
+                            # Get persistence location from TA data.
+                            pers_loc += [np.where(data_ta == np.nanmax(data_ta))[1:]]
+
+                    if len(pers_loc) == 0:
+                        raise ValueError('No matching TA observation found for ' + os.path.basename(fitsfile) + '. Cannot determine persistence location.')
+                    elif len(pers_loc) == 1:
+                        raise ValueError('Only one matching TA observation found for ' + os.path.basename(fitsfile) + '. Need the two TA observations to find both persistence locations.')
+                    
+                    # Check for valid number of integrations to trim.
+                    if ints_to_trim >= data.shape[0]:
+                        raise ValueError(f'Number of integrations to trim ({ints_to_trim}) is greater than or equal to total number of integrations in {self.database.obs[key]["TYPE"][j]} observations ({data.shape[0]}). \n Try again with a smaller number of integrations to trim or remove persistence trimming for {self.database.obs[key]["TYPE"][j]} observations.')
+
+                    # Trim persistence region in initial integrations.
+                    for nints in range(data.shape[0]):
+                        if nints < ints_to_trim:
+                            for loc in pers_loc:
+                                for yy in range(data.shape[1]):
+                                    for xx in range(data.shape[2]):
+                                        if (yy - loc[0])**2 + (xx - loc[1])**2 < radius_pxl**2:
+                                            data[nints, yy, xx] = np.nan
+
+                # Write FITS file and PSF mask.
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile)
+
+
     def replace_nans(self,
                      cval=0.,
                      types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
@@ -3276,8 +3600,12 @@ class ImageTools():
             ww_all = np.append(ww_all, ww_sci_ta)
             ww_all = np.append(ww_all, ww_ref_ta)
             shifts_all = []
-            for j in ww_all:
 
+            # Need to preserve the ww_sci[0] offsets in case we are operating only on first_sci_only
+            xoffset_orig = np.copy(self.database.obs[key]['XOFFSET'][ww_sci[0]])
+            yoffset_orig = np.copy(self.database.obs[key]['YOFFSET'][ww_sci[0]])
+
+            for j in ww_all:
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 (data, erro, pxdq, head_pri, head_sci, is2d,
@@ -3311,7 +3639,6 @@ class ImageTools():
                             # For the first SCI/REF frame, get the star position
                             # and the shift between the star and coronagraphic
                             # mask position.
-
                             if (not first_sci_only or j == ww_sci[0]) and k == 0:
 
                                 # Use TA data to determine the star position behind the coronagraphic mask.
@@ -3340,8 +3667,11 @@ class ImageTools():
                             maskoffs_temp += [np.array([xshift, yshift])]  # pixels
 
                         if first_sci_only:
-                            xoffset -= self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
-                            yoffset -= self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
+                            # Adjust centers based on first science frame. Typically these should be zero, but in some
+                            # cases manual offsets have been applied in APT to ensure better coronagraph alignment.
+                            # As such, these aren't "true" offsets from the coronagraph, and need to be removed.
+                            xoffset -= xoffset_orig  # arcsec
+                            yoffset -= yoffset_orig  # arcsec
                             log.info('  --> Calculate centers: adjusted XOFFSET/YOFFSET relative to first SCI frame.')
                         else:
                             # XOFFSET/YOFFSET remain the same.
@@ -3393,8 +3723,8 @@ class ImageTools():
                             maskoffs_temp += [np.array([xshift, yshift])]
 
                         if first_sci_only:
-                            xoffset -= self.database.obs[key]['XOFFSET'][ww_sci[0]]  # arcsec
-                            yoffset -= self.database.obs[key]['YOFFSET'][ww_sci[0]]  # arcsec
+                            xoffset -= xoffset_orig  # arcsec
+                            yoffset -= yoffset_orig  # arcsec
                             log.info('  --> Calculate centers: adjusted XOFFSET/YOFFSET relative to first SCI frame.')
                         else:
                             # XOFFSET/YOFFSET remain the same.
