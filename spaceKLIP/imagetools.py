@@ -1627,7 +1627,7 @@ class ImageTools():
                                 pxdq,
                                 NON_SCIENCE,
                                 sigclip_kwargs={},
-                                mode='klip',
+                                mode='original',
                                 mask_psf=False,
                                 crpix1=None,
                                 crpix2=None):
@@ -1705,14 +1705,14 @@ class ImageTools():
                 # Find values N standard deviations above the mean of neighbors.
                 mask_neg = np.zeros_like(ww[i]) # Default empty mask
                 
-                if mode == 'klip':
+                if mode == 'original':
                     threshold = sigclip_kwargs['sigma'] * data_std
                     mask_pos = diff > threshold
                 else:
                     mask_pos = z > sigclip_kwargs['sigma']
                     mask_neg = z < -sigclip_kwargs['neg_sigma']
                 
-                # Apply PSF protection.
+                # Apply PSF mask.
                 if psf_mask is not None:
                     mask_pos[psf_mask] = False
                     mask_neg[psf_mask] = False
@@ -1936,201 +1936,6 @@ class ImageTools():
         fig.tight_layout()
         fig.show()
         
-        from plotly.subplots import make_subplots
-        import plotly.graph_objects as go
-        from scipy.stats import median_abs_deviation
-
-        def plot_bad_pixel_timeseries(data_cube,
-                                       bad_pixel_mask,
-                                       group_map=None,
-                                       group_stats=None,
-                                       sigma=5.0,
-                                       pixel=None,
-                                       title_prefix="Temporal behavior for pixel"):
-            """
-            Diagnostic plot of pixel value over time and threshold outlier logic.
-
-            Parameters
-            ----------
-            data_cube : ndarray
-                Shape (nint, ny, nx) data array.
-            bad_pixel_mask : ndarray
-                Boolean array of shape (nint, ny, nx) with flagged pixels.
-            group_map : ndarray or None
-                2D array mapping each (y,x) to a group ID. Optional.
-            group_stats : dict or list or None
-                Stats per group (must include 'mad'). Optional.
-            sigma : float
-                Threshold level for flagging.
-            pixel : tuple or None
-                If given, plot only this (y, x) pixel. Else defaults to worst.
-            title_prefix : str
-                Title prefix for the Plotly figure.
-            """
-            nint, ny, nx = data_cube.shape
-            bad_counts = bad_pixel_mask.sum(axis=0)
-
-            # Build stats lookup dict
-            if isinstance(group_stats, list):
-                stats_dict = {s["group_id"]: s for s in group_stats}
-            else:
-                stats_dict = group_stats if group_stats else {}
-
-            # Pick pixel
-            if pixel is not None:
-                yp, xp = pixel
-            else:
-                if np.max(bad_counts) == 0:
-                    print("No bad pixels detected, nothing to plot.")
-                    return
-                # Collapse over time: any integration flagged
-                bad_any = np.any(bad_pixel_mask, axis=0)
-
-                ys, xs = np.where(bad_any)
-
-                if len(ys) == 0:
-                    raise ValueError("No bad pixels found to plot.")
-
-                idx = np.random.randint(len(ys))
-                yp, xp = ys[idx], xs[idx]
-
-            ts = data_cube[:, yp, xp]
-            bad_flags = bad_pixel_mask[:, yp, xp]
-            gid = group_map[yp, xp] if group_map is not None else None
-
-            p_med = np.nanmedian(ts)
-            p_mad = median_abs_deviation(ts, scale="normal", nan_policy="omit")
-            p_mad = max(p_mad, 1e-6)
-
-            # Group vs pixel fallback
-            if gid not in stats_dict:
-                # For ungrouped, calculate background MAD as the floor value
-                finite_cube = data_cube[np.isfinite(data_cube)]
-                bg_values = finite_cube[finite_cube < np.nanpercentile(finite_cube, 50)]
-                bg_mad = median_abs_deviation(bg_values, scale="normal")
-            else:
-                bg_mad = None  # optional, unused for grouped
-
-            if gid in stats_dict:
-                gmad = stats_dict[gid]["mad"]
-                gmed = stats_dict[gid]["median"]
-                gmad = max(gmad, 1e-6)
-                src  = f"group {gid} (MAD={gmad:.4g})"
-                thr_hi = p_med + sigma * gmad
-                thr_lo = p_med - sigma * gmad
-            else:
-                src  = f"UNGROUPED (pixel MAD={p_mad:.4g}, floor={bg_mad:.4g})" if bg_mad is not None else f"UNGROUPED (pixel MAD={p_mad:.4g})"
-                thr_hi = p_med + sigma * p_mad
-                thr_lo = p_med - sigma * p_mad
-
-            # Background info
-            cube_flat = data_cube[:, group_map == gid] if gid in stats_dict else data_cube.flatten()
-            finite_bg = cube_flat[np.isfinite(cube_flat)]
-            bg_med = np.nanmedian(finite_bg)
-            bg_mad = median_abs_deviation(finite_bg, scale="normal", nan_policy="omit")
-
-            # Plot
-            fig = make_subplots(
-                rows=2, cols=1,
-                shared_xaxes=True,
-                row_heights=[0.3, 0.7],
-                vertical_spacing=0.07,
-                subplot_titles=[
-                    "Pixel value vs integration",
-                    f"Time series for pixel (y={yp}, x={xp}) — {src}"
-                ]
-            )
-
-            z = ts[np.newaxis, :]
-            finite_ts = ts[np.isfinite(ts)]
-            vmin, vmax = np.nanpercentile(finite_ts, [5, 95]) if finite_ts.size > 0 else (np.nanmin(ts), np.nanmax(ts))
-
-            fig.add_trace(
-                go.Heatmap(
-                    z=z,
-                    x=np.arange(nint),
-                    y=[0],
-                    colorscale="Viridis",
-                    zmin=vmin,
-                    zmax=vmax,
-                    colorbar=dict(title="Intensity"),
-                    showscale=True,
-                    name="Pixel heatmap"
-                ),
-                row=1, col=1
-            )
-
-            fig.update_yaxes(showticklabels=False, row=1, col=1)
-
-            fig.add_trace(
-                go.Scatter(
-                    x=np.arange(nint),
-                    y=ts,
-                    mode="lines+markers",
-                    name="Time Series",
-                    marker=dict(color="gray"),
-                    line=dict(color="gray")
-                ),
-                row=2, col=1
-            )
-
-            fig.add_trace(
-                go.Scatter(
-                    x=np.where(bad_flags)[0],
-                    y=ts[bad_flags],
-                    mode="markers",
-                    name="Flagged Bad",
-                    marker=dict(color="red", symbol="x", size=10)
-                ),
-                row=2, col=1
-            )
-
-            # Main stats
-            fig.add_hline(y=p_med, line_dash="dash", line_color="blue",
-                          annotation_text="Pixel Median", annotation_position="bottom right", row=2, col=1)
-            fig.add_hline(y=thr_hi, line_dash="dot", line_color="red",
-                          annotation_text=f"upper threshold", annotation_position="top right", row=2, col=1)
-            fig.add_hline(y=thr_lo, line_dash="dot", line_color="red",
-                          annotation_text=f"lower threshold", annotation_position="bottom right", row=2, col=1)
-
-            
-            fig.update_xaxes(title_text="Integration", row=2, col=1)
-            fig.update_yaxes(title_text="Intensity", row=2, col=1)
-
-            fig.update_layout(title=f"{title_prefix} (y={yp}, x={xp}) — {src}")
-
-            fig.show()
-
-            return (yp, xp)
-
-
-        # --------------------------------------------
-        # Call diagnostic plot for a flagged pixel
-        # --------------------------------------------
-        if np.any(bad_pixels):
-            plot_bad_pixel_timeseries(
-                data_cube=data,
-                bad_pixel_mask=bad_pixels,
-                group_map=groupID_map if method == "group" else None,
-                group_stats=group_stats if method == "group" else None,
-                sigma=sigma,
-                pixel=timeints_kwargs.get("pixel", None)
-            )
-        #ungrouped_id = int(np.nanmax(groupID_map))
-        #ungrouped_mask = (groupID_map == ungrouped_id)
-#
-        ## Get pixel coordinates of ungrouped pixels
-        #y_ungr, x_ungr = np.where(ungrouped_mask)
-        #
-        ## Print the first N ungrouped pixels
-        #N = 10
-        #for i in range(min(N, len(x_ungr))):
-        #    print(f"Ungrouped pixel {i+1}: (x={x_ungr[i]}, y={y_ungr[i]})")
-#
-        #if len(x_ungr) > N:
-        #    print(f"... and {len(x_ungr) - N} more ungrouped pixels.")
-
-
     def find_bad_pixels_gradient(self,
                                  data,
                                  erro,
