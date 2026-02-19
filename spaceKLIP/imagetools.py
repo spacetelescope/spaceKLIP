@@ -1697,7 +1697,7 @@ class ImageTools():
         if 0 not in sigclip_kwargs['shift_y']:
             sigclip_kwargs['shift_y'] += [0]
         if 'method' not in sigclip_kwargs.keys():
-            sigclip_kwargs['method'] = 'original'
+            sigclip_kwargs['method'] = 'local'
         if 'mask_psf' not in sigclip_kwargs.keys():
             sigclip_kwargs['mask_psf'] = False
         if 'crpix1' not in sigclip_kwargs.keys():
