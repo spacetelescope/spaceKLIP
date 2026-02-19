@@ -1114,9 +1114,7 @@ class ImageTools():
                         gradient_kwargs={},
                         types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                         subdir='bpfound',
-                        restrict_to=None,
-                        mode='both',
-                        mask_psf=False):
+                        restrict_to=None):
         """
         Identify bad pixels for cleaning
 
@@ -1200,11 +1198,6 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
-                
-                crpix1 = self.database.obs[key]['CRPIX1'][j] - 1
-                crpix2 = self.database.obs[key]['CRPIX2'][j] - 1
-
-                full_fits_path = os.path.abspath(fitsfile)
 
                 if set_dq_zero:  # set_dq_zero
                     # Make copy of DQ array filled with zeros, i.e. all good pixels
@@ -1228,12 +1221,28 @@ class ImageTools():
                         if method_split[k] == 'dqarr':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             # Flag any pixels marked as DO_NOT_USE that aren't NON_SCIENCE
-                            temp_donotuse = ut.get_dqmask(pxdq_temp, 'DO_NOT_USE', return_bool=True)
                             temp_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
-                            pxdq_temp = (np.isnan(data) | temp_donotuse) & (~temp_nonsci)
+                            for i in range(pxdq_temp.shape[0]):
+                                temp_donotuse = ut.get_dqmask(pxdq[i], 'DO_NOT_USE', return_bool=True)
+
+                                # Flag the 4 pixels neighboring a DO_NOT_USE pixel.
+                                if dqarr_kwargs.get('flag_neighbors', False):
+                                    from scipy.ndimage import binary_dilation
+                                    neighbors_mask = np.array([[0,1,0],[1,1,1],[0,1,0]], bool)
+                                    before = np.sum(temp_donotuse)
+                                    temp_donotuse = binary_dilation(temp_donotuse, structure=neighbors_mask)
+                                    added = np.sum(temp_donotuse) - before
+                                    log.info(f"    Slice {i}: neighbors added = {added}")
+
+                                # Combine with NaNs and mask out NON_SCIENCE
+                                pxdq_temp[i] = (np.isnan(data[i]) | temp_donotuse) & (~temp_nonsci[i])
                         elif method_split[k] == 'sigclip':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
-                            self.find_bad_pixels_sigclip(data, erro, pxdq_temp, pxmask_nonsci, sigclip_kwargs, mode=mode, mask_psf=mask_psf, crpix1=crpix1, crpix2=crpix2)
+                            if 'crpix1' not in sigclip_kwargs:
+                                sigclip_kwargs['crpix1'] = self.database.obs[key]['CRPIX1'][j] - 1
+                            if 'crpix2' not in sigclip_kwargs:
+                                sigclip_kwargs['crpix2'] = self.database.obs[key]['CRPIX2'][j] - 1
+                            self.find_bad_pixels_sigclip(data, erro, pxdq_temp, pxmask_nonsci, sigclip_kwargs)
                         elif method_split[k] == 'custom':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             if self.database.obs[key]['TYPE'][j] not in ['SCI_TA', 'REF_TA']:
@@ -1241,6 +1250,7 @@ class ImageTools():
                             else:
                                 log.info('  --> Method ' + method_split[k] + ': skipped because TA file')
                         elif method_split[k] == 'timeints':
+                            log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             self.find_bad_pixels_timeints(data, erro, pxdq_temp, key, timeints_kwargs)
                         elif method_split[k] == 'gradient':
                             self.find_bad_pixels_gradient(data, erro, pxdq_temp, key, gradient_kwargs)
@@ -1619,18 +1629,13 @@ class ImageTools():
                 self.database.update_obs(key, j, fitsfile, maskfile)
 
         pass
-        
-        
+
     def find_bad_pixels_sigclip(self,
                                 data,
                                 erro,
                                 pxdq,
                                 NON_SCIENCE,
-                                sigclip_kwargs={},
-                                mode='original',
-                                mask_psf=False,
-                                crpix1=None,
-                                crpix2=None):
+                                sigclip_kwargs={}):
         """
         Use an iterative sigma clipping algorithm to identify additional bad
         pixels in the data.
@@ -1649,6 +1654,7 @@ class ImageTools():
             be modified by the routine.
         sigclip_kwargs : dict, optional
             Keyword arguments for the 'sigclip' method. Available keywords are:
+
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
             - neg_sigma : float, optional
@@ -1659,53 +1665,95 @@ class ImageTools():
             - shift_y : list of int, optional
                 Pixels in y-direction to which each pixel shall be compared to.
                 The default is [-1, 0, 1].
+            - method : str, optional
+                Sigma-clipping strategy used to identify bad pixels. Available options are:
+                    'local' : Flags pixels that deviate from the median of their neighboring pixels. 
+                              Large negative outliers are also identified by comparing to background estimate.
+                    'local_weighted' : Same as 'local', but includes the pixel uncertainty when computing the clipping threshold. 
+            - mask_psf : bool, optional
+                Restrict bad pixel flagging inside the PSF?
+            
+            - crpix1/crpix2: float/float, optional
+                The center of the PSF.
+
             The default is {}.
+        
         Returns
         -------
         None.
         """
-        # Optional PSF mask.
-        psf_mask = None
-        if mask_psf:
-            if crpix1 is not None and crpix2 is not None:
-                ny, nx = data.shape[1:]
-                Y, X = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
-                psf_radius = 50  # Just setting to a general value for radius.
-                psf_mask = ((X - crpix1)**2 + (Y - crpix2)**2) < psf_radius**2
 
-        # Check input.
-        sigclip_kwargs.setdefault('sigma', 5.)
-        sigclip_kwargs.setdefault('neg_sigma', 1.)
-        sigclip_kwargs.setdefault('shift_x', [-1, 0, 1])
-        sigclip_kwargs.setdefault('shift_y', [-1, 0, 1])
-        
+        # Check inputs.
+        if 'sigma' not in sigclip_kwargs.keys():
+            sigclip_kwargs['sigma'] = 5.
+        if 'neg_sigma' not in sigclip_kwargs.keys():
+            sigclip_kwargs['neg_sigma'] = 1.
+        if 'shift_x' not in sigclip_kwargs.keys():
+            sigclip_kwargs['shift_x'] = [-1, 0, 1]
+        if 'shift_y' not in sigclip_kwargs.keys():
+            sigclip_kwargs['shift_y'] = [-1, 0, 1]
         if 0 not in sigclip_kwargs['shift_x']:
             sigclip_kwargs['shift_x'] += [0]
         if 0 not in sigclip_kwargs['shift_y']:
             sigclip_kwargs['shift_y'] += [0]
+        if 'method' not in sigclip_kwargs.keys():
+            sigclip_kwargs['method'] = 'original'
+        if 'mask_psf' not in sigclip_kwargs.keys():
+            sigclip_kwargs['mask_psf'] = False
+        if 'crpix1' not in sigclip_kwargs.keys():
+            sigclip_kwargs['crpix1'] = None
+        if 'crpix2' not in sigclip_kwargs.keys():
+            sigclip_kwargs['crpix2'] = None
+
+        # Build optional PSF mask.
+        psf_mask = None
+        if sigclip_kwargs['mask_psf'] and sigclip_kwargs['crpix1']  is not None and sigclip_kwargs['crpix2']  is not None:
+            ny, nx = data.shape[1:]
+            Y, X = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
+            psf_radius = 50  # Just setting to a general value for radius.
+            psf_mask = ((X - sigclip_kwargs['crpix1'] )**2 + (Y - sigclip_kwargs['crpix2'] )**2) < psf_radius**2
 
         # Pad data.
         pad_left = np.abs(np.min(sigclip_kwargs['shift_x']))
         pad_right = np.abs(np.max(sigclip_kwargs['shift_x']))
-        right = -pad_right if pad_right != 0 else None
-        
+        if pad_right == 0:
+            right = None
+        else:
+            right = -pad_right
         pad_bottom = np.abs(np.min(sigclip_kwargs['shift_y']))
         pad_top = np.abs(np.max(sigclip_kwargs['shift_y']))
-        top = -pad_top if pad_top != 0 else None
-        
+        if pad_top == 0:
+            top = None
+        else:
+            top = -pad_top
         pad_vals = ((pad_bottom, pad_top), (pad_left, pad_right))
 
         # Find bad pixels using median of neighbors.
         pxdq_orig = pxdq.copy()
         ww = (pxdq != 0)
         data_temp = data.copy()
+        data_temp[ww] = np.nan
         erro_temp = erro.copy()
-
+        erro_temp[ww] = np.nan
         for i in range(ww.shape[0]):
-            # Initial mask for the frame
-            ww[i][NON_SCIENCE[i].astype(bool)] = False
+
+            # Create initial mask of large negative values.
+            if sigclip_kwargs['method'] == 'original':
+                # Get median background and standard deviation.
+                bg_med = np.nanmedian(data_temp[i])
+                bg_std = robust.medabsdev(data_temp[i])
+                bg_ind = data[i] < (bg_med + 10. * bg_std)  # clip bright PSFs for final calculation
+                bg_med = np.nanmedian(data_temp[i][bg_ind])
+                bg_std = robust.medabsdev(data_temp[i][bg_ind])
+                #ww[i] = ww[i] | (data[i] < bg_med - sigclip_kwargs['neg_sigma'] * bg_std)
+                threshold_neg = bg_med - sigclip_kwargs['neg_sigma'] * bg_std
+                mask_neg = data[i] < threshold_neg
+            
+            ww[i][NON_SCIENCE[i]] = 0
+
+            # Restrict flagging in the PSF center.
             if psf_mask is not None:
-                ww[i][psf_mask] = False
+                ww[i][psf_mask] = 0
 
             # Loop through max 10 iterations.
             for it in range(10):
@@ -1714,64 +1762,53 @@ class ImageTools():
 
                 # Shift data and calculate median and standard deviation of neighbours.
                 pad_data = np.pad(data_temp[i], pad_vals, mode='edge')
+                pad_erro = np.pad(erro_temp[i], pad_vals, mode='edge')
                 data_arr = []
+                erro_arr = []
                 for ix in sigclip_kwargs['shift_x']:
                     for iy in sigclip_kwargs['shift_y']:
                         if ix != 0 or iy != 0:
-                            # Using np.roll on padded data.
-                            shifted = np.roll(pad_data, (iy, ix), axis=(0, 1))
-                            # Slice back to original dimensions.
-                            data_arr.append(shifted[pad_bottom:top, pad_left:right])
-                
+                            data_arr += [np.roll(pad_data, (iy, ix), axis=(0, 1))]
+                            erro_arr += [np.roll(pad_erro, (iy, ix), axis=(0, 1))]
                 data_arr = np.array(data_arr)
-                data_med = np.nanmedian(data_arr, axis=0)
-                data_std = np.nanstd(data_arr, axis=0)
-                
+                data_arr_trim = data_arr[:, pad_bottom:top, pad_left:right]
+                data_med = np.nanmedian(data_arr_trim, axis=0)
                 diff = data[i] - data_med
-                den = np.sqrt(data_std**2 + erro[i]**2)
-                z = diff / den
 
-                # Find values N standard deviations above the mean of neighbors.
+                data_std = np.nanstd(data_arr_trim, axis=0)
+                data_std_weighted = np.sqrt(data_std**2 + erro[i]**2)
+
                 mask_neg = np.zeros_like(ww[i]) # Default empty mask
-                
-                if mode == 'original':
+                if sigclip_kwargs['method'] == 'original':
+                    # Find values N standard deviations above the mean of neighbors.
                     threshold = sigclip_kwargs['sigma'] * data_std
                     mask_pos = diff > threshold
                 else:
-                    mask_pos = z > sigclip_kwargs['sigma']
-                    mask_neg = z < -sigclip_kwargs['neg_sigma']
-                
+                    threshold = sigclip_kwargs['sigma'] * data_std_weighted
+                    threshold_neg = -sigclip_kwargs['neg_sigma'] * data_std_weighted
+                    mask_pos = diff > threshold
+                    mask_neg = diff < threshold_neg
+
+
                 # Apply PSF mask.
                 if psf_mask is not None:
                     mask_pos[psf_mask] = False
                     mask_neg[psf_mask] = False
-                
-                # Calculate how many NEW bad pixels were found
+
+                # Calculate how many NEW bad pixels were found.
                 mask_new = mask_pos | mask_neg
                 nmask_new = np.sum(mask_new & ~ww[i])
-
                 sys.stdout.write('\rFrame %.0f/%.0f, iteration %.0f' % (i + 1, ww.shape[0], it + 1))
                 sys.stdout.flush()
-
                 if it > 0 and nmask_new == 0:
                     break
-                
-                # Update working mask
-                ww[i] |= mask_new
-                
-            # Final update for this frame
-            ww[i][NON_SCIENCE[i].astype(bool)] = False
+                ww[i] = ww[i] | mask_new
+            ww[i][NON_SCIENCE[i]] = 0
             pxdq[i][ww[i]] = 1
-
         print('')
-        # Calculation for logging
-        added_pixels = np.sum(pxdq) - np.sum(pxdq_orig)
-        percent_added = 100. * added_pixels / np.prod(pxdq.shape)
-        
-        # Using print instead of log.info to ensure it runs
-        print(f' --> Method sigclip: identified {added_pixels} additional bad pixel(s) -- {percent_added:.2f}%')
-        
-        return (pxdq != 0) & (pxdq_orig == 0)
+        log.info('  --> Method sigclip: identified %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
+
+        pass
 
     def find_bad_pixels_timeints(self,
                                  data,
@@ -1781,6 +1818,7 @@ class ImageTools():
                                  timeints_kwargs={}):
         """
         Identify bad pixels from temporal variations across integrations.
+
         Parameters
         ----------
         data : 3D-array
@@ -1795,98 +1833,122 @@ class ImageTools():
             be modified by the routine.
         timeints_kwargs : dict, optional
             Keyword arguments for the 'timeints' method. Available keywords are:
+
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
+
+            - method : str, optional
+                Method for detecting bad pixels. The default is 'per_pixel'.
+                    'per_pixel' : Computes the variation across integrations independently for each pixel.
+                    'group_pixels' : Groups pixels by similar flux, computes the variation across integrations for each pixel, and compares each pixel’s variation to that of its corresponding flux group.
+
+            - n_groups : int, optional
+                The number of groups if method == 'group_pixels'. The default is 25.
+
+            - diagnostic_plots : bool, optional
+                Plot diagnostics?
+
             The default is {}.
+
         Returns
         -------
         None.
         """
+
         # Check inputs.
-        method = timeints_kwargs.get("method", "group")
-        if method not in ("group", "pixel", "pixel_klip"):
+        if 'sigma' not in timeints_kwargs.keys():
+            timeints_kwargs['sigma'] = 10.
+        if 'method' not in timeints_kwargs.keys():
+            timeints_kwargs['method'] = "per_pixel"
+        if timeints_kwargs['method'] not in ("group_pixels", "per_pixel"):
             raise ValueError(f"Unknown timeints method: {method!r}")
-        n_groups = int(timeints_kwargs.get("n_groups", 25))
-        sigma = float(timeints_kwargs.get("sigma", 10.0))
-        
+        if 'n_groups' not in timeints_kwargs.keys():
+            timeints_kwargs['n_groups'] = 25  # Number of pixel groups.
+        if 'plot_diagnostics' not in timeints_kwargs.keys():
+            timeints_kwargs['plot_diagnostics'] = False
+
         # Mask existing bad pixels.
         pxdq_orig = pxdq.copy()
         ww = pxdq != 0
         data_temp = data.copy()
         data_temp[ww] = np.nan
-        n_int, ny, nx = data_temp.shape
-        
+
+        # Find bad pixels across the cube.
+
         # Compute per-pixel statistics.
         med_ints = np.nanmedian(data_temp, axis=0)
         mad_ints = robust.medabsdev(data_temp, axis=0)
-        absdiff = np.abs(data_temp - med_ints)
-
-        # Define positive/negative masks.
-        finite_mask = np.isfinite(med_ints)
-        pos_mask   = finite_mask & (med_ints > 0)
-        bg_mask    = ~pos_mask
-        
-        # Calculate a floor for negative pixels.
-        bg_med = np.nanmedian(data_temp)
-        bg_mad = robust.medabsdev(data_temp)
-        vals_bg = data_temp[data_temp < np.nanpercentile(data_temp, 50)]  # Keep just lower half
-        #vals_bg = data_temp[data_temp < (bg_med + 1.5 * bg_mad)]
-        bg_med = np.nanmedian(vals_bg)
-        bg_mad = robust.medabsdev(vals_bg)
-        #print(f"[timeints] Background median={bg_med:.4g}, MAD={bg_mad:.4g}")
-        
-        if method == "pixel_klip":
-            dev_pixel = absdiff / mad_ints
-        else:
+        absdiff = np.abs((data_temp - med_ints))
+        if timeints_kwargs['method'] == "group_pixels":
+            # Low flux / negative pixels can be overflagged.
+            # Compute some floor.
+            bg_data = data_temp[data_temp < np.nanpercentile(data_temp, 50)]
+            bg_med = np.nanmedian(bg_data)
+            bg_mad = robust.medabsdev(bg_data)
+            #print(f"[timeints] MADINTS={np.nanmedian(mad_ints)}, BGMAD={bg_mad:.4g}")
             dev_pixel = absdiff / np.maximum(mad_ints, bg_mad)
+        else:
+            dev_pixel = absdiff / mad_ints
 
         # Compute group statistics.
         groupID_map = None
         group_bounds = None
         group_stats = []
-        if method == "group":
+        if timeints_kwargs['method'] == "group_pixels":
             # Positive, finite median values for clustering.
+            finite_mask = np.isfinite(med_ints)
+            pos_mask = finite_mask & (med_ints > 0)
+            pos_mask = finite_mask & (med_ints > 0)
             med_ints_flat = med_ints[pos_mask].flatten()
-            if med_ints_flat.size < n_groups:
+            if med_ints_flat.size < timeints_kwargs['n_groups']:
                 print(f"[timeints] Only {med_ints_flat.size} positive pixels; "
-                      f"cannot form {n_groups} groups. "
+                      f"cannot form {timeints_kwargs['n_groups']} groups. "
                       "Falling back to per-pixel temporal outlier detection.")
-                method = "pixel"
+                timeints_kwargs['method'] = "per_pixel"
             else:
                 # Define flux groups in log-space.
                 X = np.log10(med_ints_flat).reshape(-1, 1)
-                km = KMeans(n_clusters=n_groups, n_init="auto", random_state=0).fit(X)
-                
+                km = KMeans(n_clusters=timeints_kwargs['n_groups'], n_init="auto", random_state=0).fit(X)
+
                 # Define group boundaries.
-                centers = np.sort(10.0 ** km.cluster_centers_.ravel())
+                centers = np.sort(10.0 ** km.cluster_centers_.ravel())  # log to linear.
                 edges = np.concatenate((
                     [med_ints_flat.min()],
                     0.5 * (centers[:-1] + centers[1:]),
                     [med_ints_flat.max()],
                 ))
                 group_bounds = list(zip(edges[:-1], edges[1:]))
-                
+
                 # Assign each pixel to a flux group.
                 groupID_map = np.zeros_like(med_ints, dtype=int)
                 for gid, (lo, hi) in enumerate(group_bounds, start=1):
                     mask = (med_ints >= lo) & (med_ints <= hi)
                     groupID_map[mask] = gid
-                
-                # Any remaining pixels are ungrouped.
+
+                # Any remaining pixels are ungrouped. Mostly negative.
                 unassigned = (groupID_map == 0)
                 if np.any(unassigned):
-                    #print(f"[timeints] {np.sum(unassigned)} unassigned pixels → ungrouped.")
-                    groupID_map[unassigned] = n_groups + 1
-                    
+                    # Just some checks of the unassigned pixels.
+                    n_total = groupID_map.size
+                    n_nan = np.sum(np.isnan(med_ints) & unassigned)
+                    n_neg = np.sum((med_ints <= 0) & unassigned)
+                    n_pos = np.sum((med_ints > 0) & unassigned)
+                    #print(
+                    #    f"[timeints] Unassigned pixels: {np.sum(unassigned)} ({100*(np.sum(unassigned)/n_total):.2f}%) | "
+                    #    f"NaN: {n_nan} | "
+                    #    f"Negative Unassigned Pixels: {n_neg} | "
+                    #    f"Positive Unassigned Pixels: {n_pos} | using per-pixel method instead."
+                    #)
+                    groupID_map[unassigned] = timeints_kwargs['n_groups'] + 1
+
                 # Calculate group statistics.
                 group_stats = []
                 max_gid = int(np.nanmax(groupID_map))
-                for gid in range(1, n_groups + 1):
+                for gid in range(1, timeints_kwargs['n_groups'] + 1):
                     mask = (groupID_map == gid)
                     if not np.any(mask):
                         continue
 
-                    # All time × pixel values for this group.
                     group_vals = data_temp[:, mask].flatten()
                     group_stats.append({
                         "group_id": gid,
@@ -1894,13 +1956,10 @@ class ImageTools():
                         "median": np.nanmedian(group_vals),
                         "mad": robust.medabsdev(group_vals),
                         })
-                    
-        # Find outliers.
+
+        # Find bad pixels.
         bad_pixels = np.zeros_like(data_temp, dtype=bool)
-        if method == "pixel" or method == "pixel_klip":
-            # Compare each pixel to itself over time.
-            bad_pixels= dev_pixel > sigma
-        else:
+        if timeints_kwargs['method'] == "group_pixels":
             # Compare each pixel to its associated group statistics.
             for g in group_stats:
                 gid  = g["group_id"]
@@ -1908,84 +1967,89 @@ class ImageTools():
                 mask = (groupID_map == gid)
                 ys, xs = np.where(mask)
                 #print(f"[timeints] Group {gid}: {len(ys)} pixels, MAD={gmad:.4g}")
-                
+
                 dev_group = np.abs(data_temp[:, mask] - med_ints[mask]) / gmad
-                bad_pixels[:, mask] = dev_group > sigma
-                
+                bad_pixels[:, mask] = dev_group > timeints_kwargs['sigma']
+
                 # Ungrouped pixels are compared to itself over time.
                 ungrouped_id = int(np.nanmax(groupID_map))
                 ungrouped_mask = (groupID_map == ungrouped_id)
                 if np.any(ungrouped_mask):
                     ys, xs = np.where(ungrouped_mask)
-                    #print(f"[timeints] Ungrouped pixels = {len(ys)} → using per-pixel stats.")
-                    bad_pixels[:, ungrouped_mask] = dev_pixel[:, ungrouped_mask] > sigma
-            
-                    
+                    bad_pixels[:, ungrouped_mask] = dev_pixel[:, ungrouped_mask] > timeints_kwargs['sigma']
+        else:
+            # Compare each pixel to itself over time.
+            bad_pixels= dev_pixel > timeints_kwargs['sigma']
+
         # Print/save results.
         ww = ww | bad_pixels
         pxdq[ww] = 1
-        print('')
         log.info(f'  --> Method timeints: identified %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
-        total = int(np.sum(bad_pixels))
-            
-            
-        ############################################
-        # DIAGNOSTIC PLOTS
-        ############################################
-        
-        # Plot grouping diagnostics.
-        if method == "group":
-        
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(17, 6))
-            
-            # GroupID map.
-            max_gid = int(np.nanmax(groupID_map))
-            cmap = plt.get_cmap("tab20", max_gid)
-            im = ax1.imshow(groupID_map, origin="lower", cmap=cmap, vmin=1, vmax=max_gid)
-            ax1.set(title="Group IDs", xlabel="X", ylabel="Y")
-            cbar = fig.colorbar(im, ax=ax1)
-            ticks = np.arange(1, max_gid + 1)
-            labels = [f"G{i}" for i in range(1, max_gid)] + ["Ungrouped"]
-            cbar.set_ticks(ticks)
-            cbar.set_ticklabels(labels)
-            cbar.set_label("Group ID")
-            
-            # Histogram of positive median values + groups.
-            bins = np.logspace(np.log10(med_ints_flat.min()), np.log10(med_ints_flat.max()), 200)
-            ax2.hist(med_ints_flat, bins=bins, color="gray", alpha=0.6)
-            ymin, ymax = ax2.get_ylim()
-            for i, (lo, hi) in enumerate(group_bounds, start=1):
-                color = cmap((i - 1) / max_gid)
-                ax2.axvline(lo, linestyle="--", linewidth=0.8, color="black")
-                ax2.axvline(hi, linestyle="--", linewidth=0.8, color="black")
-                ax2.text(np.sqrt(lo * hi), ymax * 0.07, f"G{i}", color=color,
-                         ha="center", va="bottom", rotation=90, fontsize=9)
-            ax2.set(xscale="log", yscale="log", xlabel="DN/s [log scale]", ylabel="Counts [log scale]")
+        print('')
 
+        if timeints_kwargs['plot_diagnostics'] == True:
+            ############################################
+            # DIAGNOSTIC PLOTS
+            ############################################
+            n_int, ny, nx = data_temp.shape
+
+            # Plot grouping diagnostics.
+            if timeints_kwargs['method'] == "group_pixels":
+
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(17, 6))
+
+                # GroupID map.
+                max_gid = int(np.nanmax(groupID_map))
+                cmap = plt.get_cmap("tab20", max_gid)
+                im = ax1.imshow(groupID_map, origin="lower", cmap=cmap, vmin=1, vmax=max_gid)
+                ax1.set(title="Group IDs", xlabel="X", ylabel="Y")
+                cbar = fig.colorbar(im, ax=ax1)
+                ticks = np.arange(1, max_gid + 1)
+                labels = [f"G{i}" for i in range(1, max_gid)] + ["Ungrouped"]
+                cbar.set_ticks(ticks)
+                cbar.set_ticklabels(labels)
+                cbar.set_label("Group ID")
+
+                # Histogram of positive median values + groups.
+                bins = np.logspace(np.log10(med_ints_flat.min()), np.log10(med_ints_flat.max()), 200)
+                ax2.hist(med_ints_flat, bins=bins, color="gray", alpha=0.6)
+                ymin, ymax = ax2.get_ylim()
+                for i, (lo, hi) in enumerate(group_bounds, start=1):
+                    color = cmap((i - 1) / max_gid)
+                    ax2.axvline(lo, linestyle="--", linewidth=0.8, color="black")
+                    ax2.axvline(hi, linestyle="--", linewidth=0.8, color="black")
+                    ax2.text(np.sqrt(lo * hi), ymax * 0.07, f"G{i}", color=color,
+                             ha="center", va="bottom", rotation=90, fontsize=9)
+                ax2.set(xscale="log", yscale="log", xlabel="DN/s [log scale]", ylabel="Counts [log scale]")
+
+                fig.tight_layout()
+                plt.show(block=False)
+                plt.pause(0.001)
+
+            # Plot bad pixels found.
+            n_ints = data_temp.shape[-2]
+            ncols = min(5, n_int)
+            nrows = -(-n_int // ncols)
+            fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 5 * nrows), sharey=True)
+            axes = np.asarray(axes).ravel()
+            for i, ax in enumerate(axes):
+                if i >= n_int:
+                    ax.axis("off")
+                    continue
+                vmin, vmax = np.nanpercentile(data_temp, (1, 99))
+                ax.imshow(data_temp[i], origin="lower", vmin=vmin, vmax=vmax, cmap="gray")
+                yb, xb = np.where(bad_pixels[i])
+                if xb.size:
+                    ax.plot(xb, yb, "rx", ms=3)
+                ax.set_title(f"Integration {i+1}")
+                ax.set_xlabel("X")
+                if i == 0:
+                    ax.set_ylabel("Y")
             fig.tight_layout()
-            fig.show()
-        
-        # Plot bad pixels found.
-        n_ints = data_temp.shape[-2]
-        ncols = min(5, n_int)
-        nrows = -(-n_int // ncols)
-        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 5 * nrows), sharey=True)
-        axes = np.asarray(axes).ravel()
-        for i, ax in enumerate(axes):
-            if i >= n_int:
-                ax.axis("off")
-                continue
-            vmin, vmax = np.nanpercentile(data_temp, (1, 99))
-            ax.imshow(data_temp[i], origin="lower", vmin=vmin, vmax=vmax, cmap="gray")
-            yb, xb = np.where(bad_pixels[i])
-            if xb.size:
-                ax.plot(xb, yb, "rx", ms=3)
-            ax.set_title(f"Integration {i+1}")
-            ax.set_xlabel("X")
-            if i == 0:
-                ax.set_ylabel("Y")
-        fig.tight_layout()
-        fig.show()
+            plt.show(block=False)
+            plt.pause(0.001)
+
+        pass
         
     def find_bad_pixels_gradient(self,
                                  data,
