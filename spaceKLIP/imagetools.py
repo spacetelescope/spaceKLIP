@@ -1738,7 +1738,8 @@ class ImageTools():
         for i in range(ww.shape[0]):
 
             # Create initial mask of large negative values.
-            if sigclip_kwargs['method'] == 'original':
+            if sigclip_kwargs['method'] == 'local':
+                None
                 # Get median background and standard deviation.
                 bg_med = np.nanmedian(data_temp[i])
                 bg_std = robust.medabsdev(data_temp[i])
@@ -1778,17 +1779,18 @@ class ImageTools():
                 data_std = np.nanstd(data_arr_trim, axis=0)
                 data_std_weighted = np.sqrt(data_std**2 + erro[i]**2)
 
-                mask_neg = np.zeros_like(ww[i]) # Default empty mask
-                if sigclip_kwargs['method'] == 'original':
+                if sigclip_kwargs['method'] == 'local':
                     # Find values N standard deviations above the mean of neighbors.
                     threshold = sigclip_kwargs['sigma'] * data_std
                     mask_pos = diff > threshold
-                else:
+                elif sigclip_kwargs['method'] == 'local_weighted':
                     threshold = sigclip_kwargs['sigma'] * data_std_weighted
                     threshold_neg = -sigclip_kwargs['neg_sigma'] * data_std_weighted
                     mask_pos = diff > threshold
                     mask_neg = diff < threshold_neg
-
+                else:
+                    mask_neg = np.zeros_like(ww[i]) # Default empty mask
+                    mask_pos = np.zeros_like(ww[i]) # Default empty mask
 
                 # Apply PSF mask.
                 if psf_mask is not None:
