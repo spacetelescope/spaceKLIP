@@ -43,6 +43,9 @@ from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
 from spaceKLIP.utils import write_starfile, set_surrounded_pixels, pop_pxar_kw
 from spaceKLIP.imagetools import gaussian_kernel
+from photutils import psf as pupsf
+from astropy.wcs import WCS
+from webbpsf_ext.image_manip import frebin
 
 from functools import partial
 from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
@@ -903,6 +906,8 @@ class AnalysisTools():
                            overwrite=True,
                            subdir='companions',
                            save_figures=True,
+                           use_epsf=False,
+                           fov_pix=65,
                            **kwargs):
         """
         Extract the best fit parameters of a number of companions from each
@@ -983,7 +988,22 @@ class AnalysisTools():
         None.
         
         """
-        
+
+        def plot_traces(fma, nburn=100, labels=[r"x", r"y", r"$\alpha$", "l"], path='/.traces.pdf'):
+            fig, ax = plt.subplots(len(labels), 1, figsize=(20, 20), sharex=True)
+            samples = fma.sampler.get_chain() # Shape: (n_steps, n_walkers, n_dim)
+            n_walkers = samples.shape[1]
+            for elno in range(len(labels)):
+                for i in range(n_walkers):
+                    ax[elno].plot(samples[:, i, elno], alpha=0.5)
+                    # ax[elno].axvline(nburn, color='k', linestyle='--')
+                ax[elno].set_ylabel(f"{labels[elno]}")
+            ax[elno].set_xlabel("Step number")
+            plt.savefig(path)
+            plt.show()
+            plt.close()
+            return fig
+
         # Check input.
         kwargs_temp = {}
         
@@ -1088,13 +1108,44 @@ class AnalysisTools():
                 if date is not None:
                     if date == 'auto':
                         date = fits.getheader(self.database.obs[key]['FITSFILE'][ww_sci[0]], 0)['DATE-BEG']
-                offsetpsf_func = JWST_PSF(apername,
-                                          filt,
-                                          date=date,
-                                          fov_pix=65,
-                                          oversample=2,
-                                          sp=sed,
-                                          use_coeff=False)
+                if not use_epsf:
+                    offsetpsf_func = JWST_PSF(apername,
+                                              filt,
+                                              date=date,
+                                              fov_pix=65,
+                                              oversample=2,
+                                              sp=sed,
+                                              use_coeff=False)
+
+                else:
+                    def star2epsf(stamp, weights=None, wcs_large=None, center=[20, 20]):
+                        """Get the stamp and uncertainties from a Star object and provide it to EPSFStar"""
+                        epsf = pupsf.EPSFStar(
+                            stamp,
+                            weights=weights,
+                            wcs_large=wcs_large,
+                            cutout_center=center
+                        )
+                        return epsf
+
+                    list_of_references=[]
+                    for filepath in psflib_filepaths:
+                        hdulist = fits.open(filepath)
+                        data = hdulist['SCI'].data[0]
+                        data[np.isnan(data)] = 0
+                        weights = np.ones(data.shape)#/hdulist['ERR'].data[0]
+                        weights[np.isnan(weights) | ~np.isfinite(weights)] = 0
+                        wcs = WCS(hdulist['SCI'].header,naxis=2)
+                        list_of_references.append(star2epsf(data,weights=weights,wcs_large=wcs, center=dataset.centers[0]))
+
+                    epsfs = pupsf.EPSFStars(list_of_references)
+                    epsf_builder = pupsf.EPSFBuilder(
+                        oversampling=3,
+                        maxiters=50,
+                        progress_bar=True
+                    )
+                    offsetpsf_func = epsf_builder(epsfs)[0]
+                    offsetpsf_func.image_mask = None
 
                 # NOTE: if minmethod not None, it will split the fit into a fitmethod (e.g. mcmc) for the estimation
                 # of position and flux, and a minmethod (e.g. Powell) to fit the extension of the source using a
@@ -1267,11 +1318,16 @@ class AnalysisTools():
                         output_dir_pk = os.path.join(output_dir_comp, 'PREKLIP')
                         if not os.path.exists(output_dir_pk):
                             os.makedirs(output_dir_pk)
-                    
-                    # Offset PSF that is not affected by the coronagraphic
-                    # mask, but only the Lyot stop.
-                    psf_no_coronmsk = offsetpsf_func.psf_off
 
+                    if not use_epsf:
+                        # Offset PSF that is not affected by the coronagraphic
+                        # mask, but only the Lyot stop.
+                        psf_no_coronmsk = offsetpsf_func.psf_off
+                    else:
+                        # EPSF
+                        y, x = np.mgrid[:65, :65]
+                        psf_no_coronmsk = offsetpsf_func.evaluate(x, y, 1, 65//2, 65//2)
+                        # offsetpsf_func.image_mask = None
                     # Initial guesses for the fit parameters.
                     guess_dx = companions[k][0] / pxsc_arcsec  # pix
                     guess_dy = companions[k][1] / pxsc_arcsec  # pix
@@ -1325,41 +1381,55 @@ class AnalysisTools():
                             sim_sep = np.sqrt(guess_dx**2 + guess_dy**2) * pxsc_arcsec  # arcsec
                             sim_pa = np.rad2deg(np.arctan2(guess_dx, guess_dy))  # deg
 
-                        # Generate offset PSF for this roll angle. Do not add
-                        # the V3Yidl angle as it has already been added to the
-                        # roll angle by spaceKLIP. This is only for estimating
-                        # the coronagraphic mask throughput!
-                        offsetpsf_coronmsk = offsetpsf_func.gen_psf([sim_sep, sim_pa],
-                                                                    mode='rth',
-                                                                    PA_V3=roll_ref,
-                                                                    do_shift=False,
-                                                                    quick=True,
-                                                                    addV3Yidl=False)
+                        if  offsetpsf_func.image_mask is not None:
+                            # Generate offset PSF for this roll angle. Do not add
+                            # the V3Yidl angle as it has already been added to the
+                            # roll angle by spaceKLIP. This is only for estimating
+                            # the coronagraphic mask throughput!
+                            offsetpsf_coronmsk = offsetpsf_func.gen_psf([sim_sep, sim_pa],
+                                                                        mode='rth',
+                                                                        PA_V3=roll_ref,
+                                                                        do_shift=False,
+                                                                        quick=True,
+                                                                        addV3Yidl=False)
 
-                        # Coronagraphic mask throughput is not incorporated
-                        # into the flux calibration of the JWST pipeline so
-                        # that the companion flux from the detector pixels will
-                        # be underestimated. Therefore, we need to scale the
-                        # model offset PSF to account for the coronagraphic
-                        # mask throughput (it becomes fainter). Compute scale
-                        # factor by comparing a model PSF with and without
-                        # coronagraphic mask.
-                        scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
+                            # Coronagraphic mask throughput is not incorporated
+                            # into the flux calibration of the JWST pipeline so
+                            # that the companion flux from the detector pixels will
+                            # be underestimated. Therefore, we need to scale the
+                            # model offset PSF to account for the coronagraphic
+                            # mask throughput (it becomes fainter). Compute scale
+                            # factor by comparing a model PSF with and without
+                            # coronagraphic mask.
+                            scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
+                            # scale_factor_avg += [scale_factor]
+                        else:
+                            # Generate the scaling factor for the  EPSF.
+                            # Since there is no coronagraphic mask, it is only the total flux of the epsf
+                            scale_factor = 1 #/ np.sum(psf_no_coronmsk)
                         scale_factor_avg += [scale_factor]
-                        
-                        # Normalize model offset PSF to a total integrated flux
-                        # of 1 at infinity. Generates a new webbpsf model with
-                        # PSF normalization set to 'exit_pupil'.
-                        offsetpsf = offsetpsf_func.gen_psf([sim_sep, sim_pa],
-                                                           mode='rth',
-                                                           PA_V3=roll_ref,
-                                                           do_shift=False,
-                                                           quick=False,
-                                                           addV3Yidl=False,
-                                                           normalize='exit_pupil')
-                        
-                        # Normalize model offset PSF by the flux of the star.
-                        offsetpsf *= fzero[filt] / 10**(mstar[filt] / 2.5) / 1e6 / pxar  # MJy/sr
+
+                        if not use_epsf:
+                            # Normalize model offset PSF to a total integrated flux
+                            # of 1 at infinity. Generates a new webbpsf model with
+                            # PSF normalization set to 'exit_pupil'.
+                            offsetpsf = offsetpsf_func.gen_psf([sim_sep, sim_pa],
+                                                               mode='rth',
+                                                               PA_V3=roll_ref,
+                                                               do_shift=False,
+                                                               quick=False,
+                                                               addV3Yidl=False,
+                                                               normalize='exit_pupil')
+
+                            # Normalize model offset PSF by the flux of the star.
+                            offsetpsf *= fzero[filt] / 10**(mstar[filt] / 2.5) / 1e6 / pxar  # MJy/sr
+                        else:
+                            # Normalize model EPSF to a total integrated flux
+                            # of 1 at infinity.
+                            # EPSF
+                            y, x = np.mgrid[:fov_pix, :fov_pix]
+                            offsetpsf = offsetpsf_func.evaluate(x, y, 1, fov_pix // 2, fov_pix // 2)
+                            offsetpsf *= fzero[filt] / 10**(mstar[filt] / 2.5) / 1e6 / pxar  # MJy/sr
                         
                         # Apply scale factor to incorporate the coronagraphic
                         # mask througput.
