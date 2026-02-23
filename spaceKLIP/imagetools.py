@@ -51,6 +51,7 @@ from spaceKLIP.xara import core
 from spaceKLIP.utils import gaussian_kernel
 from spaceKLIP.psf import get_offsetpsf
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
+from spaceKLIP import mcmc_tools
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.plotting import load_plt_style
@@ -618,7 +619,9 @@ class ImageTools():
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                nanmask = ut.read_msk(nanmaskfile)
                 nints = self.database.obs[key]['NINTS'][j]
                 effinttm = self.database.obs[key]['EFFINTTM'][j]
 
@@ -664,9 +667,10 @@ class ImageTools():
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
                                         center_mask=center_mask, maskoffs=maskoffs)
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(fitsfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, nints=nints, effinttm=effinttm)
+                self.database.update_obs(key, j, fitsfile, maskfile, nints=nints, effinttm=effinttm, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -2620,7 +2624,7 @@ class ImageTools():
     def update_frames_with_nans_from_nanmask(self,
                                              cval=np.nan,
                                              types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
-                                             subdir='nanreplaced'):
+                                             subdir='nansback'):
         """
         Replace values in data wiht NaNs from the nanmask.
 
@@ -2675,9 +2679,10 @@ class ImageTools():
                 # Write FITS file and PSF mask.
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs )
                 maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
         pass
 
@@ -3541,6 +3546,172 @@ class ImageTools():
 
         pass
 
+    def calculate_centers_binary(self,
+                                kwargs={},
+                                subdir='recentered'):
+        """
+        Recenter frames so that the host star position is data.shape // 2.
+
+        Parameters
+        ----------
+        kwargs : dict, optional
+            Keyword arguments for the mcmc_tools.MCMCTools class. The default
+            is {}.
+        subdir : str, optional
+            Name of the directory where the data products shall be saved. The
+            default is 'recentered'.
+
+        Returns
+        -------
+        None.
+
+        """
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        output_dir2 = os.path.join(self.database.output_dir, subdir + '/residual')
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        database_temp = deepcopy(self.database.obs)
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Find science and reference files.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+            ww_sci_ta = np.where(self.database.obs[key]['TYPE'] == 'SCI_TA')[0]
+            ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
+            ww_ref_ta = np.where(self.database.obs[key]['TYPE'] == 'REF_TA')[0]
+
+            # Loop through FITS files.
+            ww_all = np.append(ww_sci, ww_ref)
+            ww_all = np.append(ww_all, ww_sci_ta)
+            ww_all = np.append(ww_all, ww_ref_ta)
+            shifts_all = []
+            for j in ww_all:
+
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
+
+                # Recenter frames. Use different algorithms based on data type.
+                head, tail = os.path.split(fitsfile)
+                sub_fitsfile = output_dir + '/' + tail
+                log.info('  --> Recenter frames: ' + tail)
+                if np.sum(np.isnan(data)) != 0:
+                    raise UserWarning('Please replace nan pixels before attempting to recenter frames')
+                shifts = []  # shift between star position and image center (data.shape // 2)
+                maskoffs_temp = []  # shift between star and coronagraphic mask position
+                mask_shifts = []  # shift between mask position and image center (data.shape // 2)
+                # SCI and REF data.
+                if j in ww_sci or j in ww_ref:
+                    MCMCTools = mcmc_tools.MCMCTools(data, type=self.database.obs[key]['TYPE'][j],kwargs=kwargs)
+                    for k in range(data.shape[0]):
+                        crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
+                        crpix2 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
+                        if k == 0:
+                            # Initialize a function that can generate model offset PSFs.
+                            filt = self.database.obs[key]['FILTER'][j]
+                            apername = self.database.obs[key]['APERNAME'][j]
+                            date = fits.getheader(self.database.obs[key]['FITSFILE'][ww_sci[0]], 0)['DATE-BEG']
+                            offsetpsf_func = JWST_PSF(apername,
+                                                      filt,
+                                                      date=date,
+                                                      fov_pix=data.shape[-1],
+                                                      oversample=2,
+                                                      sp=None,
+                                                      use_coeff=False)
+                            psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
+                            psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
+                            MCMCTools.run(np.median(data, axis=0).copy(),
+                                          psf_no_coronmsk,
+                                          x_guess=MCMCTools.x_guess,
+                                          y_guess=MCMCTools.y_guess,
+                                          r=MCMCTools.r,
+                                          nsteps=MCMCTools.nsteps,
+                                          ndim=len(MCMCTools.initial_guess),
+                                          nwalkers=MCMCTools.nwalkers,
+                                          initial_guess=MCMCTools.initial_guess,
+                                          limits=MCMCTools.limits,
+                                          verbose=MCMCTools.verbose,
+                                          size=MCMCTools.size,
+                                          binarity=MCMCTools.binarity,
+                                          filename=output_dir + '/' +
+                                                   self.database.obs[key]['FITSFILE'][j].split('/')[-1].split(
+                                                       '.fits')[0])
+
+                        # Apply the same shift to all SCI and REF frames.
+                        shifts += [np.array([-(MCMCTools.dx_guess - MCMCTools.best_fit_params[0]),
+                                             -(MCMCTools.dy_guess - MCMCTools.best_fit_params[1])])]
+                        mask_shifts += [np.array([0., 0.])]
+                        maskoffs_temp += [np.array([0., 0.])]
+
+
+                    starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
+                    starceny = (data.shape[-2] - 1) / 2. - shifts[0][1] + 1  # 1-indexed
+
+                    maskcenx = None
+                    maskceny = None
+
+                    xoffset = 0.  # arcsec
+                    yoffset = 0.  # arcsec
+
+                shifts = np.array(shifts)
+                shifts_all += [shifts]
+                maskoffs_temp = np.array(maskoffs_temp)
+                maskshifts_temp = np.median(mask_shifts, axis=0)
+                if center_shift is not None:
+                    center_shift += shifts
+                else:
+                    center_shift = shifts
+                if center_mask is not None:
+                    center_mask += maskshifts_temp
+                else:
+                    center_mask = maskshifts_temp
+                if maskoffs is not None:
+                    maskoffs += maskoffs_temp
+                else:
+                    maskoffs = maskoffs_temp
+
+                    # Compute shift distances.
+                    dist = np.sqrt(np.sum(shifts[:, :2] ** 2, axis=1))  # pix
+                    dist *= self.database.obs[key]['PIXSCALE'][j] * 1000  # mas
+                    head, tail = os.path.split(self.database.obs[key]['FITSFILE'][j])
+                    log.info('  --> Calculate centers: median measured shift = %.2f mas' % np.median(dist))
+
+                    # Write FITS file and PSF mask.
+                    head_pri['XOFFSET'] = xoffset  # arcsec
+                    head_pri['YOFFSET'] = yoffset  # arcsec
+                    head_sci['STARCENX'] = starcenx
+                    head_sci['STARCENY'] = starceny
+                    if maskcenx is not None:
+                        head_sci['MASKCENX'] = maskcenx
+                        head_sci['MASKCENY'] = maskceny
+                    # Reading in CRPIX1/2 from database for updates from update_nircam_centers.
+                    head_sci['CRPIX1'] = self.database.obs[key]['CRPIX1'][j]
+                    head_sci['CRPIX2'] = self.database.obs[key]['CRPIX2'][j]
+
+                    fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                            center_mask=center_mask, maskoffs=maskoffs)
+                    maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                    nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
+
+                    # Update spaceKLIP database.
+                    self.database.update_obs(key, j, fitsfile, maskfile,
+                                             xoffset=xoffset, yoffset=yoffset,
+                                             starcenx=starcenx, starceny=starceny,
+                                             maskcenx=maskcenx, maskceny=maskceny,
+                                             center_shift=center_shift, center_mask=center_mask,
+                                             nanmaskfile=nanmaskfile)
+
+                pass
+
     def calculate_centers(self,
                           method='fourier',
                           use_ta=False,
@@ -3780,12 +3951,14 @@ class ImageTools():
                                 mask_shifts += [np.array([0., 0.])]
                                 maskoffs_temp += [np.array([0., 0.])]
 
-                        xoffset = 0.  # arcsec
-                        yoffset = 0.  # arcsec
+                        # xoffset = 0.  # arcsec
+                        # yoffset = 0.  # arcsec
+                        xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
+                        yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
 
                         # Update star center (image center - shift).
-                        starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
-                        starceny = (data.shape[-2] - 1) / 2. - shifts[0][1] + 1  # 1-indexed
+                        starcenx = (data.shape[-1]) // 2. - shifts[0][0] + 1  # 1-indexed
+                        starceny = (data.shape[-2]) // 2. - shifts[0][1] + 1  # 1-indexed
 
                         maskcenx = None
                         maskceny = None
@@ -5076,6 +5249,11 @@ class ImageTools():
                         starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0] + shiftpad
                         starceny = self.database.obs[key]['STARCENY'][j] + shifts[0][1] + shiftpad
 
+                        if nanmask is not None:
+                            # Update mask center.
+                            nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j] + shifts[0][0] + shiftpad
+                            nanmaskceny = self.database.obs[key]['NANMASKCENY'][j] + shifts[0][1] + shiftpad
+
                         # Update CRPIX values.
                         crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0][0] + shiftpad
                         crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[0][1] + shiftpad
@@ -5125,24 +5303,16 @@ class ImageTools():
                     else:
                         shifts = []
                         for k in range(data.shape[0]):
-                            xshift = align_shift_star[j][k][0] + center_shift_star[j][k][0]
-                            yshift = align_shift_star[j][k][1] + center_shift_star[j][k][1]
+                            xshift = (align_shift_star[j][k][0] if not isinstance(align_shift_star[j], types.BuiltinFunctionType) else 0.0) + \
+                                     (center_shift_star[j][k][0] if not isinstance(center_shift_star[j], types.BuiltinFunctionType) else 0.0)
+                            yshift = (align_shift_star[j][k][1] if not isinstance(align_shift_star[j], types.BuiltinFunctionType) else 0.0) + \
+                                     (center_shift_star[j][k][1] if not isinstance(center_shift_star[j], types.BuiltinFunctionType) else 0.0)
                             shifts += [np.array([xshift, yshift])]
 
-                            this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
-                            this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
-
-                            # Recenter SCI and REF frames to integer pixel
-                            # precision by rolling the image.
-                            ww_max = np.unravel_index(np.argmax(data[k]), data[k].shape)
-                            if ww_max != (data.shape[-2] // 2, data.shape[-1] // 2):
-                                dx, dy = data.shape[-1] // 2 - ww_max[1], data.shape[-2] // 2 - ww_max[0]
-                                shifts[-1][0] += dx
-                                shifts[-1][1] += dy
-                                data_shift += [np.roll(np.roll(this_data, dx, axis=1), dy, axis=0)]
-                                erro_shift += [np.roll(np.roll(this_erro, dx, axis=1), dy, axis=0)]
+                            data_shift += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
+                            erro_shift += [ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
 
                             if nanmask is not None:
                                 # nanmask shift preservesing 0/1 and NaN values.
@@ -5150,10 +5320,6 @@ class ImageTools():
                                                   pad_amount=shiftpad, kwargs=kwargs)
                                 notnan = ~np.isnan(nanmask)
                                 nanmask[notnan] = (nanmask[notnan] >= 0.5).astype(np.float32)
-
-                                # Update mask center.
-                                nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j] + shifts[0][0] + shiftpad
-                                nanmaskceny = self.database.obs[key]['NANMASKCENY'][j] + shifts[0][1] + shiftpad
 
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
