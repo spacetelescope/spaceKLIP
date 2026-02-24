@@ -3612,8 +3612,8 @@ class ImageTools():
                 if j in ww_sci or j in ww_ref:
                     MCMCTools = mcmc_tools.MCMCTools(data, type=self.database.obs[key]['TYPE'][j],kwargs=kwargs)
                     for k in range(data.shape[0]):
-                        crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
-                        crpix2 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
+                        # crpix1 = (data.shape[-1]) // 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
+                        # crpix2 = (data.shape[-1]) // 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
                         if k == 0:
                             # Initialize a function that can generate model offset PSFs.
                             filt = self.database.obs[key]['FILTER'][j]
@@ -3652,8 +3652,10 @@ class ImageTools():
                         maskoffs_temp += [np.array([0., 0.])]
 
 
-                    starcenx = (data.shape[-1] - 1) / 2. - shifts[0][0] + 1  # 1-indexed
-                    starceny = (data.shape[-2] - 1) / 2. - shifts[0][1] + 1  # 1-indexed
+                    # starcenx = (data.shape[-1]) // 2. - shifts[0][0] + 1  # 1-indexed
+                    # starceny = (data.shape[-2]) // 2. - shifts[0][1] + 1  # 1-indexed
+                    starcenx = (data.shape[-1]-1) / 2. - shifts[0][0] + 1  # 1-indexed
+                    starceny = (data.shape[-2]-1) / 2. - shifts[0][1] + 1  # 1-indexed
 
                     maskcenx = None
                     maskceny = None
