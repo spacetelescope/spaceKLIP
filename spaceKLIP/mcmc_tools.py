@@ -43,10 +43,8 @@ class MCMCTools:
 
         # Make an internal alias of the spaceKLIP database class.
         # self.database = database
-        # self.crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
-        # self.crpix2 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
-        self.crpix1 = (data.shape[-1]) // 2. + 1.  # 1-indexed
-        self.crpix2 = (data.shape[-2]) // 2. + 1.  # 1-indexed
+        self.crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
+        self.crpix2 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
         if 'rotate' not in kwargs.keys():
             self.rotate = False
         else:
@@ -526,8 +524,8 @@ class MCMCTools:
                                            np.where(psf == np.nanmax(psf))[0][0], size=self.size+10 if self.rotate else self.size,
                                            flat_and_skip_center=False)
 
-        # centers = [(data_masked.shape[-1] - 1.) / 2., (data_masked.shape[-1] - 1.) / 2.]
-        centers = [(data_masked.shape[-1]) // 2., (data_masked.shape[-1]) // 2.]
+        centers = [(data_masked.shape[-1] - 1.) / 2., (data_masked.shape[-1] - 1.) / 2.]
+        # centers = [(data_masked.shape[-1]) // 2., (data_masked.shape[-1]) // 2.]
 
         # psf_masked = psf.copy()
         # Initialize the MCMC sampler
@@ -596,5 +594,6 @@ class MCMCTools:
             plt.close()
 
         if self.debug:
-            log_posterior(self.best_fit_params, data_masked, psf_masked, limits, centers, binarity, show_plots=True, vmin=0,
+            log_posterior(self.best_fit_params, data_masked, psf_masked, limits, centers, binarity, rotate, r, show_plots=True, vmin=0,
                           vmax=5000, path2fitsfile=filename + '_log_posterior_residuals.png')
+        pass
