@@ -2514,7 +2514,11 @@ class ImageTools():
             Keyword arguments for the 'interp2d' method. Available keywords are:
 
             - size : int, optional
-                Kernel size of the median filter to be used. The default is 4.
+                Kernel size of the median filter to be used. The default is 5.
+
+            - method : str, optional
+                Interpolation method to be used. The default is 'linear'. Available options are 'nearest', 'linear',
+                and 'cubic'.
 
             The default is {}.
 
@@ -2532,6 +2536,8 @@ class ImageTools():
         # Check input.
         if 'size' not in interp2d_kwargs.keys():
             interp2d_kwargs['size'] = 5
+        if 'method' not in interp2d_kwargs.keys():
+            interp2d_kwargs['method'] = 'linear'
 
         # Fix bad pixels using interpolation of neighbors.
         pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
@@ -2585,7 +2591,7 @@ class ImageTools():
                             data_interp = griddata((x_coords, y_coords),
                                                    box_values,
                                                    (ci, ri),
-                                                   method='linear',
+                                                   method=interp2d_kwargs['method'],
                                                    fill_value=np.nan)
 
                             # Replace data pixel with interpolated value
@@ -2595,13 +2601,14 @@ class ImageTools():
                             err_interp = griddata((ex_coords, ey_coords),
                                                   ebox_values,
                                                   (ci, ri),
-                                                  method='linear',
+                                                  method=interp2d_kwargs['method'],
                                                   fill_value=np.nan)
 
                             # Replace error pixel
                             erro[i][ri, ci] = err_interp
 
-                            pxdq[i][ww[i]] = 0
+                            # Set DQ to good
+                            pxdq[i][ri, ci] = 0
 
         pass
 
