@@ -3621,7 +3621,7 @@ class ImageTools():
                             offsetpsf_func = JWST_PSF(apername,
                                                       filt,
                                                       date=date,
-                                                      fov_pix=data.shape[-1],
+                                                      fov_pix=data.shape[-1]+1 if data.shape[-1]%2==0 else data.shape[-1],
                                                       oversample=2,
                                                       sp=None,
                                                       use_coeff=False)
