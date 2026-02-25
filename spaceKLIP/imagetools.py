@@ -3610,10 +3610,9 @@ class ImageTools():
                 mask_shifts = []  # shift between mask position and image center (data.shape // 2)
                 # SCI and REF data.
                 if j in ww_sci or j in ww_ref:
+                    kwargs['debug'] = True
                     MCMCTools = mcmc_tools.MCMCTools(data, type=self.database.obs[key]['TYPE'][j],kwargs=kwargs)
                     for k in range(data.shape[0]):
-                        # crpix1 = (data.shape[-1]) // 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
-                        # crpix2 = (data.shape[-1]) // 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
                         if k == 0:
                             # Initialize a function that can generate model offset PSFs.
                             filt = self.database.obs[key]['FILTER'][j]
@@ -3641,27 +3640,22 @@ class ImageTools():
                                           verbose=MCMCTools.verbose,
                                           size=MCMCTools.size,
                                           binarity=MCMCTools.binarity,
-                                          filename=output_dir + '/' +
-                                                   self.database.obs[key]['FITSFILE'][j].split('/')[-1].split(
-                                                       '.fits')[0])
+                                          filename=output_dir + '/' +self.database.obs[key]['FITSFILE'][j].split('/')[-1].split('.fits')[0])
 
                         # Apply the same shift to all SCI and REF frames.
-                        shifts += [np.array([-(MCMCTools.dx_guess - MCMCTools.best_fit_params[0]),
-                                             -(MCMCTools.dy_guess - MCMCTools.best_fit_params[1])])]
+                        shifts += [np.array([-(MCMCTools.best_fit_params[0] - (data.shape[-1] - 1) / 2), -(MCMCTools.best_fit_params[1] - (data.shape[-2] - 1) / 2)])]
+
                         mask_shifts += [np.array([0., 0.])]
                         maskoffs_temp += [np.array([0., 0.])]
 
-
-                    # starcenx = (data.shape[-1]) // 2. - shifts[0][0] + 1  # 1-indexed
-                    # starceny = (data.shape[-2]) // 2. - shifts[0][1] + 1  # 1-indexed
                     starcenx = (data.shape[-1]-1) / 2. - shifts[0][0] + 1  # 1-indexed
                     starceny = (data.shape[-2]-1) / 2. - shifts[0][1] + 1  # 1-indexed
 
                     maskcenx = None
                     maskceny = None
 
-                    xoffset = 0.  # arcsec
-                    yoffset = 0.  # arcsec
+                    xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
+                    yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
 
                 shifts = np.array(shifts)
                 shifts_all += [shifts]
@@ -3945,7 +3939,7 @@ class ImageTools():
                             # https://github.com/fmartinache/xara
                             if subpix_first_sci_only == False or (j == ww_sci[0] and k == 0):
                                 pp = core.determine_origin(data[k], algo='BCEN')
-                                shifts += [np.array([-(pp[0] - data.shape[-1]//2), -(pp[1] - data.shape[-2]//2)])]
+                                shifts += [np.array([-(pp[0] - (data.shape[-1]-1)/2), -(pp[1] - (data.shape[-2]-1)/2)])]
                                 mask_shifts += [np.array([0., 0.])]
                                 maskoffs_temp += [np.array([0., 0.])]
                             else:
