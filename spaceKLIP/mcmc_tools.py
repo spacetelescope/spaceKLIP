@@ -68,7 +68,7 @@ class MCMCTools:
         if 'size' in kwargs.keys():
             self.size = kwargs['size'] + 1 if kwargs['size'] % 2 == 0 else kwargs['size']
         else:
-            self.size = 30
+            self.size = 31
         if 'oversample' in kwargs.keys():
             self.oversample = kwargs['oversample']
         else:
@@ -532,7 +532,7 @@ class MCMCTools:
         # Add a small random offset to the initial guess to initialize walkers
         pos = initial_guess + 1e-4 * np.random.randn(nwalkers, ndim)
 
-        moves = [(emcee.moves.DEMove(), 0.7), (emcee.moves.DESnookerMove(), 0.3), ]
+        # moves = [(emcee.moves.DEMove(), 0.7), (emcee.moves.DESnookerMove(), 0.3), ]
         # Create the MCMC sampler object
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=(data_masked, psf_masked, limits, centers, binarity, rotate, r)) #, moves=moves,
         # Run the MCMC sampler for a number of steps
@@ -554,6 +554,9 @@ class MCMCTools:
             thin = self.thin
 
         flat_samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
+        flat_samples[:, 0] = self.x_guess -flat_samples[:, 0]
+        flat_samples[:, 1]+= self.y_guess
+
         pranges=[]
         for i in range(flat_samples.shape[1]):
             pranges.append((np.nanmin(flat_samples[:, i][np.isfinite(flat_samples[:, i])]),
@@ -571,8 +574,14 @@ class MCMCTools:
             n_walkers = samples.shape[1]
             fig, ax = plt.subplots(len(labels), 1, figsize=(20, 20), sharex=True)
             for elno in range(len(labels)):
+                if labels[elno] == "x":
+                    add_origin = self.x_guess
+                elif labels[elno] == "y":
+                    add_origin = self.y_guess
+                else:
+                    add_origin = 0
                 for i in range(n_walkers):
-                    ax[elno].plot(samples[:, i, elno], alpha=0.5)
+                    ax[elno].plot(samples[:, i, elno]+add_origin, alpha=0.5)
                     ax[elno].axvline(burnin, color='k', linestyle='--')
                 ax[elno].set_ylabel(f"{labels[elno]}")
             ax[elno].set_xlabel("Step number")
