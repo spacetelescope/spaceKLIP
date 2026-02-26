@@ -449,7 +449,7 @@ class ImageTools():
                         mask = np.pad(mask, ((npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=np.nan)
                     if nanmask is not None:
                         nanmask = np.pad(nanmask, ((npix[2], npix[3]), (npix[0], npix[1])), mode='constant',
-                                      constant_values=np.nan)
+                                      constant_values=1)
                     crpix1 += npix[0]
                     crpix2 += npix[2]
                     starcenx += npix[0]
