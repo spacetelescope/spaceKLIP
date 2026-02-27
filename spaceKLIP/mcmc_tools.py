@@ -44,7 +44,7 @@ class MCMCTools:
         # Make an internal alias of the spaceKLIP database class.
         # self.database = database
         self.crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
-        self.crpix2 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
+        self.crpix2 = (data.shape[-2] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
         if 'rotate' not in kwargs.keys():
             self.rotate = False
         else:
@@ -555,7 +555,7 @@ class MCMCTools:
 
         flat_samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
         flat_samples[:, 0] = self.x_guess -flat_samples[:, 0]
-        flat_samples[:, 1]+= self.y_guess
+        flat_samples[:, 1] = self.y_guess - flat_samples[:, 1]
 
         pranges=[]
         for i in range(flat_samples.shape[1]):
