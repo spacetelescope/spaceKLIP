@@ -5232,14 +5232,6 @@ class ImageTools():
                             # Update mask center.
                             maskcenx = self.database.obs[key]['MASKCENX'][j] + shifts[0][0] + shiftpad
                             maskceny = self.database.obs[key]['MASKCENY'][j] + shifts[0][1] + shiftpad
-                        if nanmask is not None:
-                            nanmask_shift = center_shift_mask[j] + align_shift_mask[j]
-                            nanmask = ut.imshift(nanmask, [nanmask_shift[0], nanmask_shift[1]], method='spline',
-                                              pad_amount=shiftpad, kwargs={'mode':'constant'})
-
-                            # Update mask center.
-                            nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j] + shifts[0][0] + shiftpad
-                            nanmaskceny = self.database.obs[key]['NANMASKCENY'][j] + shifts[0][1] + shiftpad
 
                         # Update star center.
                         starcenx = self.database.obs[key]['STARCENX'][j] + shifts[0][0] + shiftpad
@@ -5312,10 +5304,13 @@ class ImageTools():
 
                             if nanmask is not None:
                                 # nanmask shift preservesing 0/1 and NaN values.
-                                nanmask = ut.imshift(nanmask, [shifts[k][0], shifts[k][1]], method=method,
-                                                  pad_amount=shiftpad, kwargs=kwargs)
-                                notnan = ~np.isnan(nanmask)
-                                nanmask[notnan] = (nanmask[notnan] >= 0.5).astype(np.float32)
+                                nanmask = ut.imshift(nanmask, [shifts[k][0], shifts[k][1]], method='spline',
+                                                     pad_amount=shiftpad, kwargs={'mode': 'constant'})
+
+                                nanmask[np.isnan(nanmask)] = 1
+                                nanmask = (nanmask >= 0.5).astype(np.float32)
+                                nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j] + shifts[0][0] + shiftpad
+                                nanmaskceny = self.database.obs[key]['NANMASKCENY'][j] + shifts[0][1] + shiftpad
 
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
