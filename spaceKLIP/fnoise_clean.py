@@ -91,7 +91,7 @@ class OneOverfStep(Step):
         model_type = option('median', 'mean', 'savgol', default='savgol') # Type of model to fit
         sat_frac = float(default=0.5) # Maximum saturation fraction for fitting
         combine_ints = boolean(default=True) # Combine integrations before ramp fitting
-        vertical_corr = boolean(default=True) # Apply horizontal correction
+        vertical_corr = boolean(default=True) # Apply vertical correction
         nproc = integer(default=4) # Number of processes to use
     """
 
@@ -1248,7 +1248,7 @@ def create_bkg_mask(data, bpmask=None, nsigma=3, niter=3):
         bpmask = np.zeros_like(data, dtype=np.bool_)
     else:
         # Ensure bpmask isn't all True
-        if np.alltrue(bpmask):
+        if np.all(bpmask):
             bpmask = np.zeros_like(data, dtype=np.bool_)
 
     # Excpliitly mask out NaNs

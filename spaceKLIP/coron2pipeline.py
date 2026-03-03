@@ -98,8 +98,14 @@ class Coron2Pipeline_spaceKLIP(Image2Pipeline):
             filebase = os.path.basename(asn.filename)
             res = self.process_exposure_product(product, asn['asn_pool'], filebase)
             
-            # Run outlier detection.
-            res = self.outlier_detection.run(res)
+            # Run outlier detection on CubeModel
+            try:
+                if isinstance(res, datamodels.CubeModel):
+                    res = self.outlier_detection.run(res)
+            except Exception as e:
+                log.warning('Error in outlier_detection step. Skipping outlier detection.')
+                log.error(e)
+                pass
             
             # Save results.
             suffix = 'calints' if isinstance(res, datamodels.CubeModel) else 'cal'
@@ -107,11 +113,15 @@ class Coron2Pipeline_spaceKLIP(Image2Pipeline):
             all_res.append(res)
 
             # If outlier detection was run but intermediates were not request
-            # to be saved, remove the intermediate _median.fits files.
+            # to be saved, remove the intermediate files.
             if not self.save_intermediates and not self.outlier_detection.skip:
                 file_median = res.meta.filename.replace('calints', 'median')
-                if os.path.exists(file_median):
-                    os.remove(file_median)
+                file_blot = res.meta.filename.replace('calints', 'blot')
+                file_outlier = res.meta.filename.replace('calints.fits', 'outlier_i2d.fits')
+                foutlier_local = os.path.basename(file_outlier)
+                for f in [file_median, file_blot, file_outlier, foutlier_local]:
+                    if os.path.exists(f):
+                        os.remove(f)
         
         # Setup output file.
         self.output_use_model = True
@@ -161,8 +171,8 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
     skip_resample : bool, optional
         Skip the resampling (drizzle) step? While the default is set
         to False, this step only applies to normal imaging modes and
-        skips coronagraphic observation. For coronagraphic observations,
-        resampling occurs in Stage 3.
+        only on rate/cal files (not rateints/calints). 
+        For coronagraphic observations, resampling occurs in Stage 3.
     skip_wcs : bool, optional
         Skip the WCS assignment step? The default is False.
     skip_flat : bool, optional
@@ -255,7 +265,9 @@ def run_obs(database,
         See here for how to use the steps parameter:
         https://jwst-pipeline.readthedocs.io/en/latest/jwst/user_documentation/running_pipeline_python.html#configuring-a-pipeline-step-in-python
         Custom step parameters are:
+
         - n/a
+
         The default is {}.
     subdir : str, optional
         Name of the directory where the data products shall be saved. The
@@ -282,8 +294,8 @@ def run_obs(database,
     skip_resample : bool, optional
         Skip the resampling (drizzle) step? While the default is set
         to False, this step only applies to normal imaging modes and
-        skips coronagraphic observation. For coronagraphic observations,
-        resampling occurs in Stage 3.
+        only on rate/cal files (not rateints/calints). 
+        For coronagraphic observations, resampling occurs in Stage 3.
     skip_wcs : bool, optional
         Skip the WCS assignment step? The default is False.
     skip_flat : bool, optional
