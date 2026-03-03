@@ -228,13 +228,13 @@ def run_obs(database,
                     if kwargs_temp['save_full_output']:
                         # Cube is held in dataset.output
                         intsfile = os.path.join(output_dir, fileprefix + '-KLmodes-all_fulloutput.fits')
-                        hdul = fits.HDUList([fits.PrimaryHDU(data=dataset.output)])
+                        hdul_full = fits.HDUList([fits.PrimaryHDU(data=dataset.output)])
                         # Set header keywords for the full cube as well, using the same header as the final output
                         # but with updated NAXIS and NINTS.
-                        hdul[0].header = hdul[0].header.copy()
-                        hdul[0].header['NAXIS'] = 3
-                        hdul[0].header['NINTS'] = dataset.output.shape[0]
-                        hdul.writeto(intsfile, output_verify='fix', overwrite=True)
+                        hdul_full[0].header = hdul[0].header.copy()
+                        hdul_full[0].header['NAXIS'] = len(dataset.output.shape)
+                        hdul_full[0].header['NINTS'] = dataset.output.shape[0]
+                        hdul_full.writeto(intsfile, output_verify='fix', overwrite=True)
 
                     # If requested, save each roll separately.
                     if kwargs_temp['save_ints']:
