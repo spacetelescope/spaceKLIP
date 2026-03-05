@@ -3648,14 +3648,14 @@ class ImageTools():
                         mask_shifts += [np.array([0., 0.])]
                         maskoffs_temp += [np.array([0., 0.])]
 
+                    xoffset = 0  # arcsec
+                    yoffset = 0  # arcsec
+
                     starcenx = (data.shape[-1]-1) / 2. - shifts[0][0] + 1  # 1-indexed
                     starceny = (data.shape[-2]-1) / 2. - shifts[0][1] + 1  # 1-indexed
 
                     maskcenx = None
                     maskceny = None
-
-                    xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
-                    yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
 
                 shifts = np.array(shifts)
                 shifts_all += [shifts]
@@ -3933,7 +3933,6 @@ class ImageTools():
                     # Other data types.
                     else:
                         for k in range(data.shape[0]):
-
                             # Recenter SCI and REF frames to subpixel precision
                             # using the 'BCEN' routine from XARA.
                             # https://github.com/fmartinache/xara
@@ -3947,10 +3946,8 @@ class ImageTools():
                                 mask_shifts += [np.array([0., 0.])]
                                 maskoffs_temp += [np.array([0., 0.])]
 
-                        # xoffset = 0.  # arcsec
-                        # yoffset = 0.  # arcsec
-                        xoffset = self.database.obs[key]['XOFFSET'][j]  # arcsec
-                        yoffset = self.database.obs[key]['YOFFSET'][j]  # arcsec
+                        xoffset = 0  # arcsec
+                        yoffset = 0  # arcsec
 
                         # Update star center (image center - shift).
                         starcenx = (data.shape[-1]) // 2. - shifts[0][0] + 1  # 1-indexed
