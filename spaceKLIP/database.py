@@ -1602,10 +1602,8 @@ def create_database(output_dir,
     # Cycle through all obsids and get the files in a single list
     fitsfiles = [get_files(input_dir, pid=pid, obsid=oid, **kwargs) for oid in obsids]
     fitsfiles = [f for sublist in fitsfiles for f in sublist]
-    if psflibpaths is None:
-        datapaths = [os.path.join(input_dir, f) for f in fitsfiles]
-    else:
-        datapaths = [os.path.join(input_dir, f) for f in fitsfiles if os.path.join(input_dir, f) not in psflibpaths]
+    datapaths = [os.path.join(input_dir, f) for f in fitsfiles]
+
     # Initialize the spaceKLIP database and read the input FITS files.
     db = Database(output_dir=output_dir)
     db.verbose = verbose
