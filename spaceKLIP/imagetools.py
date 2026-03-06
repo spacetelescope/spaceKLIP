@@ -35,7 +35,7 @@ from sklearn.cluster import KMeans
 import scipy.ndimage
 from scipy.ndimage import gaussian_filter, median_filter
 from scipy.ndimage import shift as spline_shift
-from scipy.ndimage import label, binary_dilation
+from scipy.ndimage import label, convolve, binary_dilation
 from scipy.optimize import leastsq, minimize
 from scipy.interpolate import griddata
 
@@ -1140,11 +1140,19 @@ class ImageTools():
         dqarr_kwargs : dict, optional
             Keyword arguments for the 'dqarr' identification method. Available keywords are:
 
+            - flag_neighbors : bool, optional
+                Flag the 4 connecting neighbors of a DO_NOT_USE pixel?
+
+            - neighbor_threshold : int, optional
+                Minimum number of DO_NOT_USE pixels that must be present within
+                the 5x5 region centered on a DO_NOT_USE pixel before its 4 connected
+                neighbors are also flagged.
+
             The default is {}.
         sigclip_kwargs : dict, optional
             Keyword arguments for the 'sigclip' identification methods. Available keywords are:
 
-            - sigma: float, optional
+            - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
             - shift_x : list of int, optional
                 Pixels in x-direction to which each pixel shall be compared to.
@@ -1171,9 +1179,7 @@ class ImageTools():
         Returns
         -------
         None
-
         """
-        
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -1246,18 +1252,35 @@ class ImageTools():
                             # Flag any pixels marked as DO_NOT_USE that aren't NON_SCIENCE
                             temp_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
                             for i in range(pxdq_temp.shape[0]):
+
                                 temp_donotuse = ut.get_dqmask(pxdq[i], 'DO_NOT_USE', return_bool=True)
 
-                                # Flag the 4 pixels neighboring a DO_NOT_USE pixel.
+                                # Flag the 4 pixels neighboring a DO_NOT_USE pixel,
+                                # but only for pixels that have another DO_NOT_USE pixel
+                                # somewhere in their 5x5 neighborhood.
                                 if dqarr_kwargs.get('flag_neighbors', False):
-                                    from scipy.ndimage import binary_dilation
-                                    neighbors_mask = np.array([[0,1,0],[1,1,1],[0,1,0]], bool)
+
                                     before = np.sum(temp_donotuse)
-                                    temp_donotuse = binary_dilation(temp_donotuse, structure=neighbors_mask)
+                                    
+                                    # Count DO_NOT_USE pixels in each 5x5 neighborhood.
+                                    kernel_5x5 = np.ones((5, 5), dtype=int)
+                                    neighbor_count = convolve(temp_donotuse.astype(int),
+                                                              kernel_5x5,
+                                                              mode='constant',
+                                                              cval=0)
+                                    
+                                    # Only expand pixels that are not isolated.
+                                    clustered_donotuse = temp_donotuse & (neighbor_count > dqarr_kwargs.get('neighbor_threshold', 5))
+                                    neighbors_mask = np.array([[0,1,0],[1,1,1],[0,1,0]], bool)
+                                    expanded = binary_dilation(clustered_donotuse, structure=neighbors_mask)
+                                    
+                                    # Keep all original DO_NOT_USE pixels, and add neighbors if clustered.
+                                    temp_donotuse = temp_donotuse | expanded
+
                                     added = np.sum(temp_donotuse) - before
                                     log.info(f"    Slice {i}: neighbors added = {added}")
 
-                                # Combine with NaNs and mask out NON_SCIENCE
+                                # Combine with NaNs and mask out NON_SCIENCE.
                                 pxdq_temp[i] = (np.isnan(data[i]) | temp_donotuse) & (~temp_nonsci[i])
                         elif method_split[k] == 'sigclip':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
