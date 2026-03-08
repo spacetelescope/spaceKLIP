@@ -447,7 +447,7 @@ def write_fitpsf_images(fitpsf,
     pri = pyfits.PrimaryHDU()
     for key in row.keys():
         if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST','GSCALE_ERROR', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
-                   'THETA_ERROR'] and np.isnan(row[key]):
+                   'THETA','THETA_ERROR'] and np.isnan(row[key]):
             pri.header[key] = 'NONE'
         else:
             pri.header[key] = row[key]
@@ -1173,14 +1173,14 @@ def interpret_dq_value(dq_value):
     return dqflags_to_mnemonics(dq_value, pixel)
 
 
-def gaussian_kernel(sigma_x=1, sigma_y=1, theta_degrees=0, n=6):
+def gaussian_kernel(sigma_x=1, sigma_y=1, theta_degrees=None, n=6):
     """
     Generates a 2D Gaussian kernel with specified standard deviations and rotation.
 
     Parameters:
     sigma_x (float): Standard deviation of the Gaussian in the x direction.
     sigma_y (float): Standard deviation of the Gaussian in the y direction.
-    theta_degrees (float): Rotation angle of the Gaussian kernel in degrees.
+    theta_degrees (float): Rotation angle of the Gaussian kernel in degrees. Skip if None
 
     Returns:
     numpy.ndarray: The generated Gaussian kernel.
@@ -1189,17 +1189,20 @@ def gaussian_kernel(sigma_x=1, sigma_y=1, theta_degrees=0, n=6):
     kernel_size_x = max(3, int(n * sigma_x + 1) | 1)  # Ensure odd size
     kernel_size_y = max(3, int(n * sigma_y + 1) | 1)  # Ensure odd size
 
-    # Convert theta from degrees to radians
-    theta = np.deg2rad(theta_degrees)
-
     # Create coordinate grids
     x = np.linspace(-kernel_size_x // 2, kernel_size_x // 2, kernel_size_x)
     y = np.linspace(-kernel_size_y // 2, kernel_size_y // 2, kernel_size_y)
     x, y = np.meshgrid(x, y)
 
-    # Rotate the coordinates
-    x_rot = x * np.cos(theta) + y * np.sin(theta)
-    y_rot = -x * np.sin(theta) + y * np.cos(theta)
+    if theta_degrees is not None:
+        # Convert theta from degrees to radians
+        theta = np.deg2rad(theta_degrees)
+        # Rotate the coordinates
+        x_rot = x * np.cos(theta) + y * np.sin(theta)
+        y_rot = -x * np.sin(theta) + y * np.cos(theta)
+    else:
+        x_rot = x
+        y_rot = y
 
     kernel = np.exp(-(x_rot ** 2 / (2 * sigma_x ** 2) + y_rot ** 2 / (2 * sigma_y ** 2)))
     kernel /= kernel.sum()

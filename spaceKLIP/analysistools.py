@@ -1090,11 +1090,46 @@ class AnalysisTools():
                     split_fit = False
 
                 if split_fit:
-                    if not all(x in kwargs.keys() for x in ['sigma_xguess', 'sigma_yguess',  'scale_guess', 'theta_guess']):
-                        gauss_param_guesses = [0.3,0.3,0,0]
+                    if 'sigma_xguess' in kwargs.keys():
+                        sigma_xguess = kwargs['sigma_xguess']
                     else:
-                        gauss_param_guesses = [kwargs['sigma_xguess'], kwargs['sigma_yguess'], kwargs['scale_guess'], kwargs['theta_guess']]
+                        sigma_xguess = 0.1
+                    if 'sigma_yguess' in kwargs.keys():
+                        sigma_yguess = kwargs['sigma_yguess']
+                    else:
+                        sigma_yguess = 0.1
+                    if 'scale_guess' in kwargs.keys():
+                        scale_guess = kwargs['scale_guess']
+                    else:
+                        scale_guess = 0.0
+                    if 'theta_guess' in kwargs.keys():
+                        theta_guess = kwargs['theta_guess']
+                    else:
+                        theta_guess = 0.0
 
+                    if 'sigma_xrange' in kwargs.keys():
+                        sigma_xrange = kwargs['sigma_xrange']
+                    else:
+                        sigma_xrange = [0.001, 5.0]
+                    if 'sigma_yrange' in kwargs.keys():
+                        sigma_yrange = kwargs['sigma_yrange']
+                    else:
+                        sigma_yrange = [0.001, 5.0]
+                    if 'theta_range' in kwargs.keys():
+                        theta_range = kwargs['theta_range']
+                    else:
+                        theta_range = [-180, 180]
+                    if 'scale_range' in kwargs.keys():
+                        scale_range = kwargs['scale_range']
+                    else:
+                        scale_range = [-1,1]
+
+                    if theta_guess is not None:
+                        gauss_param_guesses = [sigma_xguess, sigma_yguess, theta_guess, scale_guess]
+                        gauss_bounds=[sigma_xrange, sigma_yrange, theta_range, scale_range]
+                    else:
+                        gauss_param_guesses = [sigma_xguess, sigma_yguess, scale_guess]
+                        gauss_bounds=[sigma_xrange, sigma_yrange, scale_range]
                     # Loop through companions.
                     tab = Table(names=('ID',
                                        'RA',
@@ -1655,7 +1690,8 @@ class AnalysisTools():
                                 # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
                                 fig, result = best_convfit_and_residuals(fma,
                                                                          minmethod=minmethod,
-                                                                         initial_params=gauss_param_guesses)
+                                                                         initial_params=gauss_param_guesses,
+                                                                         bounds=gauss_bounds)
 
                                 if save_figures:
                                     path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_conv_c%.0f' % (k + 1) + '.pdf')
@@ -1663,6 +1699,17 @@ class AnalysisTools():
                                     fig.savefig(path)
                                 plt.show()
                                 plt.close(fig)
+
+                                if theta_guess is not None:
+                                    gscale = result.x[3]
+                                    sigma_x = result.x[0]
+                                    sigma_y = result.x[1]
+                                    theta = result.x[2]
+                                else:
+                                    gscale = result.x[2]
+                                    sigma_x = result.x[0]
+                                    sigma_y = result.x[1]
+                                    theta = np.nan
 
                                 tab.add_row((k + 1,
                                              fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
@@ -1688,13 +1735,13 @@ class AnalysisTools():
                                              scale_factor_avg,
                                              tp_comsubst,
                                              fitsfile,
-                                             result.x[3],
+                                             gscale,
                                              np.nan,
-                                             result.x[0],
+                                             sigma_x,
                                              np.nan,
-                                             result.x[1],
+                                             sigma_y,
                                              np.nan,
-                                             result.x[2],
+                                             theta,
                                              np.nan,
                                              ))
                             else:
@@ -1780,7 +1827,7 @@ class AnalysisTools():
                                 plt.savefig(path)
                             plt.show()
                             plt.close(fig)
-                            
+
                             # Write the pymultinest fit results into a table.
                             flux_jy = fit.fit_flux.bestfit * guess_flux
                             flux_jy *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
@@ -1802,6 +1849,7 @@ class AnalysisTools():
                                 mstar_err_temp = mstar_err
                             appmag = mstar[filt] + delmag  # vegamag
                             appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
+
                             fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
                             tab.add_row((k + 1,
                                          -(fit.fit_x.bestfit - data_centx) * pxsc_arcsec,  # arcsec
@@ -1886,7 +1934,8 @@ class AnalysisTools():
                                 # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
                                 fig, result = best_convfit_and_residuals(fma,
                                                                          minmethod=minmethod,
-                                                                         initial_params=gauss_param_guesses)
+                                                                         initial_params=gauss_param_guesses,
+                                                                         bounds=gauss_bounds)
 
                                 if save_figures:
                                     path = os.path.join(output_dir_comp,
@@ -1898,6 +1947,17 @@ class AnalysisTools():
                                     fig.savefig(path)
                                 plt.show()
                                 plt.close(fig)
+
+                                if theta_guess is not None:
+                                    gscale = result.x[3]
+                                    sigma_x = result.x[0]
+                                    sigma_y = result.x[1]
+                                    theta = result.x[2]
+                                else:
+                                    gscale = result.x[2]
+                                    sigma_x = result.x[0]
+                                    sigma_y = result.x[1]
+                                    theta = np.nan
 
                                 tab.add_row((k + 1,
                                              fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
@@ -1923,17 +1983,23 @@ class AnalysisTools():
                                              scale_factor_avg,
                                              tp_comsubst,
                                              fitsfile,
-                                             result.x[3],
+                                             gscale,
                                              np.nan,
-                                             result.x[0],
+                                             sigma_x,
                                              np.nan,
-                                             result.x[1],
+                                             sigma_y,
                                              np.nan,
-                                             result.x[2],
+                                             theta,
                                              np.nan,
                                              ))
                             else:
                                 raise NotImplementedError()
+
+                        # Save the results table.
+                        output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                            subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                        Table(tab[-1]).write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
+                        print(f'Table saved to {output_ecsv_path}')
 
                         # Plot estimated background level.
                         if remove_background:
@@ -2062,8 +2128,8 @@ class AnalysisTools():
                 self.database.update_src(key, j, tab)
 
                 # Save the results table.
-                output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                    subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
+                output_ecsv_path = os.path.join(output_dir_kl, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
+                    subsections) + '_' + key + '-results' + '.ecsv')
                 tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
                 print(f'Table saved to {output_ecsv_path}')
         pass
@@ -2074,12 +2140,18 @@ def loss_function(params,
     '''
     Loss function for the minimization process in fit_for_extended_sources.
     '''
-    sigma_x, sigma_y, theta_degrees, scale = params
-    kernel = gaussian_kernel(sigma_x=sigma_x, sigma_y=sigma_y, theta_degrees=theta_degrees, n=6)
+    if len(params) == 4:
+        sigma_x, sigma_y, theta_degrees, scale = params
+        kernel = gaussian_kernel(sigma_x=sigma_x, sigma_y=sigma_y, theta_degrees=theta_degrees, n=6)
+    else:
+        sigma_x, sigma_y, scale = params
+        kernel = gaussian_kernel(sigma_x=sigma_x, sigma_y=sigma_y, theta_degrees=None, n=6)
+
     convolved_image = convolve(offset_psf*10**scale, kernel)
 
     # mse = np.nanmean((target_array - convolved_image) ** 2)
-    mse = np.nanmean((target_array - convolved_image) ** 2 *(target_array))
+    mse = np.sum((target_array - convolved_image) ** 2)/(2*target_array.shape[0]*target_array.shape[1])
+    # mse = np.nanmean((target_array - convolved_image) ** 2 *(target_array))
     return mse
 
 def best_convfit_and_residuals(fma,
@@ -2117,11 +2189,11 @@ def best_convfit_and_residuals(fma,
     if fig is None:
         fig = plt.figure(figsize=(12, 4))
 
-    # create best fit FM
-    dx = fma.fit_x.bestfit - fma.data_stamp_x_center
-    dy = fma.fit_y.bestfit - fma.data_stamp_y_center
+    # # create best fit FM
+    # dx = fma.fit_x.bestfit - fma.data_stamp_x_center
+    # dy = fma.fit_y.bestfit - fma.data_stamp_y_center
 
-    fm_bestfit = fma.fit_flux.bestfit * sinterp.shift(fma.fm_stamp, [dy, dx])
+    fm_bestfit = fma.fm_stamp#*fma.fit_flux.bestfit * sinterp.shift(fma.fm_stamp, [dy, dx])
 
     if fma.padding > 0:
         fm_bestfit = fm_bestfit[fma.padding:-fma.padding, fma.padding:-fma.padding]
@@ -2129,10 +2201,16 @@ def best_convfit_and_residuals(fma,
     if minmethod is not None:
         result = estimate_extended(fma.data_stamp, fm_bestfit, bounds=bounds, initial_params=initial_params, method=minmethod)
         # Convolve the PSF by a 2D gaussian
-        kernel = gaussian_kernel(sigma_x=result.x[0],
-                                 sigma_y=result.x[1],
-                                 theta_degrees=result.x[2], n=6)
-        fm_bestfit_convolved = convolve(fm_bestfit * 10 ** result.x[3], kernel)
+        if len(result.x) == 4:
+            kernel = gaussian_kernel(sigma_x=result.x[0],
+                                     sigma_y=result.x[1],
+                                     theta_degrees=result.x[2], n=6)
+            fm_bestfit_convolved = convolve(fm_bestfit * 10 ** result.x[3], kernel)
+        else:
+            kernel = gaussian_kernel(sigma_x=result.x[0],
+                                     sigma_y=result.x[1],
+                                     theta_degrees=None, n=6)
+            fm_bestfit_convolved = convolve(fm_bestfit * 10 ** result.x[2], kernel)
     else:
         result = None
         # Convolve the PSF by a 2D gaussian
