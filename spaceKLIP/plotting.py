@@ -616,7 +616,7 @@ def display_image_comparisons(database,
             # Count the number of bad (DO_NOT_USE) pixels in the DQ data.
             dq = fits.getdata(fn_path, extname='DQ')
             num_bad_pixels = np.sum((dq & 1) == 1)
-            image_info['bp_counts'].append(num_bad_pixels)
+            #image_info['bp_counts'].append(num_bad_pixels)
 
             # Handle subtraction only if enabled.
             if subtract_first:
@@ -639,7 +639,7 @@ def display_image_comparisons(database,
             plt.draw()
 
             ax.set_title(base_dir)
-            ax.legend(handles=[patches.Patch(color='orange', label=f"DO_NOT_USE = {image_info['bp_counts'][0]} px")],
+            ax.legend(handles=[patches.Patch(color='orange', label=f"DO_NOT_USE = {num_bad_pixels} px")],
                       loc='lower center', bbox_to_anchor=(0.5, -0.18))
         fig.suptitle(
             f"{os.path.basename(fn)} - {os.path.basename(image_info['first_sci_file'])}" if subtract_first else os.path.basename(fn),
