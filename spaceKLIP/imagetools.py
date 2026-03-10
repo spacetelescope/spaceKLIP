@@ -1227,12 +1227,13 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
+                pxmask_donotuse = ut.get_dqmask(pxdq, 'DO_NOT_USE', return_bool=True)
 
-                if set_dq_zero:  # set_dq_zero
-                    # Make copy of DQ array filled with zeros, i.e. all good pixels
+                if set_dq_zero:
+                    # Make copy of DQ array filled with zeros, i.e. all good pixels.
                     pxdq_temp = np.zeros_like(pxdq)
                 else:
-                    # Make copy of DQ array
+                    # Make copy of DQ array.
                     pxdq_temp = pxdq.copy()
 
                 # Skip file types that are not in the list of types.
@@ -1249,31 +1250,33 @@ class ImageTools():
                         head, tail = os.path.split(fitsfile)
                         if method_split[k] == 'dqarr':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
-                            # Flag any pixels marked as DO_NOT_USE that aren't NON_SCIENCE
-                            temp_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
+
                             for i in range(pxdq_temp.shape[0]):
 
-                                temp_donotuse = ut.get_dqmask(pxdq[i], 'DO_NOT_USE', return_bool=True)
+                                # Flag any pixels marked as DO_NOT_USE that aren't NON_SCIENCE.
+                                # DO_NOT_USE pixels are NaN.
+                                temp_nonsci = pxmask_nonsci[i].copy()
+                                temp_donotuse = np.isnan(data[i])  # Prevents additional flags each run.
 
                                 # Flag the 4 pixels neighboring a DO_NOT_USE pixel,
                                 # but only for pixels that have another DO_NOT_USE pixel
-                                # somewhere in their 5x5 neighborhood.
+                                # somewhere in their 5x5 neighborhood (cluster).
                                 if dqarr_kwargs.get('flag_neighbors', False):
 
                                     before = np.sum(temp_donotuse)
-                                    
+
                                     # Count DO_NOT_USE pixels in each 5x5 neighborhood.
                                     kernel_5x5 = np.ones((5, 5), dtype=int)
                                     neighbor_count = convolve(temp_donotuse.astype(int),
                                                               kernel_5x5,
                                                               mode='constant',
                                                               cval=0)
-                                    
+
                                     # Only expand pixels that are not isolated.
                                     clustered_donotuse = temp_donotuse & (neighbor_count > dqarr_kwargs.get('neighbor_threshold', 5))
                                     neighbors_mask = np.array([[0,1,0],[1,1,1],[0,1,0]], bool)
                                     expanded = binary_dilation(clustered_donotuse, structure=neighbors_mask)
-                                    
+
                                     # Keep all original DO_NOT_USE pixels, and add neighbors if clustered.
                                     temp_donotuse = temp_donotuse | expanded
 
@@ -1281,7 +1284,7 @@ class ImageTools():
                                     log.info(f"    Slice {i}: neighbors added = {added}")
 
                                 # Combine with NaNs and mask out NON_SCIENCE.
-                                pxdq_temp[i] = (np.isnan(data[i]) | temp_donotuse) & (~temp_nonsci[i])
+                                pxdq_temp[i] = (np.isnan(data[i]) | temp_donotuse) & (~temp_nonsci)
                         elif method_split[k] == 'sigclip':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             sigclip_kwargs['crpix1'] = self.database.obs[key]['CRPIX1'][j] - 1
