@@ -802,8 +802,7 @@ class ImageTools():
                 nanmaskfile = ut.write_msk(fitsfile, nanmask, fitsfile, '_nanmask.fits')
 
                 # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, nints=nints, effinttm=effinttm,
-                                         nanmaskfile=nanmaskfile)
+                self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
     def subtract_background_godoy(self,
                                   types=['SCI', 'REF'],
