@@ -3643,7 +3643,7 @@ class ImageTools():
                                           filename=output_dir + '/' +self.database.obs[key]['FITSFILE'][j].split('/')[-1].split('.fits')[0])
 
                         # Apply the same shift to all SCI and REF frames.
-                        shifts += [np.array([-(MCMCTools.best_fit_params[0] - (data.shape[-1] - 1) / 2), -(MCMCTools.best_fit_params[1] - (data.shape[-2] - 1) / 2)])]
+                        shifts += [np.array([-(MCMCTools.best_fit_params[0] - (data.shape[-1]) // 2), -(MCMCTools.best_fit_params[1] - (data.shape[-2]) // 2)])]
 
                         mask_shifts += [np.array([0., 0.])]
                         maskoffs_temp += [np.array([0., 0.])]
@@ -3651,8 +3651,8 @@ class ImageTools():
                     xoffset = 0  # arcsec
                     yoffset = 0  # arcsec
 
-                    starcenx = (data.shape[-1]-1) / 2. - shifts[0][0] + 1  # 1-indexed
-                    starceny = (data.shape[-2]-1) / 2. - shifts[0][1] + 1  # 1-indexed
+                    starcenx = (data.shape[-1]) // 2. - shifts[0][0] + 1  # 1-indexed
+                    starceny = (data.shape[-2]) // 2. - shifts[0][1] + 1  # 1-indexed
 
                     maskcenx = None
                     maskceny = None
@@ -3933,12 +3933,14 @@ class ImageTools():
                     # Other data types.
                     else:
                         for k in range(data.shape[0]):
+
                             # Recenter SCI and REF frames to subpixel precision
                             # using the 'BCEN' routine from XARA.
                             # https://github.com/fmartinache/xara
                             if subpix_first_sci_only == False or (j == ww_sci[0] and k == 0):
                                 pp = core.determine_origin(data[k], algo='BCEN')
-                                shifts += [np.array([-(pp[0] - (data.shape[-1]-1)/2), -(pp[1] - (data.shape[-2]-1)/2)])]
+                                # shifts += [np.array([-(pp[0] - (data.shape[-1]-1)/2), -(pp[1] - (data.shape[-2]-1)/2)])]
+                                shifts += [np.array([-(pp[0] - (data.shape[-1])//2), -(pp[1] - (data.shape[-2])//2)])]
                                 mask_shifts += [np.array([0., 0.])]
                                 maskoffs_temp += [np.array([0., 0.])]
                             else:
@@ -3946,8 +3948,8 @@ class ImageTools():
                                 mask_shifts += [np.array([0., 0.])]
                                 maskoffs_temp += [np.array([0., 0.])]
 
-                        xoffset = 0  # arcsec
-                        yoffset = 0  # arcsec
+                        xoffset = 0.  # arcsec
+                        yoffset = 0.  # arcsec
 
                         # Update star center (image center - shift).
                         starcenx = (data.shape[-1]) // 2. - shifts[0][0] + 1  # 1-indexed
@@ -5288,26 +5290,37 @@ class ImageTools():
                     else:
                         shifts = []
                         for k in range(data.shape[0]):
-                            xshift = (align_shift_star[j][k][0] if not isinstance(align_shift_star[j], types.BuiltinFunctionType) else 0.0) + \
-                                     (center_shift_star[j][k][0] if not isinstance(center_shift_star[j], types.BuiltinFunctionType) else 0.0)
-                            yshift = (align_shift_star[j][k][1] if not isinstance(align_shift_star[j], types.BuiltinFunctionType) else 0.0) + \
-                                     (center_shift_star[j][k][1] if not isinstance(center_shift_star[j], types.BuiltinFunctionType) else 0.0)
+                            xshift = align_shift_star[j][k][0] + center_shift_star[j][k][0]
+                            yshift = align_shift_star[j][k][1] + center_shift_star[j][k][1]
                             shifts += [np.array([xshift, yshift])]
 
-                            data_shift += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
-                            erro_shift += [ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
+                            this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
+                                                   pad_amount=shiftpad, method=method, kwargs=kwargs)
+                            this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+                                                   pad_amount=shiftpad, method=method, kwargs=kwargs)
 
-                            if nanmask is not None:
-                                # nanmask shift preservesing 0/1 and NaN values.
-                                nanmask = ut.imshift(nanmask, [shifts[k][0], shifts[k][1]], method='spline',
-                                                     pad_amount=shiftpad, kwargs={'mode': 'constant'})
+                            # Recenter SCI and REF frames to integer pixel
+                            # precision by rolling the image.
+                            ww_max = np.unravel_index(np.nanargmax(this_data), this_data.shape)
+                            if ww_max != (this_data.shape[-2] // 2, this_data.shape[-1] // 2):
+                                dx, dy = this_data.shape[-1] // 2 - ww_max[1], this_data.shape[-2] // 2 - ww_max[0]
+                                shifts[-1][0] += dx
+                                shifts[-1][1] += dy
+                                data_shift += [np.roll(np.roll(this_data, dx, axis=1), dy, axis=0)]
+                                erro_shift += [np.roll(np.roll(this_erro, dx, axis=1), dy, axis=0)]
+                            else:
+                                data_shift += [this_data]
+                                erro_shift += [this_erro]
 
-                                nanmask[np.isnan(nanmask)] = 1
-                                nanmask = (nanmask >= 0.5).astype(np.float32)
-                                nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j] + shifts[0][0] + shiftpad
-                                nanmaskceny = self.database.obs[key]['NANMASKCENY'][j] + shifts[0][1] + shiftpad
+                        if nanmask is not None:
+                            # nanmask shift preservesing 0/1 and NaN values.
+                            nanmask = ut.imshift(nanmask, [shifts[k][0], shifts[k][1]], method='spline',
+                                                 pad_amount=shiftpad, kwargs={'mode': 'constant'})
+
+                            nanmask[np.isnan(nanmask)] = 1
+                            nanmask = (nanmask >= 0.5).astype(np.float32)
+                            nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j] + shifts[0][0] + shiftpad
+                            nanmaskceny = self.database.obs[key]['NANMASKCENY'][j] + shifts[0][1] + shiftpad
 
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
