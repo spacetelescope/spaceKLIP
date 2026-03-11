@@ -15,6 +15,7 @@ import json
 import types
 import copy
 import lmfit
+import astrofix
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
@@ -1131,7 +1132,7 @@ class ImageTools():
             - sigclip: use sigma clipping to identify additional bad pixels.
 
             - custom: use a custom bad pixel map
-
+            
             The default is 'dqarr'.
         set_dq_zero : bool, optional
             Toggle to start a new empty DQ array, or built upon the existing array.
@@ -1500,6 +1501,7 @@ class ImageTools():
                          localmed_kwargs=None,
                          medfilt_kwargs=None,
                          interp2d_kwargs=None,
+                         astrofix_kwargs=None,
                          types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                          subdir='bpcleaned',
                          restrict_to=None,
@@ -1523,6 +1525,8 @@ class ImageTools():
             - medfilt: replace bad pixels with an image plane median filter.
 
             - interp2d: replace bad pixels with an interpolation of neighbouring pixels.
+            
+            - astrofix: is an astronomical image correction algorithm based on Gaussian Process Regression.
 
             The default is 'timemed+localmed+medfilt'.
         timemed_kwargs : dict, optional
@@ -1556,7 +1560,10 @@ class ImageTools():
                 Kernel size of the median filter to be used. The default is 4.
 
             The default is {}.
+        astrofix_kwargs: dict, optional
+            Keyword arguments for the 'astrofix' method. Available keywords are:
 
+            The default is {}.
         types : list of str, optional
             List of data types for which bad pixels shall be identified and
             fixed. The default is ['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA',
@@ -1592,6 +1599,10 @@ class ImageTools():
             interp2d_kwargs = {}
         else:
             interp2d_kwargs = interp2d_kwargs.copy()
+        if astrofix_kwargs is None:
+            astrofix_kwargs = {}
+        else:
+            astrofix_kwargs = astrofix_kwargs.copy()
 
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
@@ -1631,7 +1642,7 @@ class ImageTools():
                 if self.database.obs[key]['TYPE'][j] in types:
                     method_split = method.split('+')
 
-                    spatial = ['localmed', 'medfilt', 'interp2d']
+                    spatial = ['localmed', 'medfilt', 'interp2d', 'astofix']
                     # If localmed and medfilt in cleaning, can't run both
                     if len(set(method_split) & set(spatial)) > 1:
                         log.info('  --> WARNING: Multiple spatial cleaning routines detected!')
@@ -1641,7 +1652,7 @@ class ImageTools():
                         log.info('  --> localmed is partially redundant with other methods')
                         log.info('      --> if run first, large clusters of bad pixels may not be fully cleaned.')
 
-                    # Loop over methods
+                    # Loop over methods.
                     for k in range(len(method_split)):
                         head, tail = os.path.split(fitsfile)
                         log.info('  --> Method ' + method_split[k] + ': ' + tail)
@@ -1653,6 +1664,8 @@ class ImageTools():
                             self.fix_bad_pixels_medfilt(data, erro, pxdq_temp, medfilt_kwargs)
                         elif method_split[k] == 'interp2d':
                             self.fix_bad_pixels_interp2d(data, erro, pxdq_temp, interp2d_kwargs)
+                        elif method_split[k] == 'astrofix':
+                            self.fix_bad_pixels_astrofix(data, erro, pxdq_temp, astrofix_kwargs, plot=plot)
                         else:
                             log.info('  --> Unknown method ' + method_split[k] + ': skipped')
 
@@ -2518,6 +2531,106 @@ class ImageTools():
             pxdq[i][ww[i]] = 0
 
         pass
+        
+    def fix_bad_pixels_astrofix(self,
+                                data,
+                                erro,
+                                pxdq,
+                                astrofix_kwargs=None,
+                                plot=False):
+        """
+        Replace bad pixels with an algorithm based on Gaussian Process Regression.
+        It trains itself to apply the optimal interpolation kernel for each image,
+        performing multiple times better than median replacement and interpolation with a fixed kernel.
+
+        Parameters
+        ----------
+        data : 3D-array
+            Input images.
+        erro : 3D-array
+            Input image uncertainties.
+        pxdq : 3D-array
+            Input binary bad pixel maps (1 = bad, 0 = good). Will be updated by
+            the routine to exclude the fixed bad pixels.
+        astrofix_kwargs : dict, optional
+            Keyword arguments for the 'astrofix' method. Available keywords are:
+
+            The default is {}.
+        plot : bool, optional
+            Plot diagnostics? 
+
+        Returns
+        -------
+        None.
+        """
+        
+        # Protection for mutability.
+        if astrofix_kwargs is None:
+            astrofix_kwargs = {}
+        else:
+            astrofix_kwargs = astrofix_kwargs.copy()
+            
+        # Fix bad pixels using astrofix.
+        pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
+        ww = (pxdq != 0) & (~pxmask_nonsci)
+        log.info('  --> Method astrofix: fixing %.0f bad pixel(s) -- %.2f%%' % (np.sum(ww), 100. * np.sum(ww) / np.prod(ww.shape)))
+
+        # NaN pixels to be replaced.
+        data_temp = data.copy()
+        data_temp[np.where(np.isnan(data_temp))] = 0
+        data_temp[ww] = np.nan
+        
+        fixed_img = np.zeros_like(data_temp)
+
+        for i in range(data_temp.shape[0]):
+
+            fixed_img[i], para, TS = astrofix.Fix_Image(
+                data_temp[i], "asnan", max_clip=1
+            )
+        
+            #print("a={},h={}".format(para[0],para[1]))
+            #print("Number of training set pixels: {}".format(np.count_nonzero(TS)))
+        
+        if plot:
+            from mpl_toolkits.axes_grid1 import make_axes_locatable
+            # -----------------------------
+            # Diagnostic plot
+            # -----------------------------
+
+            zoom = None#(100, 200, 100, 200)
+
+            frame = -1
+
+            if zoom is not None:
+                y1, y2, x1, x2 = zoom
+                images = [
+                    data[frame, y1:y2, x1:x2],
+                    fixed_img[frame, y1:y2, x1:x2],
+                ]
+            else:
+                images = [
+                    data[frame],
+                    fixed_img[frame],
+                ]
+            titles = ["Original", "Fixed"]
+
+            fig, ax = plt.subplots(1, 2, figsize=(18, 7))
+
+            for i in range(2):
+
+                im = ax[i].imshow(images[i], vmin=np.nanpercentile(images[i], 10), vmax=np.nanpercentile(images[i], 100))
+
+                divider = make_axes_locatable(ax[i])
+                cax = divider.append_axes("bottom", size="5%", pad=0.2)
+
+                fig.colorbar(im, ax=ax[i], cax=cax, orientation="horizontal")
+
+                ax[i].set_title(titles[i], fontsize=30, pad=15)
+                ax[i].axis("off")
+
+            plt.tight_layout()
+            plt.show()
+    
 
     def fix_bad_pixels_interp2d(self,
                                 data,
