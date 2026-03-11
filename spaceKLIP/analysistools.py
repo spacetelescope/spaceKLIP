@@ -1115,7 +1115,7 @@ class AnalysisTools():
                     offsetpsf_func = JWST_PSF(apername,
                                               filt,
                                               date=date,
-                                              fov_pix=65,
+                                              fov_pix=fov_pix,
                                               oversample=2,
                                               sp=sed,
                                               use_coeff=False)
@@ -1326,11 +1326,7 @@ class AnalysisTools():
                         # Offset PSF that is not affected by the coronagraphic
                         # mask, but only the Lyot stop.
                         psf_no_coronmsk = offsetpsf_func.psf_off
-                    else:
-                        # EPSF
-                        y, x = np.mgrid[:65, :65]
-                        psf_no_coronmsk = offsetpsf_func.evaluate(x, y, 1, 65//2, 65//2)
-                        # offsetpsf_func.image_mask = None
+
                     # Initial guesses for the fit parameters.
                     guess_dx = companions[k][0] / pxsc_arcsec  # pix
                     guess_dy = companions[k][1] / pxsc_arcsec  # pix
@@ -1407,8 +1403,7 @@ class AnalysisTools():
                             scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
                             # scale_factor_avg += [scale_factor]
                         else:
-                            # Generate the scaling factor for the  EPSF.
-                            # Since there is no coronagraphic mask, it is only the total flux of the epsf
+                            # Since there is no coronagraphic mask, it is 1
                             scale_factor = 1 #/ np.sum(psf_no_coronmsk)
                         scale_factor_avg += [scale_factor]
 
@@ -1425,15 +1420,13 @@ class AnalysisTools():
                                                                normalize='exit_pupil')
 
                             # Normalize model offset PSF by the flux of the star.
-                            offsetpsf *= fzero[filt] / 10**(mstar[filt] / 2.5) / 1e6 / pxar  # MJy/sr
                         else:
                             # Normalize model EPSF to a total integrated flux
                             # of 1 at infinity.
                             # EPSF
                             y, x = np.mgrid[:fov_pix, :fov_pix]
                             offsetpsf = offsetpsf_func.evaluate(x, y, 1, fov_pix // 2, fov_pix // 2)
-                            offsetpsf *= fzero[filt] / 10**(mstar[filt] / 2.5) / 1e6 / pxar  # MJy/sr
-                        
+                        offsetpsf *= fzero[filt] / 10**(mstar[filt] / 2.5) / 1e6 / pxar  # MJy/sr
                         # Apply scale factor to incorporate the coronagraphic
                         # mask througput.
                         # NOTE: There is no need to apply a correction for the substrate
