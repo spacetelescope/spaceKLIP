@@ -67,6 +67,8 @@ def run_obs(database,
             Verbose mode? The default is False.
         - save_rolls : bool, optional
             Save each processed roll separately? The default is False.
+        - save_full_output : bool, optional
+            Save the full output cube before flattening? The default is False.
 
         The default is {}.
     subdir : str, optional
@@ -106,7 +108,11 @@ def run_obs(database,
         kwargs_temp['save_ints'] = False
         kwargs_temp['save_rolls'] = False
     else:
+        # Note pyKLIP uses save_ints as the keyword for this, but we want to use save_rolls in our pipeline for clarity,
+        # so we need to set save_ints to the same value as save_rolls.
         kwargs_temp['save_ints'] = kwargs_temp['save_rolls']
+    if 'save_full_output' not in kwargs_temp.keys():
+        kwargs_temp['save_full_output'] = False
     if 'highpass' not in kwargs_temp.keys():
         kwargs_temp['highpass'] = False
     
@@ -156,9 +162,12 @@ def run_obs(database,
                     kwargs_temp['annuli'] = annu
                     kwargs_temp['subsections'] = subs
                     kwargs_temp_temp = kwargs_temp.copy()
+
+                    # Need to cleanup some kwargs that we're using but pyKLIP doesn't
+                    del kwargs_temp_temp['save_full_output']
                     del kwargs_temp_temp['save_rolls']
                     parallelized.klip_dataset(**kwargs_temp_temp)
-                    
+
                     # Get reduction path.
                     datapath = os.path.join(output_dir, fileprefix + '-KLmodes-all.fits')
                     datapaths += [datapath]
@@ -214,8 +223,20 @@ def run_obs(database,
                         hdul[0].header['BLURFWHM'] = database.obs[key]['BLURFWHM'][ww_sci[0]]
                     hdul.writeto(datapath, output_verify='fix', overwrite=True)
                     hdul.close()
-                    
-                    # Save each roll separately.
+
+                    # If requested, save the full cube before flattening
+                    if kwargs_temp['save_full_output']:
+                        # Cube is held in dataset.output
+                        intsfile = os.path.join(output_dir, fileprefix + '-KLmodes-all_fulloutput.fits')
+                        hdul_full = fits.HDUList([fits.PrimaryHDU(data=dataset.output)])
+                        # Set header keywords for the full cube as well, using the same header as the final output
+                        # but with updated NAXIS and NINTS.
+                        hdul_full[0].header = hdul[0].header.copy()
+                        hdul_full[0].header['NAXIS'] = len(dataset.output.shape)
+                        hdul_full[0].header['NINTS'] = dataset.output.shape[0]
+                        hdul_full.writeto(intsfile, output_verify='fix', overwrite=True)
+
+                    # If requested, save each roll separately.
                     if kwargs_temp['save_ints']:
                         n_roll = 1
                         for j in ww_sci:
