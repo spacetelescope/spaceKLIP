@@ -374,6 +374,7 @@ class ImageTools():
 
     def pad_frames(self,
                    npix=1,
+                   tshape=None,
                    cval=np.nan,
                    types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
                    subdir='padded'):
@@ -387,6 +388,11 @@ class ImageTools():
             number of pixels will be padded on each side. If list of four int,
             a different number of pixels can be padded on the [left, right,
             bottom, top] of the frames. The default is 1.
+        npix : int or list of four int, optional
+            target shape in pixels to reshape the frame into it. If int, the same
+            shape will be applied to the each axis. If list of 2 int,
+            a different shape owill be applied [x, y] to the frames.
+            If none skip and use the default npix. The default is None.
         cval : float, optional
             Fill value for the padded pixels. The default is nan.
         types : list of str, optional
@@ -402,11 +408,17 @@ class ImageTools():
 
         """
 
-        # Check input.
-        if isinstance(npix, int):
-            npix = [npix, npix, npix, npix]  # left, right, bottom, top
-        if len(npix) != 4:
-            raise UserWarning('Parameter npix must either be an int or a list of four int (left, right, bottom, top)')
+        if tshape is not None:
+            if isinstance(tshape, int):
+                tshape = [tshape, tshape]  # y,x
+            if len(tshape) != 2:
+                raise UserWarning( 'Parameter tshape must either be an int or a list of 2 int (y,x)')
+        else:
+            # Check input.
+            if isinstance(npix, int):
+                npix = [npix, npix, npix, npix]  # left, right, bottom, top
+            if len(npix) != 4:
+                raise UserWarning('Parameter npix must either be an int or a list of four int (left, right, bottom, top)')
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -442,6 +454,10 @@ class ImageTools():
                     head, tail = os.path.split(fitsfile)
                     log.info('  --> Frame padding: ' + tail)
                     sh = data.shape
+                    if tshape is not None:
+                        y_shape = np.array([(tshape[0]-sh[1])//2,(tshape[0]-sh[1])//2]) if (tshape[0]-sh[1])%2 == 0 else np.array([(tshape[0]-sh[1])//2,(tshape[0]-sh[1])//2+1])
+                        x_shape = np.array([(tshape[1]-sh[2])//2,(tshape[1]-sh[2])//2]) if (tshape[1]-sh[2])%2 == 0 else np.array([(tshape[1]-sh[2])//2,(tshape[1]-sh[2])//2+1])
+                        npix = np.append(x_shape,y_shape)
                     data = np.pad(data, ((0, 0), (npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=cval)
                     erro = np.pad(erro, ((0, 0), (npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=cval)
                     pxdq = np.pad(pxdq, ((0, 0), (npix[2], npix[3]), (npix[0], npix[1])), mode='constant', constant_values=0)
@@ -457,7 +473,7 @@ class ImageTools():
                     maskcenx += npix[0]
                     maskceny += npix[2]
                     log.info('  --> Frame padding: old shape = ' + str(sh[1:]) + ', new shape = ' + str(data.shape[1:]) + ', fill value = %.2f' % cval)
-
+                    pass
                 # Write FITS file and PSF mask.
                 head_sci['CRPIX1'] = crpix1
                 head_sci['CRPIX2'] = crpix2
