@@ -705,7 +705,7 @@ class AnalysisTools():
                         kwargs_inj['RA'] = tab[-1]['RA']  # arcsec
                         kwargs_inj['DEC'] = tab[-1]['DEC']  # arcsec
                         kwargs_inj['CON'] = tab[-1]['CON']
-                        pa = np.rad2deg(np.arctan2(ra, dec))  # deg
+                        pa = np.rad2deg(np.arctan2(kwargs_inj['RA'], kwargs_inj['DEC']))  # deg
                         kwargs_inj['thetas'] = [pa + 90. - all_pa for all_pa in all_pas]
 
                     # Run the injection and recovery process
