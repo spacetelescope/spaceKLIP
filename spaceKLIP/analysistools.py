@@ -684,6 +684,30 @@ class AnalysisTools():
                     all_inj_fluxes = np.load(save_string+'_injrec_inj_fluxes.npy')
                     all_retr_fluxes = np.load(save_string+'_injrec_retr_fluxes.npy')
                 else:
+                    kwargs_inj={}
+                    if 'binarity' in kwargs.keys():
+                        all_pas = []
+                        kwargs_inj['binarity'] = kwargs['binarity']
+                        kwargs_inj['pxsc_arcsec'] = pxsc_arcsec
+                        ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+                        for ww in ww_sci:
+                            nints = self.database.obs[key]['NINTS'][ww]
+                            roll_ref = self.database.obs[key]['ROLL_REF'][ww]  # deg
+                            all_pas.extend([roll_ref for ni in range(nints)])
+
+                        output_dir_extraction = os.path.join(os.path.join(self.database.output_dir, kwargs['extraction_subdir']),'KL%.0f' % kwargs['klmode'])
+                        output_dir_comp = os.path.join(output_dir_extraction, 'C%.0f' % kwargs['C'])
+                        output_dir_fm = os.path.join(output_dir_comp, 'KLIP_FM')
+
+                        kwargs_inj['psf_filename'] = os.path.join(output_dir_fm,'FM-' + klip_args['mode'] + '_NANNU' + str(klip_args['annuli']) + '_NSUBS' + str(klip_args[ 'subsections']) + '_' + key + '-psf-KLmodes-all.fits')
+                        kwargs_inj['companion_filename'] =  os.path.join(output_dir_comp, klip_args['mode'] + '_NANNU' + str(klip_args['annuli']) + '_NSUBS' + str(klip_args['subsections']) + '_' + key + '-results_c%.0f' % (kwargs['C']) + '.ecsv')
+                        tab = Table.read(kwargs_inj['companion_filename'], format='ascii')
+                        kwargs_inj['RA'] = tab[-1]['RA']  # arcsec
+                        kwargs_inj['DEC'] = tab[-1]['DEC']  # arcsec
+                        kwargs_inj['CON'] = tab[-1]['CON']
+                        pa = np.rad2deg(np.arctan2(ra, dec))  # deg
+                        kwargs_inj['thetas'] = [pa + 90. - all_pa for all_pa in all_pas]
+
                     # Run the injection and recovery process
                     log.info('Injecting and recovering synthetic companions. This may take a while...')
                     inj_rec = inject_and_recover(pyklip_dataset, 
@@ -694,7 +718,8 @@ class AnalysisTools():
                                                  injection_fluxes=inj_fluxes, 
                                                  klip_args=klip_args,
                                                  retrieve_fwhm=resolution_fwhm,
-                                                 true_companions=companions_pix)
+                                                 true_companions=companions_pix,
+                                                 **kwargs_inj)
 
                     # Unpack everything from the injection and recovery
                     all_inj_seps, all_inj_pas, all_inj_fluxes, all_retr_fluxes = inj_rec
@@ -911,6 +936,7 @@ class AnalysisTools():
                            save_figures=True,
                            use_epsf=False,
                            fov_pix=65,
+                           save_psf = False,
                            **kwargs):
         """
         Extract the best fit parameters of a number of companions from each
@@ -985,6 +1011,8 @@ class AnalysisTools():
             default is 'companions'.
         save_figures : bool, optional
             Save the plots in a PDF?
+        save_psf: bool, optional
+                Save the best fit PSF for each companion as a FITS file.
         
         Returns
         -------
@@ -1482,6 +1510,13 @@ class AnalysisTools():
                     subsections = int(self.database.red[key]['SUBSECTS'][j])
                     fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fmpsf-KLmodes-all.fits')
                     klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-klipped-KLmodes-all.fits')
+
+                    if save_psf:
+                        psfdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-psf-KLmodes-all.fits')
+                        hdu = fits.PrimaryHDU(all_offsetpsfs)
+                        hdul = fits.HDUList([hdu])
+                        hdul.writeto(psfdataset, overwrite=True)
+
                     if overwrite or (not os.path.exists(fmdataset) or not os.path.exists(klipdataset)):
                         
                         # Initialize the pyKLIP FM class. Use sep/pa relative
@@ -2345,7 +2380,8 @@ def inject_and_recover(raw_dataset,
                        injection_fluxes,
                        klip_args,
                        retrieve_fwhm,
-                       true_companions=None):
+                       true_companions=None,
+                       **kwargs):
     '''
     Function to inject synthetic PSFs into a pyKLIP dataset, then perform
     KLIP subtraction, then calculate the flux losses from the KLIP process. 
@@ -2429,7 +2465,26 @@ def inject_and_recover(raw_dataset,
                                                                              Nsep*Npa))
     else:
         log.info('--> All {} source positions suitable for injection.'.format(Nsep*Npa))
-                
+
+    if kwargs['binarity']:
+        # remove the bright companion before injecting the fake companions to calibrate contrast ona clean residual.
+        pxsc_arcsec = kwargs['pxsc_arcsec']
+        thetas = kwargs['thetas']
+
+        dataset = copy.deepcopy(raw_dataset)
+        all_offsetpsfs_nohpf = fits.getdata(kwargs['psf_filename'])
+        ra = kwargs['RA']  # arcsec
+        dec = kwargs['DEC']  # arcsec
+        con = kwargs['CON']
+        inputflux = -con * np.array(all_offsetpsfs_nohpf)  # negative to remove companion
+        sep = np.sqrt(ra ** 2 + dec ** 2) / pxsc_arcsec  # pix
+        pa = np.rad2deg(np.arctan2(ra, dec))  # deg
+        fakes.inject_planet(frames=dataset.input, centers=dataset.centers, inputflux=inputflux,
+                            astr_hdrs=dataset.wcs, radius=sep, pa=pa, thetas=np.array(thetas),
+                            field_dependent_correction=None)
+        raw_dataset = copy.deepcopy(dataset)
+        pass
+
     # Want to keep going until a companion has been injected and recovered
     # at each given separation and position angle.
     counter = 1
