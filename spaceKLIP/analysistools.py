@@ -2463,8 +2463,10 @@ def inject_and_recover(raw_dataset,
                     if dist < tcomp_rad:
                         list_of_injected += [pos_id]
     if len(list_of_injected) != 0:
-        log.info('--> {}/{} source positions not suitable for injection.'.format(len(list_of_injected), 
-                                                                             Nsep*Npa))
+        if len(list_of_injected) < Nsep*Npa:
+            log.info('--> {}/{} source positions not suitable for injection.'.format(len(list_of_injected),Nsep*Npa))
+        else:
+            raise ValueError('--> All {} source positions not suitable for injection.'.format(Nsep*Npa))
     else:
         log.info('--> All {} source positions suitable for injection.'.format(Nsep*Npa))
 
