@@ -707,6 +707,8 @@ class AnalysisTools():
                         kwargs_inj['CON'] = tab[-1]['CON']
                         pa = np.rad2deg(np.arctan2(kwargs_inj['RA'], kwargs_inj['DEC']))  # deg
                         kwargs_inj['thetas'] = [pa + 90. - all_pa for all_pa in all_pas]
+                    else:
+                        kwargs_inj['binarity'] = False
 
                     # Run the injection and recovery process
                     log.info('Injecting and recovering synthetic companions. This may take a while...')
