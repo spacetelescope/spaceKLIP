@@ -57,6 +57,10 @@ def run_obs(database,
         - subsections : list of int, optional
             Numbers of subtraction subsections that shall be looped over. The
             default is [1].
+        - annuli_spacing : str, optional
+            How to distribute the annuli radially. Options are 'constant'
+            (equally spaced), 'log' (logarithmically spaced), and 'linear'
+            (linearly spaced). The default is 'constant'.
         - numbasis : list of int, optional
             Number of KL modes that shall be looped over. The default is [1, 2,
             5, 10, 20, 50, 100].
@@ -115,7 +119,9 @@ def run_obs(database,
         kwargs_temp['save_full_output'] = False
     if 'highpass' not in kwargs_temp.keys():
         kwargs_temp['highpass'] = False
-    
+    if 'annuli_spacing' not in kwargs_temp.keys():
+        kwargs_temp['annuli_spacing'] = 'constant'
+
     # Set output directory.
     output_dir = os.path.join(database.output_dir, subdir)
     if not os.path.exists(output_dir):
@@ -203,6 +209,7 @@ def run_obs(database,
                     hdul[0].header['MODE'] = mode
                     hdul[0].header['ANNULI'] = annu
                     hdul[0].header['SUBSECTS'] = subs
+                    hdul[0].header['ANNSPAC'] = kwargs_temp['annuli_spacing']
                     hdul[0].header['BUNIT'] = database.obs[key]['BUNIT'][ww_sci[0]]
                     w = wcs.WCS(head_sci)
                     _rotate_wcs_hdr(w, database.obs[key]['ROLL_REF'][ww_sci[0]])

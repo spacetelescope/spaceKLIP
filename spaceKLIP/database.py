@@ -710,6 +710,7 @@ class Database():
         MODE = []
         ANNULI = []
         SUBSECTS = []
+        ANNSPAC = []
         KLMODES = []
         BUNIT = []
         CRPIX1 = []  # pix
@@ -786,6 +787,7 @@ class Database():
                 MODE += ['RDI']
                 ANNULI += [1]
                 SUBSECTS += [1]
+                ANNSPAC += ['constant']
                 try:
                     KLMODES += [str(head['KLMODE0'])]
                 except KeyError:
@@ -795,6 +797,7 @@ class Database():
                 MODE += [head['MODE']]
                 ANNULI += [head['ANNULI']]
                 SUBSECTS += [head['SUBSECTS']]
+                ANNSPAC += [head.get('ANNSPAC', 'constant')]
                 klmodes = str(head['KLMODE0'])
                 j = 1
                 while True:
@@ -850,6 +853,7 @@ class Database():
         MODE = np.array(MODE)
         ANNULI = np.array(ANNULI)
         SUBSECTS = np.array(SUBSECTS)
+        ANNSPAC = np.array(ANNSPAC)
         KLMODES = np.array(KLMODES)
         BUNIT = np.array(BUNIT)
         CRPIX1 = np.array(CRPIX1)
@@ -900,6 +904,7 @@ class Database():
                                    'MODE',
                                    'ANNULI',
                                    'SUBSECTS',
+                                   'ANNSPAC',
                                    'KLMODES',
                                    'BUNIT',
                                    'BLURFWHM',
@@ -932,6 +937,7 @@ class Database():
                                    'object',
                                    'int',
                                    'int',
+                                   'object',
                                    'object',
                                    'object',
                                    'float',
@@ -970,6 +976,7 @@ class Database():
                              MODE[ww[j]],
                              ANNULI[ww[j]],
                              SUBSECTS[ww[j]],
+                             ANNSPAC[ww[j]],
                              KLMODES[ww[j]],
                              BUNIT[ww[j]],
                              BLURFWHM[ww][j],

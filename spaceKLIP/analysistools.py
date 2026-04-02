@@ -653,6 +653,7 @@ class AnalysisTools():
                 klip_args['mode'] = self.database.red[key]['MODE'][j]
                 klip_args['annuli'] = self.database.red[key]['ANNULI'][j]
                 klip_args['subsections'] = self.database.red[key]['SUBSECTS'][j]
+                klip_args['annuli_spacing'] = self.database.red[key]['ANNSPAC'][j]
                 klip_args['numbasis'] = [int(nb) for nb in self.database.red[key]['KLMODES'][j].split(',')]
                 klip_args['algo'] = 'klip' #Currently not logged, may need changing in future. 
                 _, _, maxnumbasis = get_pyklip_filepaths(self.database, key, return_maxbasis=True) # ensure maxnumbasis is same as for rawcon / klipsub reduction 
@@ -1406,6 +1407,7 @@ class AnalysisTools():
                                         fileprefix='FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key,
                                         annuli=annuli,
                                         subsections=subsections,
+                                        annuli_spacing=self.database.red[key]['ANNSPAC'][j],
                                         movement=1.,
                                         numbasis=klmodes,
                                         maxnumbasis=maxnumbasis,
@@ -2039,6 +2041,7 @@ class AnalysisTools():
                                                   fileprefix=fileprefix,
                                                   annuli=annuli,
                                                   subsections=subsections,
+                                                  annuli_spacing=self.database.red[key]['ANNSPAC'][j],
                                                   movement=1.,
                                                   numbasis=klmodes,
                                                   maxnumbasis=maxnumbasis,
