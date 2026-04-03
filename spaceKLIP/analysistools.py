@@ -173,7 +173,12 @@ class AnalysisTools():
                 log.info('Analyzing file ' + self.database.red[key]['FITSFILE'][j])
 
                 # Get stellar magnitudes and filter zero points.
-                mstar, fzero = get_stellar_magnitudes(starfile, spectral_type, self.database.red[key]['INSTRUME'][j], output_dir=output_dir, **kwargs)  # vegamag, Jy
+                mstar, fzero, fzero_flam, fzero_wm2um = get_stellar_magnitudes(
+                    starfile, spectral_type,
+                    self.database.red[key]['INSTRUME'][j],
+                    self.database.red[key]['DETECTOR'][j],
+                    self.database.red[key]['EXP_TYPE'][j],
+                    output_dir=output_dir, **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
 
                 tp_comsubst = ut.get_tp_comsubst(self.database.red[key]['INSTRUME'][j],
                                                  self.database.red[key]['SUBARRAY'][j],
@@ -586,11 +591,13 @@ class AnalysisTools():
                     starfile, spectral_type_info = cci.readline().strip('\n').split(' /// ')
                     spectral_type = spectral_type_info.split(': ')[1]
                     starfile = os.path.join(rawcon_dir, starfile.replace('#',''))
-                mstar, fzero = get_stellar_magnitudes(starfile,
+                mstar, fzero, _, _ = get_stellar_magnitudes(starfile,
                                                       spectral_type,
                                                       self.database.red[key]['INSTRUME'][j],
+                                                      self.database.red[key]['DETECTOR'][j],
+                                                      self.database.red[key]['EXP_TYPE'][j],
                                                       output_dir=output_dir,
-                                                      **kwargs)  # vegamag, Jy
+                                                      **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
                 filt = self.database.red[key]['FILTER'][j]
                 fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
                 fstar *= ((180./np.pi)*3600.)**2/pxsc_arcsec**2 # MJy/sr
@@ -986,8 +993,13 @@ class AnalysisTools():
             for j in range(nfitsfiles):
                 
                 # Get stellar magnitudes and filter zero points.
-                mstar, fzero, fzero_si = get_stellar_magnitudes(starfile, spectral_type, self.database.red[key]['INSTRUME'][j], return_si=True, output_dir=output_dir,**kwargs)  # vegamag, Jy, erg/cm^2/s/A
-                
+                mstar, fzero, fzero_flam, fzero_wm2um = get_stellar_magnitudes(
+                    starfile, spectral_type,
+                    self.database.red[key]['INSTRUME'][j],
+                    self.database.red[key]['DETECTOR'][j],
+                    self.database.red[key]['EXP_TYPE'][j],
+                    output_dir=output_dir, **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
+
                 # Get COM substrate throughput.
                 tp_comsubst = ut.get_tp_comsubst(self.database.red[key]['INSTRUME'][j],
                                                  self.database.red[key]['SUBARRAY'][j],
@@ -1103,10 +1115,16 @@ class AnalysisTools():
                                        'DEC_ERR',
                                        'FLUX_JY',
                                        'FLUX_JY_ERR',
-                                       'FLUX_SI',
-                                       'FLUX_SI_ERR',
-                                       'FLUX_SI_ALT',
-                                       'FLUX_SI_ALT_ERR',
+                                       'FLUX_FLAM',
+                                       'FLUX_FLAM_ERR',
+                                       'FLUX_WM2UM',
+                                       'FLUX_WM2UM_ERR',
+                                       'FSTAR_JY',
+                                       'FSTAR_JY_ERR',
+                                       'FSTAR_FLAM',
+                                       'FSTAR_FLAM_ERR',
+                                       'FSTAR_WM2UM',
+                                       'FSTAR_WM2UM_ERR',
                                        'CON',
                                        'CON_ERR',
                                        'DELMAG',
@@ -1151,6 +1169,12 @@ class AnalysisTools():
                                        'float',
                                        'float',
                                        'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
                                        'object',
                                        'float',
                                        'float',
@@ -1169,10 +1193,16 @@ class AnalysisTools():
                                        'DEC_ERR',
                                        'FLUX_JY',
                                        'FLUX_JY_ERR',
-                                       'FLUX_SI',
-                                       'FLUX_SI_ERR',
-                                       'FLUX_SI_ALT',
-                                       'FLUX_SI_ALT_ERR',
+                                       'FLUX_FLAM',
+                                       'FLUX_FLAM_ERR',
+                                       'FLUX_WM2UM',
+                                       'FLUX_WM2UM_ERR',
+                                       'FSTAR_JY',
+                                       'FSTAR_JY_ERR',
+                                       'FSTAR_FLAM',
+                                       'FSTAR_FLAM_ERR',
+                                       'FSTAR_WM2UM',
+                                       'FSTAR_WM2UM_ERR',
                                        'CON',
                                        'CON_ERR',
                                        'DELMAG',
@@ -1187,6 +1217,12 @@ class AnalysisTools():
                                        'TP_COMSUBST',
                                        'FITSFILE'),
                                 dtype=('int',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
+                                       'float',
                                        'float',
                                        'float',
                                        'float',
@@ -1629,24 +1665,25 @@ class AnalysisTools():
                             plt.close(fig)
 
                             # Write the MCMC fit results into a table.
-                            flux_jy = fma.fit_flux.bestfit * guess_flux
-                            flux_jy *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            flux_jy_err = fma.fit_flux.error * guess_flux
-                            flux_jy_err *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            flux_si = fma.fit_flux.bestfit * guess_flux
-                            flux_si *= fzero_si[filt] / 10**(mstar[filt] / 2.5)  # erg/cm^2/s/A
-                            flux_si *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                            flux_si_err = fma.fit_flux.error * guess_flux
-                            flux_si_err *= fzero_si[filt] / 10**(mstar[filt] / 2.5)  # erg/cm^2/s/A
-                            flux_si_err *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                            flux_si_alt = flux_jy * 1e-26 * 299792458. / (1e-6 * self.database.red[key]['CWAVEL'][j])**2 * 1e-6  # W/m^2/um
-                            flux_si_alt_err = flux_jy_err * 1e-26 * 299792458. / (1e-6 * self.database.red[key]['CWAVEL'][j])**2 * 1e-6  # W/m^2/um
-                            delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
-                            delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
                             if isinstance(mstar_err, dict):
                                 mstar_err_temp = mstar_err[filt]
                             else:
                                 mstar_err_temp = mstar_err
+                            rel_err = np.sqrt((fma.fit_flux.error / fma.fit_flux.bestfit)**2 + (mstar_err_temp * np.log(10) / 2.5)**2)
+                            flux_jy = fma.fit_flux.bestfit * guess_flux * fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
+                            flux_jy_err = flux_jy * rel_err  # Jy
+                            flux_flam = fma.fit_flux.bestfit * guess_flux * fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
+                            flux_flam_err = flux_flam * rel_err  # erg/s/cm^2/A
+                            flux_wm2um = fma.fit_flux.bestfit * guess_flux * fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
+                            flux_wm2um_err = flux_wm2um * rel_err  # W/m^2/um
+                            fstar_jy = fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
+                            fstar_jy_err = fstar_jy * (mstar_err_temp * np.log(10) / 2.5)  # Jy
+                            fstar_flam = fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
+                            fstar_flam_err = fstar_flam * (mstar_err_temp * np.log(10) / 2.5)  # erg/s/cm^2/A
+                            fstar_wm2um = fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
+                            fstar_wm2um_err = fstar_wm2um * (mstar_err_temp * np.log(10) / 2.5)  # W/m^2/um
+                            delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
+                            delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
                             appmag = mstar[filt] + delmag  # vegamag
                             appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
                             fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
@@ -1671,10 +1708,16 @@ class AnalysisTools():
                                              fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
                                              flux_jy,
                                              flux_jy_err,
-                                             flux_si,
-                                             flux_si_err,
-                                             flux_si_alt,
-                                             flux_si_alt_err,
+                                             flux_flam,
+                                             flux_flam_err,
+                                             flux_wm2um,
+                                             flux_wm2um_err,
+                                             fstar_jy,
+                                             fstar_jy_err,
+                                             fstar_flam,
+                                             fstar_flam_err,
+                                             fstar_wm2um,
+                                             fstar_wm2um_err,
                                              fma.raw_flux.bestfit * guess_flux,
                                              fma.raw_flux.error * guess_flux,
                                              delmag,  # mag
@@ -1705,10 +1748,16 @@ class AnalysisTools():
                                              fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
                                              flux_jy,
                                              flux_jy_err,
-                                             flux_si,
-                                             flux_si_err,
-                                             flux_si_alt,
-                                             flux_si_alt_err,
+                                             flux_flam,
+                                             flux_flam_err,
+                                             flux_wm2um,
+                                             flux_wm2um_err,
+                                             fstar_jy,
+                                             fstar_jy_err,
+                                             fstar_flam,
+                                             fstar_flam_err,
+                                             fstar_wm2um,
+                                             fstar_wm2um_err,
                                              fma.raw_flux.bestfit * guess_flux,
                                              fma.raw_flux.error * guess_flux,
                                              delmag,  # mag
@@ -1722,39 +1771,39 @@ class AnalysisTools():
                                              scale_factor_avg,
                                              tp_comsubst,
                                              fitsfile))
-                            
+
                             # Write the FM PSF to a file for future plotting.
                             ut.write_fitpsf_images(fma, fitsfile, tab[-1])
-                        
+
                         # Nested sampling.
                         elif fitmethod == 'nested':
                             output_dir_ns = os.path.join(output_dir_comp, 'temp-multinest/')
-                            
+
                             # Initialize PlanetEvidence module.
                             try:
                                 fit = fitpsf.PlanetEvidence(guess_sep, guess_pa, boxsize, output_dir_ns)
                             except ModuleNotFoundError:
                                 raise ModuleNotFoundError('Pymultinest is not installed, try\n\"conda install -c conda-forge pymultinest\"')
                             log.info('  --> Initialized PlanetEvidence module')
-                            
+
                             # Generate FM and data stamps.
                             fit.generate_fm_stamp(fm_frame, [fm_centx, fm_centy], padding=5)
                             fit.generate_data_stamp(data_frame, [data_centx, data_centy], dr=dr, exclusion_radius=exclr)
                             log.info('  --> Generated FM and data stamps')
-                            
+
                             # Set fit kernel.
                             corr_len_label = 'l'
                             fit.set_kernel(fitkernel, [corr_len_guess], [corr_len_label])
                             log.info('  --> Set fit kernel to ' + fitkernel)
-                            
+
                             # Set fit bounds.
                             fit.set_bounds(xrange, yrange, frange, [corr_len_range])
                             log.info('  --> Set fit bounds')
-                            
+
                             # Run the pymultinest fit.
                             fit.multifit()
                             log.info('  --> Finished pymultinest fit')
-                            
+
                             # Get model evidence and posteriors.
                             evidence = fit.fit_stats()
                             fm_evidence = evidence[0]['nested sampling global log-evidence']  # FM evidence
@@ -1762,7 +1811,7 @@ class AnalysisTools():
                             null_evidence = evidence[1]['nested sampling global log-evidence']  # null evidence
                             null_posteriors = evidence[1]['marginals']  # null posteriors
                             evidence_ratio = fm_evidence - null_evidence
-                            
+
                             # Plot the pymultinest fit results.
                             H1, H0 = fit.fit_plots()
                             if save_figures:
@@ -1780,26 +1829,27 @@ class AnalysisTools():
                                 plt.savefig(path)
                             plt.show()
                             plt.close(fig)
-                            
+
                             # Write the pymultinest fit results into a table.
-                            flux_jy = fit.fit_flux.bestfit * guess_flux
-                            flux_jy *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            flux_jy_err = fit.fit_flux.error * guess_flux
-                            flux_jy_err *= fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            flux_si = fit.fit_flux.bestfit * guess_flux
-                            flux_si *= fzero_si[filt] / 10**(mstar[filt] / 2.5)  # erg/cm^2/s/A
-                            flux_si *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                            flux_si_err = fit.fit_flux.error * guess_flux
-                            flux_si_err *= fzero_si[filt] / 10**(mstar[filt] / 2.5)  # erg/cm^2/s/A
-                            flux_si_err *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                            flux_si_alt = flux_jy * 1e-26 * 299792458. / (1e-6 * self.database.red[key]['CWAVEL'][j])**2 * 1e-6  # W/m^2/um
-                            flux_si_alt_err = flux_jy_err * 1e-26 * 299792458. / (1e-6 * self.database.red[key]['CWAVEL'][j])**2 * 1e-6  # W/m^2/um
-                            delmag = -2.5 * np.log10(fit.fit_flux.bestfit * guess_flux)  # mag
-                            delmag_err = 2.5 / np.log(10.) * fit.fit_flux.error / fit.fit_flux.bestfit  # mag
                             if isinstance(mstar_err, dict):
                                 mstar_err_temp = mstar_err[filt]
                             else:
                                 mstar_err_temp = mstar_err
+                            rel_err = np.sqrt((fit.fit_flux.error / fit.fit_flux.bestfit)**2 + (mstar_err_temp * np.log(10) / 2.5)**2)
+                            flux_jy = fit.fit_flux.bestfit * guess_flux * fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
+                            flux_jy_err = flux_jy * rel_err  # Jy
+                            flux_flam = fit.fit_flux.bestfit * guess_flux * fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
+                            flux_flam_err = flux_flam * rel_err  # erg/s/cm^2/A
+                            flux_wm2um = fit.fit_flux.bestfit * guess_flux * fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
+                            flux_wm2um_err = flux_wm2um * rel_err  # W/m^2/um
+                            fstar_jy = fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
+                            fstar_jy_err = fstar_jy * (mstar_err_temp * np.log(10) / 2.5)  # Jy
+                            fstar_flam = fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
+                            fstar_flam_err = fstar_flam * (mstar_err_temp * np.log(10) / 2.5)  # erg/s/cm^2/A
+                            fstar_wm2um = fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
+                            fstar_wm2um_err = fstar_wm2um * (mstar_err_temp * np.log(10) / 2.5)  # W/m^2/um
+                            delmag = -2.5 * np.log10(fit.fit_flux.bestfit * guess_flux)  # mag
+                            delmag_err = 2.5 / np.log(10.) * fit.fit_flux.error / fit.fit_flux.bestfit  # mag
                             appmag = mstar[filt] + delmag  # vegamag
                             appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
                             fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
@@ -1810,10 +1860,16 @@ class AnalysisTools():
                                          fit.fit_y.error * pxsc_arcsec,  # arcsec
                                          flux_jy,
                                          flux_jy_err,
-                                         flux_si,
-                                         flux_si_err,
-                                         flux_si_alt,
-                                         flux_si_alt_err,
+                                         flux_flam,
+                                         flux_flam_err,
+                                         flux_wm2um,
+                                         flux_wm2um_err,
+                                         fstar_jy,
+                                         fstar_jy_err,
+                                         fstar_flam,
+                                         fstar_flam_err,
+                                         fstar_wm2um,
+                                         fstar_wm2um_err,
                                          fit.fit_flux.bestfit * guess_flux,
                                          fit.fit_flux.error * guess_flux,
                                          delmag,  # mag
@@ -1827,10 +1883,10 @@ class AnalysisTools():
                                          scale_factor_avg,
                                          tp_comsubst,
                                          fitsfile))
-                            
+
                             # Write the FM PSF to a file for future plotting.
                             ut.write_fitpsf_images(fit, fitsfile, tab[-1])
-                        
+
                         # Otherwise.
                         else:
                             if split_fit:
@@ -1858,26 +1914,25 @@ class AnalysisTools():
                                                                        fma.fit_y.error_2sided[::-1])
                                 fma.raw_flux = fma.fit_flux
 
-                                flux_jy = fma.fit_flux.bestfit * guess_flux
-                                flux_jy *= fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
-                                flux_jy_err = fma.fit_flux.error * guess_flux
-                                flux_jy_err *= fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
-                                flux_si = fma.fit_flux.bestfit * guess_flux
-                                flux_si *= fzero_si[filt] / 10 ** (mstar[filt] / 2.5)  # erg/cm^2/s/A
-                                flux_si *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                                flux_si_err = fma.fit_flux.error * guess_flux
-                                flux_si_err *= fzero_si[filt] / 10 ** (mstar[filt] / 2.5)  # erg/cm^2/s/A
-                                flux_si_err *= 1e-7 * 1e4 * 1e4  # W/m^2/um
-                                flux_si_alt = flux_jy * 1e-26 * 299792458. / (
-                                            1e-6 * self.database.red[key]['CWAVEL'][j]) ** 2 * 1e-6  # W/m^2/um
-                                flux_si_alt_err = flux_jy_err * 1e-26 * 299792458. / (
-                                            1e-6 * self.database.red[key]['CWAVEL'][j]) ** 2 * 1e-6  # W/m^2/um
-                                delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
-                                delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
                                 if isinstance(mstar_err, dict):
                                     mstar_err_temp = mstar_err[filt]
                                 else:
                                     mstar_err_temp = mstar_err
+                                rel_err = np.sqrt((fma.fit_flux.error / fma.fit_flux.bestfit)**2 + (mstar_err_temp * np.log(10) / 2.5)**2) if fma.fit_flux.bestfit != 0 else 0.0
+                                flux_jy = fma.fit_flux.bestfit * guess_flux * fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
+                                flux_jy_err = flux_jy * rel_err  # Jy
+                                flux_flam = fma.fit_flux.bestfit * guess_flux * fzero_flam[filt] / 10 ** (mstar[filt] / 2.5)  # erg/s/cm^2/A
+                                flux_flam_err = flux_flam * rel_err  # erg/s/cm^2/A
+                                flux_wm2um = fma.fit_flux.bestfit * guess_flux * fzero_wm2um[filt] / 10 ** (mstar[filt] / 2.5)  # W/m^2/um
+                                flux_wm2um_err = flux_wm2um * rel_err  # W/m^2/um
+                                fstar_jy = fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
+                                fstar_jy_err = fstar_jy * (mstar_err_temp * np.log(10) / 2.5)  # Jy
+                                fstar_flam = fzero_flam[filt] / 10 ** (mstar[filt] / 2.5)  # erg/s/cm^2/A
+                                fstar_flam_err = fstar_flam * (mstar_err_temp * np.log(10) / 2.5)  # erg/s/cm^2/A
+                                fstar_wm2um = fzero_wm2um[filt] / 10 ** (mstar[filt] / 2.5)  # W/m^2/um
+                                fstar_wm2um_err = fstar_wm2um * (mstar_err_temp * np.log(10) / 2.5)  # W/m^2/um
+                                delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
+                                delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
                                 appmag = mstar[filt] + delmag  # vegamag
                                 appmag_err = np.sqrt(mstar_err_temp ** 2 + delmag_err ** 2)
                                 fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
@@ -1906,10 +1961,16 @@ class AnalysisTools():
                                              fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
                                              flux_jy,
                                              flux_jy_err,
-                                             flux_si,
-                                             flux_si_err,
-                                             flux_si_alt,
-                                             flux_si_alt_err,
+                                             flux_flam,
+                                             flux_flam_err,
+                                             flux_wm2um,
+                                             flux_wm2um_err,
+                                             fstar_jy,
+                                             fstar_jy_err,
+                                             fstar_flam,
+                                             fstar_flam_err,
+                                             fstar_wm2um,
+                                             fstar_wm2um_err,
                                              fma.raw_flux.bestfit * guess_flux,
                                              fma.raw_flux.error * guess_flux,
                                              delmag,  # mag
@@ -1993,7 +2054,7 @@ class AnalysisTools():
                         pa = np.rad2deg(np.arctan2(ra, dec))  # deg
                         thetas = [pa + 90. - all_pa for all_pa in all_pas]
                         fakes.inject_planet(frames=dataset_orig.input, centers=dataset_orig.centers, inputflux=inputflux, astr_hdrs=dataset_orig.wcs, radius=sep, pa=pa, thetas=np.array(thetas), field_dependent_correction=None)
-                        
+
                         if save_preklip:
 
                             # Copy pre-KLIP files.
@@ -2028,7 +2089,7 @@ class AnalysisTools():
                             file = os.path.join(output_dir_fm, file + '.dat')
                             self.database.obs[key].write(file, format='ascii', overwrite=True)
                             self.database.obs = temp
-                        
+
                         # Reduce companion-subtracted data.
                         mode = self.database.red[key]['MODE'][j]
                         annuli = self.database.red[key]['ANNULI'][j]
@@ -2245,7 +2306,7 @@ def inject_and_recover(raw_dataset,
     injection_psf : 2D-array
         The PSF of the companion to be injected. 
     injection_seps : 1D-array
-        List of separations to inject companions at (pixels). 
+        List of separations to inject companions at (pixels).
     injection_pas : 1D-array
         List of position angles to inject companions at (degrees).  
     injection_spacing : int, None

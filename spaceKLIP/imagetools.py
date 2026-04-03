@@ -2826,10 +2826,12 @@ class ImageTools():
                     filt = self.database.obs[key]['FILTER'][ww]
 
                     # Get stellar magnitudes and filter zero points.
-                    mstar, fzero, fzero_si = get_stellar_magnitudes(starfile, spectral_type,
-                                                                    self.database.obs[key]['INSTRUME'][ww], return_si=True,
+                    mstar, fzero, _, _ = get_stellar_magnitudes(starfile, spectral_type,
+                                                                    self.database.obs[key]['INSTRUME'][ww],
+                                                                    self.database.obs[key]['DETECTOR'][ww],
+                                                                    self.database.obs[key]['EXP_TYPE'][ww],
                                                                     output_dir=output_dir,
-                                                                    **kwargs)  # vegamag, Jy, erg/cm^2/s/A
+                                                                    **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
                     # Compute the pixel area in steradian.
                     pxsc_arcsec = self.database.obs[key]['PIXSCALE'][ww]  # arcsec
                     pxsc_rad = pxsc_arcsec / 3600. / 180. * np.pi  # rad

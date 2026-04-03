@@ -26,7 +26,7 @@ from webbpsf_ext.imreg_tools import get_files
 from webbpsf_ext.imreg_tools import get_coron_apname as nircam_apname
 
 # helper functions
-from .utils import get_nrcmask_from_apname, get_filter_info, config_stpipe_log
+from .utils import get_nrcmask_from_apname, get_filter_info, get_pce_info, config_stpipe_log
 
 #  Set up log.
 log = logging.getLogger(__name__)
@@ -42,12 +42,6 @@ siaf_nis = pysiaf.Siaf('NIRISS')
 siaf_mir = pysiaf.Siaf('MIRI')
 
 setup_logging('WARN', verbose=False)
-
-# Load NIRCam, NIRISS, and MIRI filters.
-wave_nircam, weff_nircam, do_svo = get_filter_info('NIRCAM', return_more=True)
-wave_niriss, weff_niriss = get_filter_info('NIRISS', do_svo=do_svo)
-wave_miri, weff_miri = get_filter_info('MIRI', do_svo=False)
-
 
 class Database():
     """
@@ -240,19 +234,21 @@ class Database():
             FILTER += [head['FILTER']]
             PUPIL += [head.get('PUPIL', 'NONE')]
             if TELESCOP[-1] == 'JWST':
-                if INSTRUME[-1] == 'NIRCAM':
-                    if PUPIL[-1] in wave_nircam.keys():
-                        CWAVEL += [wave_nircam[PUPIL[-1]]]
-                        DWAVEL += [weff_nircam[PUPIL[-1]]]
-                    else:
-                        CWAVEL += [wave_nircam[FILTER[-1]]]
-                        DWAVEL += [weff_nircam[FILTER[-1]]]
+                if INSTRUME[-1] in ('NIRCAM', 'MIRI'):
+                    try:
+                        _pce = get_pce_info(INSTRUME[-1], FILTER[-1], DETECTOR[-1],
+                                            head.get('EXP_TYPE', 'UNKNOWN'))
+                        CWAVEL += [_pce['WavelengthPivot'] / 1e4]  # angstrom -> micron
+                        DWAVEL += [_pce['WidthEff'] / 1e4]  # angstrom -> micron
+                    except KeyError:
+                        log.warning(f'PCE data not found for {INSTRUME[-1]} {FILTER[-1]} '
+                                    f'{DETECTOR[-1]}. Using NaN for CWAVEL/DWAVEL.')
+                        CWAVEL += [np.nan]
+                        DWAVEL += [np.nan]
                 elif INSTRUME[-1] == 'NIRISS':
-                    CWAVEL += [wave_niriss[FILTER[-1]]]
-                    DWAVEL += [weff_niriss[FILTER[-1]]]
-                elif INSTRUME[-1] == 'MIRI':
-                    CWAVEL += [wave_miri[FILTER[-1]]]
-                    DWAVEL += [weff_miri[FILTER[-1]]]
+                    log.warning('NIRISS PCE data not available. Using NaN for CWAVEL/DWAVEL.')
+                    CWAVEL += [np.nan]
+                    DWAVEL += [np.nan]
                 else:
                     raise UserWarning('Data originates from unknown JWST instrument')
             else:
@@ -742,19 +738,21 @@ class Database():
             FILTER += [head['FILTER']]
             PUPIL += [head.get('PUPIL', 'NONE')]
             if TELESCOP[-1] == 'JWST':
-                if INSTRUME[-1] == 'NIRCAM':
-                    if PUPIL[-1] in wave_nircam.keys():
-                        CWAVEL += [wave_nircam[PUPIL[-1]]]
-                        DWAVEL += [weff_nircam[PUPIL[-1]]]
-                    else:
-                        CWAVEL += [wave_nircam[FILTER[-1]]]
-                        DWAVEL += [weff_nircam[FILTER[-1]]]
+                if INSTRUME[-1] in ('NIRCAM', 'MIRI'):
+                    try:
+                        _pce = get_pce_info(INSTRUME[-1], FILTER[-1], DETECTOR[-1],
+                                            head.get('EXP_TYPE', 'UNKNOWN'))
+                        CWAVEL += [_pce['WavelengthPivot'] / 1e4]  # angstrom -> micron
+                        DWAVEL += [_pce['WidthEff'] / 1e4]  # angstrom -> micron
+                    except KeyError:
+                        log.warning(f'PCE data not found for {INSTRUME[-1]} {FILTER[-1]} '
+                                    f'{DETECTOR[-1]}. Using NaN for CWAVEL/DWAVEL.')
+                        CWAVEL += [np.nan]
+                        DWAVEL += [np.nan]
                 elif INSTRUME[-1] == 'NIRISS':
-                    CWAVEL += [wave_niriss[FILTER[-1]]]
-                    DWAVEL += [weff_niriss[FILTER[-1]]]
-                elif INSTRUME[-1] == 'MIRI':
-                    CWAVEL += [wave_miri[FILTER[-1]]]
-                    DWAVEL += [weff_miri[FILTER[-1]]]
+                    log.warning('NIRISS PCE data not available. Using NaN for CWAVEL/DWAVEL.')
+                    CWAVEL += [np.nan]
+                    DWAVEL += [np.nan]
                 else:
                     raise UserWarning('Data originates from unknown JWST instrument')
             else:
