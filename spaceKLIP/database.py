@@ -196,6 +196,8 @@ class Database():
         CRPIX2 = []  # pix
         MASKCENX = []  # pix
         MASKCENY = []  # pix
+        NANMASKCENX = []  # pix
+        NANMASKCENY = []
         STARCENX = []  # pix
         STARCENY = []  # pix
         CROP_SHIFTX = []  # pix
@@ -299,6 +301,8 @@ class Database():
 
             MASKCENX += [head.get('MASKCENX', float(CRPIX1[i]))]
             MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
+            NANMASKCENX += [head.get('NANMASKCENX', float(CRPIX1[i]))]
+            NANMASKCENY += [head.get('NANMASKCENY', float(CRPIX2[i]))]
             STARCENX += [head.get('STARCENX', MASKCENX[-1])]
             STARCENY += [head.get('STARCENY', MASKCENY[-1])]
             CROP_SHIFTX += [head.get('CROP_SHIFTX', np.nan)]
@@ -345,6 +349,8 @@ class Database():
         CRPIX2 = np.array(CRPIX2)
         MASKCENX = np.array(MASKCENX)
         MASKCENY = np.array(MASKCENY)
+        NANMASKCENX = np.array(NANMASKCENX)
+        NANMASKCENY = np.array(NANMASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
         CROP_SHIFTX = np.array(CROP_SHIFTX)
@@ -421,8 +427,8 @@ class Database():
                     else:
                         ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
                         ww_ref = None
-                        log.warning('  --> Could not identify science and reference files based on dither pattern')
-                        raise UserWarning('Consider using psflibpaths to specify reference files')
+                        log.warning('  --> Could not identify science and reference files based on dither pattern.'
+                                    'Please use psflibpaths to specify reference files before running klip subtraction step')
 
             # Make Astropy tables for concatenations.
             tab = Table(names=('TYPE',
@@ -455,6 +461,8 @@ class Database():
                                'CRPIX2',
                                'MASKCENX',
                                'MASKCENY',
+                               'NANMASKCENX',
+                               'NANMASKCENY',
                                'STARCENX',
                                'STARCENY',
                                'CROP_SHIFTX',
@@ -468,7 +476,8 @@ class Database():
                                'ROLL_REF',
                                'BLURFWHM',
                                'FITSFILE',
-                               'MASKFILE'),
+                               'MASKFILE',
+                               'NANMASKFILE'),
                         dtype=('object',
                                'object',
                                'object',
@@ -503,6 +512,8 @@ class Database():
                                'float',
                                'float',
                                'float',
+                               'float',
+                               'float',
                                'object',
                                'object',
                                'object',
@@ -511,6 +522,7 @@ class Database():
                                'float',
                                'float',
                                'float',
+                               'object',
                                'object',
                                'object'))
             ww_all = ww_sci if ww_ref is None else np.append(ww_sci, ww_ref)
@@ -566,6 +578,11 @@ class Database():
                         maskfile = os.path.join(maskbase, maskpath)
                     else:
                         maskfile = 'NONE'
+
+                nanmaskfile = allpaths[ww][j].replace('.fits', '_nanmask.fits')
+                if not os.path.exists(nanmaskfile):
+                    nanmaskfile = 'NONE'
+
                 tab.add_row((tt,
                              EXP_TYPE[ww][j],
                              DATAMODL[ww][j],
@@ -596,6 +613,8 @@ class Database():
                              CRPIX2[ww][j],
                              MASKCENX[ww][j],
                              MASKCENY[ww][j],
+                             NANMASKCENX[ww][j],
+                             NANMASKCENY[ww][j],
                              STARCENX[ww][j],
                              STARCENY[ww][j],
                              CROP_SHIFTX[ww][j],
@@ -609,7 +628,8 @@ class Database():
                              ROLL_REF[ww][j] - V3I_YANG[ww][j] * VPARITY[ww][j],
                              BLURFWHM[ww][j],
                              allpaths[ww][j],
-                             maskfile))
+                             maskfile,
+                             nanmaskfile))
             self.obs[HASH_unique[i]] = tab.copy()
             del tab
 
@@ -716,6 +736,8 @@ class Database():
         CRPIX2 = []  # pix
         MASKCENX = []  # pix
         MASKCENY = []  # pix
+        NANMASKCENX = []  # pix
+        NANMASKCENY = []  # pix
         STARCENX = []  # pix
         STARCENY = []  # pix
         CROP_SHIFTX = []  # pix
@@ -819,6 +841,8 @@ class Database():
                 CRPIX2 += [head.get('CRPIX2', np.nan)]
             MASKCENX += [head.get('MASKCENX', CRPIX1[i])]
             MASKCENY += [head.get('MASKCENY', CRPIX2[i])]
+            NANMASKCENX += [head.get('NANMASKCENX', CRPIX1[i])]
+            NANMASKCENY += [head.get('NANMASKCENY', CRPIX2[i])]
             STARCENX += [head.get('STARCENX', np.nan)]
             STARCENY += [head.get('STARCENY', np.nan)]
             CROP_SHIFTX += [head.get('CROP_SHIFTX', 0.)]
@@ -856,6 +880,8 @@ class Database():
         CRPIX2 = np.array(CRPIX2)
         MASKCENX = np.array(MASKCENX)
         MASKCENY = np.array(MASKCENY)
+        NANMASKCENX = np.array(NANMASKCENX)
+        NANMASKCENY = np.array(NANMASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
         CROP_SHIFTX = np.array(CROP_SHIFTX)
@@ -1124,10 +1150,10 @@ class Database():
             print_tab = copy.deepcopy(self.obs[key])
             if include_fitsfiles:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER',
-                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF'])
+                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'NANMASKCENX', 'NANMASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF'])
             else:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER',
-                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
+                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'NANMASKCENX', 'NANMASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
             print_tab['XOFFSET'] *= 1e3
             print_tab['XOFFSET'] = np.round(print_tab['XOFFSET'])
             print_tab['XOFFSET'][print_tab['XOFFSET'] == 0.] = 0.
@@ -1203,6 +1229,7 @@ class Database():
                    index,
                    fitsfile,
                    maskfile=None,
+                   nanmaskfile=None,
                    nints=None,
                    effinttm=None,
                    xoffset=None,
@@ -1211,6 +1238,8 @@ class Database():
                    crpix2=None,
                    maskcenx=None,
                    maskceny=None,
+                   nanmaskcenx=None,
+                   nanmaskceny=None,
                    starcenx=None,
                    starceny=None,
                    crop_shiftx=None,
@@ -1235,6 +1264,9 @@ class Database():
         maskfile : path, optional
             New PSF mask path for the observation to be updated. The default is
             None.
+        nanmaskfile : path, optional
+            New NaNs mask path for the observation to be updated. The default is
+            None.
         nints : int, optional
             New number of integrations for the observation to be updated. The
             default is None.
@@ -1258,6 +1290,12 @@ class Database():
             updated. The default is None.
         maskceny : float, optional
             New mask y-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        nanmaskcenx : float, optional
+            New nanmask x-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        nanmaskceny : float, optional
+            New nanmask y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
         starcenx : float, optional
             New star x-position (pix, 1-indexed) for the observation to be
@@ -1317,6 +1355,10 @@ class Database():
             self.obs[key]['MASKCENX'][index] = maskcenx
         if maskceny is not None:
             self.obs[key]['MASKCENY'][index] = maskceny
+        if nanmaskcenx is not None:
+            self.obs[key]['NANMASKCENX'][index] = nanmaskcenx
+        if nanmaskceny is not None:
+            self.obs[key]['NANMASKCENY'][index] = nanmaskceny
         if starcenx is not None:
             self.obs[key]['STARCENX'][index] = starcenx
         if starceny is not None:
@@ -1338,6 +1380,8 @@ class Database():
         self.obs[key]['FITSFILE'][index] = fitsfile
         if maskfile is not None:
             self.obs[key]['MASKFILE'][index] = maskfile
+        if nanmaskfile is not None:
+            self.obs[key]['NANMASKFILE'][index] = nanmaskfile
         if update_pxar:
             try:
                 pxar = fits.getheader(self.obs[key]['FITSFILE'][index], 'SCI')['PIXAR_SR']

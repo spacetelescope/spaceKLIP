@@ -43,6 +43,9 @@ from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
 from spaceKLIP.utils import write_starfile, set_surrounded_pixels, pop_pxar_kw
 from spaceKLIP.imagetools import gaussian_kernel
+from photutils import psf as pupsf
+from astropy.wcs import WCS
+from webbpsf_ext.image_manip import frebin
 
 from functools import partial
 from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
@@ -94,6 +97,7 @@ class AnalysisTools():
                      subdir='rawcon',
                      output_filetype='npy',
                      plot_xlim=(0,10),
+                     plot_ylim=(None,1),
                      save_figures=True,
                      plot_style=None,
                      **kwargs):
@@ -394,7 +398,9 @@ class AnalysisTools():
                         ax.plot(seps[k], cons[k], color=colors[k % mod], alpha=0.3, ls='--')
                         ax.plot(seps[k], cons_mask[k], color=colors[k % mod], label=klmodes[k] + ' KL')
                 ax.set_yscale('log')
-                ax.set_ylim([None,1])
+                # ax.set_ylim([None,1])
+                if plot_ylim is not None:
+                    ax.set_ylim(plot_ylim)
                 if plot_xlim is not None:
                     ax.set_xlim(plot_xlim)
                 ax.set_xlabel('Separation [arcsec]')
@@ -547,11 +553,13 @@ class AnalysisTools():
                 if rawcon_filetype == 'npy':
                     seps_file = file_str.replace('.fits', '_seps.npy') #Arcseconds
                     rawcons_file = file_str.replace('.fits', '_cons.npy')
-                    maskcons_file = file_str.replace('.fits', '_cons_mask.npy')
+                    if mask is not None:
+                        maskcons_file = file_str.replace('.fits', '_cons_mask.npy')
 
                     rawseps = np.load(os.path.join(rawcon_dir,seps_file))
                     rawcons = np.load(os.path.join(rawcon_dir,rawcons_file))
-                    maskcons = np.load(os.path.join(rawcon_dir,maskcons_file))
+                    if mask is not None:
+                        maskcons = np.load(os.path.join(rawcon_dir,maskcons_file))
                 elif rawcon_filetype == 'ecsv':
                     raise NotImplementedError('.ecsv save format not currently supported for \
                         calibrated contrasts. Please use .npy raw contrasts as input.')
@@ -676,6 +684,32 @@ class AnalysisTools():
                     all_inj_fluxes = np.load(save_string+'_injrec_inj_fluxes.npy')
                     all_retr_fluxes = np.load(save_string+'_injrec_retr_fluxes.npy')
                 else:
+                    kwargs_inj={}
+                    if 'binarity' in kwargs.keys():
+                        all_pas = []
+                        kwargs_inj['binarity'] = kwargs['binarity']
+                        kwargs_inj['pxsc_arcsec'] = pxsc_arcsec
+                        ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+                        for ww in ww_sci:
+                            nints = self.database.obs[key]['NINTS'][ww]
+                            roll_ref = self.database.obs[key]['ROLL_REF'][ww]  # deg
+                            all_pas.extend([roll_ref for ni in range(nints)])
+
+                        output_dir_extraction = os.path.join(os.path.join(self.database.output_dir, kwargs['extraction_subdir']),'KL%.0f' % kwargs['klmode'])
+                        output_dir_comp = os.path.join(output_dir_extraction, 'C%.0f' % kwargs['C'])
+                        output_dir_fm = os.path.join(output_dir_comp, 'KLIP_FM')
+
+                        kwargs_inj['psf_filename'] = os.path.join(output_dir_fm,'FM-' + klip_args['mode'] + '_NANNU' + str(klip_args['annuli']) + '_NSUBS' + str(klip_args[ 'subsections']) + '_' + key + '-psf-KLmodes-all.fits')
+                        kwargs_inj['companion_filename'] =  os.path.join(output_dir_comp, klip_args['mode'] + '_NANNU' + str(klip_args['annuli']) + '_NSUBS' + str(klip_args['subsections']) + '_' + key + '-results_c%.0f' % (kwargs['C']) + '.ecsv')
+                        tab = Table.read(kwargs_inj['companion_filename'], format='ascii')
+                        kwargs_inj['RA'] = tab[-1]['RA']  # arcsec
+                        kwargs_inj['DEC'] = tab[-1]['DEC']  # arcsec
+                        kwargs_inj['CON'] = tab[-1]['CON']
+                        pa = np.rad2deg(np.arctan2(kwargs_inj['RA'], kwargs_inj['DEC']))  # deg
+                        kwargs_inj['thetas'] = [pa + 90. - all_pa for all_pa in all_pas]
+                    else:
+                        kwargs_inj['binarity'] = False
+
                     # Run the injection and recovery process
                     log.info('Injecting and recovering synthetic companions. This may take a while...')
                     inj_rec = inject_and_recover(pyklip_dataset, 
@@ -686,7 +720,8 @@ class AnalysisTools():
                                                  injection_fluxes=inj_fluxes, 
                                                  klip_args=klip_args,
                                                  retrieve_fwhm=resolution_fwhm,
-                                                 true_companions=companions_pix)
+                                                 true_companions=companions_pix,
+                                                 **kwargs_inj)
 
                     # Unpack everything from the injection and recovery
                     all_inj_seps, all_inj_pas, all_inj_fluxes, all_retr_fluxes = inj_rec
@@ -717,7 +752,8 @@ class AnalysisTools():
                     # Get the raw separation and contrast for this KL mode
                     this_KL_rawseps = rawseps[k]
                     this_KL_rawcons = rawcons[k]
-                    this_KL_maskcons = maskcons[k]
+                    if mask is not None:
+                        this_KL_maskcons = maskcons[k]
 
                     # Get fluxes for this KL mode subtracted image
                     this_KL_retr_fluxes = all_retr_fluxes[:,k]
@@ -749,7 +785,8 @@ class AnalysisTools():
 
                     # Apply contrast correction
                     rawcons_corr.append(rawcons[k] / contrast_correction)
-                    maskcons_corr.append(maskcons[k] / contrast_correction)
+                    if mask is not None:
+                        maskcons_corr.append(maskcons[k] / contrast_correction)
                     all_corrections.append(contrast_correction)
 
                 all_corrections = np.squeeze(all_corrections) #Tidy array
@@ -760,7 +797,8 @@ class AnalysisTools():
                 # Save the corrected contrasts, as well as the separations for convenience. 
                 np.save(save_string+'_cal_seps.npy', rawseps)
                 np.save(save_string+'_cal_cons.npy', rawcons_corr)
-                np.save(save_string+'_cal_maskcons.npy', maskcons_corr)
+                if mask is not None:
+                    np.save(save_string+'_cal_maskcons.npy', maskcons_corr)
 
                 # Define some local utilty functions for plot setup.
                 # This makes the plotting code below less repetitive and more consistent
@@ -837,13 +875,17 @@ class AnalysisTools():
                 fig, ax = standardize_plots_setup(plot_style=plot_style)
                 for si, seps in enumerate(rawseps):
                     KLmodes = klip_args['numbasis'][si]
-                    ax.plot(seps, maskcons_corr[si],
-                            label=f'KL = {KLmodes}', color=f'C{si}')
-                    ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='--',
-                            color=f'C{si}')
-                ax.legend(loc='upper right', ncols=3, fontsize=10,
-                          title = 'Dashed lines exclude coronagraph mask throughput',
-                          title_fontsize=10)
+                    if mask is not None:
+                        ax.plot(seps, maskcons_corr[si],
+                                label=f'KL = {KLmodes}', color=f'C{si}')
+                        ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='--',
+                                color=f'C{si}')
+                        ax.legend(loc='upper right', ncols=3, fontsize=10,
+                                  title = 'Dashed lines exclude coronagraph mask throughput',
+                                  title_fontsize=10)
+                    else:
+                        ax.plot(seps, rawcons_corr[si], alpha=0.3, ls='-',
+                                color=f'C{si}')
                 standardize_plots_annotate_save(ax,
                                                 title=f'Calibrated contrast in {filt}, {psfsub_strategy}',
                                                 ylabel='Contrast',
@@ -854,10 +896,16 @@ class AnalysisTools():
                 fig, ax = standardize_plots_setup(plot_style=plot_style)
                 for si, seps in enumerate(rawseps):
                     KLmodes = klip_args['numbasis'][si]
-                    ax.plot(seps, maskcons_corr[si],
-                            label=f'KL = {KLmodes}', color=f'C{si}')
-                    ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
-                            color=f'C{si}')
+                    if mask is not None:
+                        ax.plot(seps, maskcons_corr[si],
+                                label=f'KL = {KLmodes}', color=f'C{si}')
+                        ax.plot(seps, maskcons[si], alpha=0.3, ls=':',
+                                color=f'C{si}')
+                    else:
+                        ax.plot(seps, rawcons_corr[si],
+                                label=f'KL = {KLmodes}', color=f'C{si}')
+                        ax.plot(seps, rawcons[si], alpha=0.3, ls=':',
+                                color=f'C{si}')
                 ax.legend(loc='upper right', ncols=3, fontsize=10,
                           title = 'Solid lines = calibrated, dotted lines = raw',
                           title_fontsize=10)
@@ -888,6 +936,9 @@ class AnalysisTools():
                            overwrite=True,
                            subdir='companions',
                            save_figures=True,
+                           use_epsf=False,
+                           fov_pix=65,
+                           save_psf = False,
                            **kwargs):
         """
         Extract the best fit parameters of a number of companions from each
@@ -962,13 +1013,30 @@ class AnalysisTools():
             default is 'companions'.
         save_figures : bool, optional
             Save the plots in a PDF?
+        save_psf: bool, optional
+                Save the best fit PSF for each companion as a FITS file.
         
         Returns
         -------
         None.
         
         """
-        
+
+        def plot_traces(fma, nburn=100, labels=[r"x", r"y", r"$\alpha$", "l"], path='/.traces.pdf'):
+            fig, ax = plt.subplots(len(labels), 1, figsize=(20, 20), sharex=True)
+            samples = fma.sampler.get_chain() # Shape: (n_steps, n_walkers, n_dim)
+            n_walkers = samples.shape[1]
+            for elno in range(len(labels)):
+                for i in range(n_walkers):
+                    ax[elno].plot(samples[:, i, elno], alpha=0.5)
+                    # ax[elno].axvline(nburn, color='k', linestyle='--')
+                ax[elno].set_ylabel(f"{labels[elno]}")
+            ax[elno].set_xlabel("Step number")
+            plt.savefig(path)
+            plt.show()
+            plt.close()
+            return fig
+
         # Check input.
         kwargs_temp = {}
         
@@ -1073,13 +1141,44 @@ class AnalysisTools():
                 if date is not None:
                     if date == 'auto':
                         date = fits.getheader(self.database.obs[key]['FITSFILE'][ww_sci[0]], 0)['DATE-BEG']
-                offsetpsf_func = JWST_PSF(apername,
-                                          filt,
-                                          date=date,
-                                          fov_pix=65,
-                                          oversample=2,
-                                          sp=sed,
-                                          use_coeff=False)
+                if not use_epsf:
+                    offsetpsf_func = JWST_PSF(apername,
+                                              filt,
+                                              date=date,
+                                              fov_pix=fov_pix,
+                                              oversample=2,
+                                              sp=sed,
+                                              use_coeff=False)
+
+                else:
+                    def star2epsf(stamp, weights=None, wcs_large=None, center=[20, 20]):
+                        """Get the stamp and uncertainties from a Star object and provide it to EPSFStar"""
+                        epsf = pupsf.EPSFStar(
+                            stamp,
+                            weights=weights,
+                            wcs_large=wcs_large,
+                            cutout_center=center
+                        )
+                        return epsf
+
+                    list_of_references=[]
+                    for filepath in psflib_filepaths:
+                        hdulist = fits.open(filepath)
+                        data = hdulist['SCI'].data[0]
+                        data[np.isnan(data)] = 0
+                        weights = np.ones(data.shape)#/hdulist['ERR'].data[0]
+                        weights[np.isnan(weights) | ~np.isfinite(weights)] = 0
+                        wcs = WCS(hdulist['SCI'].header,naxis=2)
+                        list_of_references.append(star2epsf(data,weights=weights,wcs_large=wcs, center=dataset.centers[0]))
+
+                    epsfs = pupsf.EPSFStars(list_of_references)
+                    epsf_builder = pupsf.EPSFBuilder(
+                        oversampling=3,
+                        maxiters=50,
+                        progress_bar=True
+                    )
+                    offsetpsf_func = epsf_builder(epsfs)[0]
+                    offsetpsf_func.image_mask = None
 
                 # NOTE: if minmethod not None, it will split the fit into a fitmethod (e.g. mcmc) for the estimation
                 # of position and flux, and a minmethod (e.g. Powell) to fit the extension of the source using a
@@ -1090,10 +1189,41 @@ class AnalysisTools():
                     split_fit = False
 
                 if split_fit:
-                    if not all(x in kwargs.keys() for x in ['sigma_xguess', 'sigma_yguess',  'scale_guess', 'theta_guess']):
-                        gauss_param_guesses = [0.3,0.3,0,0]
+                    if 'sigma_xguess' in kwargs.keys() and kwargs['sigma_xguess'] is not None:
+                        sigma_xguess = kwargs['sigma_xguess']
                     else:
-                        gauss_param_guesses = [kwargs['sigma_xguess'], kwargs['sigma_yguess'], kwargs['scale_guess'], kwargs['theta_guess']]
+                        sigma_xguess = 0.1
+                    if 'sigma_yguess' in kwargs.keys() and kwargs['sigma_yguess'] is not None:
+                        sigma_yguess = kwargs['sigma_yguess']
+                    else:
+                        sigma_yguess = 0.1
+                    if 'theta_guess' in kwargs.keys() and kwargs['theta_guess'] is not None:
+                        theta_guess = kwargs['theta_guess']
+                    else:
+                        theta_guess = 0
+                    if 'scale_guess' in kwargs.keys() and kwargs['scale_guess'] is not None:
+                        scale_guess = kwargs['scale_guess']
+                    else:
+                        scale_guess = 0
+                    gauss_param_guesses = [sigma_xguess, sigma_yguess, theta_guess, scale_guess]
+
+                    if 'sigma_xrange' in kwargs.keys() and kwargs['sigma_xrange'] is not None:
+                        sigma_xrange = kwargs['sigma_xrange']
+                    else:
+                        sigma_xrange = (0.001, 5)
+                    if 'sigma_yrange' in kwargs.keys() and kwargs['sigma_yrange'] is not None:
+                        sigma_yrange = kwargs['sigma_yrange']
+                    else:
+                        sigma_yrange = (0.001, 5)
+                    if 'theta_range' in kwargs.keys() and kwargs['theta_range'] is not None:
+                        theta_range = kwargs['theta_range']
+                    else:
+                        theta_range = (-180, 180)
+                    if 'scale_range' in kwargs.keys() and kwargs['scale_range'] is not None:
+                        scale_range = kwargs['scale_range']
+                    else:
+                        scale_range = (-1, 1)
+                    gauss_param_ranges = [sigma_xrange, sigma_yrange, theta_range, scale_range]
 
                     # Loop through companions.
                     tab = Table(names=('ID',
@@ -1221,10 +1351,11 @@ class AnalysisTools():
                         output_dir_pk = os.path.join(output_dir_comp, 'PREKLIP')
                         if not os.path.exists(output_dir_pk):
                             os.makedirs(output_dir_pk)
-                    
-                    # Offset PSF that is not affected by the coronagraphic
-                    # mask, but only the Lyot stop.
-                    psf_no_coronmsk = offsetpsf_func.psf_off
+
+                    if not use_epsf:
+                        # Offset PSF that is not affected by the coronagraphic
+                        # mask, but only the Lyot stop.
+                        psf_no_coronmsk = offsetpsf_func.psf_off
 
                     # Initial guesses for the fit parameters.
                     guess_dx = companions[k][0] / pxsc_arcsec  # pix
@@ -1279,42 +1410,53 @@ class AnalysisTools():
                             sim_sep = np.sqrt(guess_dx**2 + guess_dy**2) * pxsc_arcsec  # arcsec
                             sim_pa = np.rad2deg(np.arctan2(guess_dx, guess_dy))  # deg
 
-                        # Generate offset PSF for this roll angle. Do not add
-                        # the V3Yidl angle as it has already been added to the
-                        # roll angle by spaceKLIP. This is only for estimating
-                        # the coronagraphic mask throughput!
-                        offsetpsf_coronmsk = offsetpsf_func.gen_psf([sim_sep, sim_pa],
-                                                                    mode='rth',
-                                                                    PA_V3=roll_ref,
-                                                                    do_shift=False,
-                                                                    quick=True,
-                                                                    addV3Yidl=False)
+                        if  offsetpsf_func.image_mask is not None:
+                            # Generate offset PSF for this roll angle. Do not add
+                            # the V3Yidl angle as it has already been added to the
+                            # roll angle by spaceKLIP. This is only for estimating
+                            # the coronagraphic mask throughput!
+                            offsetpsf_coronmsk = offsetpsf_func.gen_psf([sim_sep, sim_pa],
+                                                                        mode='rth',
+                                                                        PA_V3=roll_ref,
+                                                                        do_shift=False,
+                                                                        quick=True,
+                                                                        addV3Yidl=False)
 
-                        # Coronagraphic mask throughput is not incorporated
-                        # into the flux calibration of the JWST pipeline so
-                        # that the companion flux from the detector pixels will
-                        # be underestimated. Therefore, we need to scale the
-                        # model offset PSF to account for the coronagraphic
-                        # mask throughput (it becomes fainter). Compute scale
-                        # factor by comparing a model PSF with and without
-                        # coronagraphic mask.
-                        scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
+                            # Coronagraphic mask throughput is not incorporated
+                            # into the flux calibration of the JWST pipeline so
+                            # that the companion flux from the detector pixels will
+                            # be underestimated. Therefore, we need to scale the
+                            # model offset PSF to account for the coronagraphic
+                            # mask throughput (it becomes fainter). Compute scale
+                            # factor by comparing a model PSF with and without
+                            # coronagraphic mask.
+                            scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
+                            # scale_factor_avg += [scale_factor]
+                        else:
+                            # Since there is no coronagraphic mask, it is 1
+                            scale_factor = 1 #/ np.sum(psf_no_coronmsk)
                         scale_factor_avg += [scale_factor]
-                        
-                        # Normalize model offset PSF to a total integrated flux
-                        # of 1 at infinity. Generates a new webbpsf model with
-                        # PSF normalization set to 'exit_pupil'.
-                        offsetpsf = offsetpsf_func.gen_psf([sim_sep, sim_pa],
-                                                           mode='rth',
-                                                           PA_V3=roll_ref,
-                                                           do_shift=False,
-                                                           quick=False,
-                                                           addV3Yidl=False,
-                                                           normalize='exit_pupil')
-                        
-                        # Normalize model offset PSF by the flux of the star.
+
+                        if not use_epsf:
+                            # Normalize model offset PSF to a total integrated flux
+                            # of 1 at infinity. Generates a new webbpsf model with
+                            # PSF normalization set to 'exit_pupil'.
+                            offsetpsf = offsetpsf_func.gen_psf([sim_sep, sim_pa],
+                                                               mode='rth',
+                                                               PA_V3=roll_ref,
+                                                               do_shift=False,
+                                                               quick=False,
+                                                               addV3Yidl=False,
+                                                               normalize='exit_pupil')
+
+                            # Normalize model offset PSF by the flux of the star.
+                        else:
+                            # Normalize model EPSF to a total integrated flux
+                            # of 1 at infinity.
+                            # EPSF
+                            y, x = np.mgrid[:fov_pix, :fov_pix]
+                            offsetpsf = offsetpsf_func.evaluate(x, y, 1, fov_pix // 2, fov_pix // 2)
                         offsetpsf *= fzero[filt] / 10**(mstar[filt] / 2.5) / 1e6 / pxar  # MJy/sr
-                        
                         # Apply scale factor to incorporate the coronagraphic
                         # mask througput.
                         # NOTE: There is no need to apply a correction for the substrate
@@ -1370,6 +1512,13 @@ class AnalysisTools():
                     subsections = int(self.database.red[key]['SUBSECTS'][j])
                     fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fmpsf-KLmodes-all.fits')
                     klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-klipped-KLmodes-all.fits')
+
+                    if save_psf:
+                        psfdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-psf-KLmodes-all.fits')
+                        hdu = fits.PrimaryHDU(all_offsetpsfs)
+                        hdul = fits.HDUList([hdu])
+                        hdul.writeto(psfdataset, overwrite=True)
+
                     if overwrite or (not os.path.exists(fmdataset) or not os.path.exists(klipdataset)):
                         
                         # Initialize the pyKLIP FM class. Use sep/pa relative
@@ -1655,7 +1804,8 @@ class AnalysisTools():
                                 # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
                                 fig, result = best_convfit_and_residuals(fma,
                                                                          minmethod=minmethod,
-                                                                         initial_params=gauss_param_guesses)
+                                                                         initial_params=gauss_param_guesses,
+                                                                         bounds=gauss_param_ranges)
 
                                 if save_figures:
                                     path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_conv_c%.0f' % (k + 1) + '.pdf')
@@ -2232,7 +2382,8 @@ def inject_and_recover(raw_dataset,
                        injection_fluxes,
                        klip_args,
                        retrieve_fwhm,
-                       true_companions=None):
+                       true_companions=None,
+                       **kwargs):
     '''
     Function to inject synthetic PSFs into a pyKLIP dataset, then perform
     KLIP subtraction, then calculate the flux losses from the KLIP process. 
@@ -2312,11 +2463,32 @@ def inject_and_recover(raw_dataset,
                     if dist < tcomp_rad:
                         list_of_injected += [pos_id]
     if len(list_of_injected) != 0:
-        log.info('--> {}/{} source positions not suitable for injection.'.format(len(list_of_injected), 
-                                                                             Nsep*Npa))
+        if len(list_of_injected) < Nsep*Npa:
+            log.info('--> {}/{} source positions not suitable for injection.'.format(len(list_of_injected),Nsep*Npa))
+        else:
+            raise ValueError('--> All {} source positions not suitable for injection.'.format(Nsep*Npa))
     else:
         log.info('--> All {} source positions suitable for injection.'.format(Nsep*Npa))
-                
+
+    if kwargs['binarity']:
+        # remove the bright companion before injecting the fake companions to calibrate contrast ona clean residual.
+        pxsc_arcsec = kwargs['pxsc_arcsec']
+        thetas = kwargs['thetas']
+
+        dataset = copy.deepcopy(raw_dataset)
+        all_offsetpsfs_nohpf = fits.getdata(kwargs['psf_filename'])
+        ra = kwargs['RA']  # arcsec
+        dec = kwargs['DEC']  # arcsec
+        con = kwargs['CON']
+        inputflux = -con * np.array(all_offsetpsfs_nohpf)  # negative to remove companion
+        sep = np.sqrt(ra ** 2 + dec ** 2) / pxsc_arcsec  # pix
+        pa = np.rad2deg(np.arctan2(ra, dec))  # deg
+        fakes.inject_planet(frames=dataset.input, centers=dataset.centers, inputflux=inputflux,
+                            astr_hdrs=dataset.wcs, radius=sep, pa=pa, thetas=np.array(thetas),
+                            field_dependent_correction=None)
+        raw_dataset = copy.deepcopy(dataset)
+        pass
+
     # Want to keep going until a companion has been injected and recovered
     # at each given separation and position angle.
     counter = 1
