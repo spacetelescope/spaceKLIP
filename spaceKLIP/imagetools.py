@@ -1463,12 +1463,14 @@ class ImageTools():
                         # convert pxdq_temp to a boolean mask or some of the next steps won't work.
                         # This is just a place holder. We need to think about how this mask will look like.
                         pxdq_temp = (pxdq_temp > 0)
-
+                        
                     for k in range(len(method_split)):
                         head, tail = os.path.split(fitsfile)
                         if method_split[k] == 'dqarr':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             
+                            total_added = 0
+
                             # Loop through each integration.
                             for i in range(data.shape[0]):
                             
@@ -1518,8 +1520,13 @@ class ImageTools():
                                                     added_count += 1
 
                                     # Combine original DO_NOT_USE with newly flagged neighbors.
-                                    log.info(f"    Integration {i + 1}: neighbors flagged = {added_count}")
+                                    #log.info(f"    Integration {i + 1}: neighbors flagged = {added_count}")
+                                    total_added += added_count
                                 pxdq[i] = (np.isnan(data[i]) | temp_donotuse) & (~temp_nonsci)
+
+                            if dqarr_kwargs.get('flag_neighbors', False):
+                                log.info(f"  --> Total neighbor pixels flagged: {total_added}")
+
                         elif method_split[k] == 'sigclip':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             sigclip_kwargs['crpix1'] = self.database.obs[key]['CRPIX1'][j] - 1
