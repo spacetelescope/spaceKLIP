@@ -4,11 +4,10 @@ description = 'Data reduction pipeline for JWST high-contrast imaging'
 readme = "README.rst"
 dynamic = ["version", "dependencies"] # version will come from setuptools.scm
 authors = [
-  { name="Jens Kammerer", email="jkammerer@stsci.edu" },
-  { name="Aarynn Carter", email="aarynn.carter@ucsc.edu" },
+  { name="Jens Kammerer", email="jens.kammerer@eso.org" },
+  { name="Aarynn Carter", email="aacarter@stsci.edu" },
   { name="The JWST Direct Observations of Exoplanetary Systems (ERS-1386) Collaboration"},
 ]
-
 
 [build-system]
 requires = [
