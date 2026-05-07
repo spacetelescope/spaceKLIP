@@ -135,9 +135,12 @@ def run_obs(database,
             
             # Initialize pyKLIP dataset.
             pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-            dataset = JWSTData(filepaths, psflib_filepaths, highpass=kwargs_temp['highpass'])
+            dataset = JWSTData(filepaths, psflib_filepaths, 
+                               highpass=kwargs_temp['highpass'],
+                               center_include_offset=False,
+                               center_keywords=['STARCENX','STARCENY'])
             kwargs_temp['dataset'] = dataset
-            kwargs_temp['aligned_center'] = dataset._centers[0]
+            kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
             kwargs_temp['psf_library'] = dataset.psflib
             kwargs_temp['mode'] = mode
             
@@ -195,6 +198,8 @@ def run_obs(database,
                     w = wcs.WCS(head_sci)
                     _rotate_wcs_hdr(w, database.obs[key]['ROLL_REF'][ww_sci[0]])
                     hdul[0].header['WCSAXES'] = head_sci['WCSAXES']
+                    hdul[0].header['CRPIX1'] = head_sci['STARCENX']
+                    hdul[0].header['CRPIX2'] = head_sci['STARCENY']
                     hdul[0].header['CRVAL1'] = head_sci['CRVAL1']
                     hdul[0].header['CRVAL2'] = head_sci['CRVAL2']
                     hdul[0].header['CTYPE1'] = head_sci['CTYPE1']
@@ -224,6 +229,8 @@ def run_obs(database,
                                 hdul[0].data = np.nanmedian(dataset.allints[:, :, ww, :, :], axis=2)
                             hdul[0].header['NINTS'] = database.obs[key]['NINTS'][j]
                             hdul[0].header['WCSAXES'] = head_sci['WCSAXES']
+                            hdul[0].header['CRPIX1'] = head_sci['STARCENX']
+                            hdul[0].header['CRPIX2'] = head_sci['STARCENY']
                             hdul[0].header['CRVAL1'] = head_sci['CRVAL1']
                             hdul[0].header['CRVAL2'] = head_sci['CRVAL2']
                             hdul[0].header['CTYPE1'] = head_sci['CTYPE1']
@@ -237,11 +244,21 @@ def run_obs(database,
                             hdul.writeto(datapath.replace('-KLmodes-all.fits', '-KLmodes-all_roll%.0f.fits' % n_roll), output_verify='fix', overwrite=True)
                             hdul.close()
                             n_roll += 1
-        
+
         # Save corresponding observations database.
         file = os.path.join(output_dir, key + '.dat')
+        for col in ['CENTER_MASK', 'ALIGN_MASK', 'CENTER_SHIFT', 'ALIGN_SHIFT']:
+            if col in database.obs[key].colnames:
+                database.obs[key][col] = [
+                    str([x.tolist() if hasattr(x, "tolist") else x for x in row])
+                    if row is not None and hasattr(row, '__iter__')
+                    else str(row)
+                    for row in database.obs[key][col]
+                ]
+
+
         database.obs[key].write(file, format='ascii', overwrite=True)
-        
+
         # Compute and save corresponding transmission mask.
         file = os.path.join(output_dir, key + '_psfmask.fits')
         mask = get_transmission(database.obs[key])
@@ -251,10 +268,10 @@ def run_obs(database,
             hdul[0].data = None
             hdul['SCI'].data = mask
             hdul.writeto(file, output_verify='fix', overwrite=True)
-    
+
     # Read reductions into database.
     database.read_jwst_s3_data(datapaths)
-    
+
     pass
 
 

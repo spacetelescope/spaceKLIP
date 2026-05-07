@@ -8,6 +8,7 @@ from . import imagetools
 from . import mast
 from . import plotting
 from . import psf
+from . import psflib
 from . import pyklippipeline
 from . import utils
 

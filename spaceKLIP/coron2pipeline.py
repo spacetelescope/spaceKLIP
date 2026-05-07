@@ -7,18 +7,15 @@ import matplotlib
 # =============================================================================
 
 import os
-import pdb
-import sys
 
 import astropy.io.fits as pyfits
-import numpy as np
 
-from tqdm import tqdm, trange
+from tqdm import trange
 
 from jwst import datamodels
 from jwst.associations.load_as_asn import LoadAsLevel2Asn
 from jwst.outlier_detection.outlier_detection_step import OutlierDetectionStep
-from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Coron3Pipeline
+from jwst.pipeline import Image2Pipeline
 
 import logging
 log = logging.getLogger(__name__)
