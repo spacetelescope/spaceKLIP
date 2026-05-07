@@ -26,7 +26,7 @@ from webbpsf_ext.imreg_tools import get_files
 from webbpsf_ext.imreg_tools import get_coron_apname as nircam_apname
 
 # helper functions
-from .utils import get_nrcmask_from_apname, get_filter_info, config_stpipe_log
+from .utils import get_nrcmask_from_apname, get_filter_info, get_pce_info, config_stpipe_log
 
 #  Set up log.
 log = logging.getLogger(__name__)
@@ -42,12 +42,6 @@ siaf_nis = pysiaf.Siaf('NIRISS')
 siaf_mir = pysiaf.Siaf('MIRI')
 
 setup_logging('WARN', verbose=False)
-
-# Load NIRCam, NIRISS, and MIRI filters.
-wave_nircam, weff_nircam, do_svo = get_filter_info('NIRCAM', return_more=True)
-wave_niriss, weff_niriss = get_filter_info('NIRISS', do_svo=do_svo)
-wave_miri, weff_miri = get_filter_info('MIRI', do_svo=False)
-
 
 class Database():
     """
@@ -112,8 +106,8 @@ class Database():
                             cr_from_siaf=False,
                             assoc_using_targname=True):
         """
-        Read JWST stage 0 (\*uncal), 1 (\*rate or \*rateints), or 2 (\*cal or
-        \*calints) data into the Database.obs dictionary. It contains a table of
+        Read JWST stage 0 (uncal), 1 (rate or rateints), or 2 (cal or
+        calints) data into the Database.obs dictionary. It contains a table of
         metadata for each concatenation, which are identified automatically
         based on instrument, filter, pupil mask, and image mask. The tables can
         be edited by the user at any stage of the data reduction process and
@@ -196,6 +190,8 @@ class Database():
         CRPIX2 = []  # pix
         MASKCENX = []  # pix
         MASKCENY = []  # pix
+        NANMASKCENX = []  # pix
+        NANMASKCENY = []
         STARCENX = []  # pix
         STARCENY = []  # pix
         CROP_SHIFTX = []  # pix
@@ -240,19 +236,21 @@ class Database():
             FILTER += [head['FILTER']]
             PUPIL += [head.get('PUPIL', 'NONE')]
             if TELESCOP[-1] == 'JWST':
-                if INSTRUME[-1] == 'NIRCAM':
-                    if PUPIL[-1] in wave_nircam.keys():
-                        CWAVEL += [wave_nircam[PUPIL[-1]]]
-                        DWAVEL += [weff_nircam[PUPIL[-1]]]
-                    else:
-                        CWAVEL += [wave_nircam[FILTER[-1]]]
-                        DWAVEL += [weff_nircam[FILTER[-1]]]
+                if INSTRUME[-1] in ('NIRCAM', 'MIRI'):
+                    try:
+                        _pce = get_pce_info(INSTRUME[-1], FILTER[-1], DETECTOR[-1],
+                                            head.get('EXP_TYPE', 'UNKNOWN'))
+                        CWAVEL += [_pce['WavelengthPivot'] / 1e4]  # angstrom -> micron
+                        DWAVEL += [_pce['WidthEff'] / 1e4]  # angstrom -> micron
+                    except KeyError:
+                        log.warning(f'PCE data not found for {INSTRUME[-1]} {FILTER[-1]} '
+                                    f'{DETECTOR[-1]}. Using NaN for CWAVEL/DWAVEL.')
+                        CWAVEL += [np.nan]
+                        DWAVEL += [np.nan]
                 elif INSTRUME[-1] == 'NIRISS':
-                    CWAVEL += [wave_niriss[FILTER[-1]]]
-                    DWAVEL += [weff_niriss[FILTER[-1]]]
-                elif INSTRUME[-1] == 'MIRI':
-                    CWAVEL += [wave_miri[FILTER[-1]]]
-                    DWAVEL += [weff_miri[FILTER[-1]]]
+                    log.warning('NIRISS PCE data not available. Using NaN for CWAVEL/DWAVEL.')
+                    CWAVEL += [np.nan]
+                    DWAVEL += [np.nan]
                 else:
                     raise UserWarning('Data originates from unknown JWST instrument')
             else:
@@ -299,14 +297,16 @@ class Database():
 
             MASKCENX += [head.get('MASKCENX', float(CRPIX1[i]))]
             MASKCENY += [head.get('MASKCENY', float(CRPIX2[i]))]
+            NANMASKCENX += [head.get('NANMASKCENX', float(CRPIX1[i]))]
+            NANMASKCENY += [head.get('NANMASKCENY', float(CRPIX2[i]))]
             STARCENX += [head.get('STARCENX', MASKCENX[-1])]
             STARCENY += [head.get('STARCENY', MASKCENY[-1])]
             CROP_SHIFTX += [head.get('CROP_SHIFTX', np.nan)]
             CROP_SHIFTY += [head.get('CROP_SHIFTY', np.nan)]
             ALIGN_SHIFT += [head.get('ALIGN_SHIFT', np.zeros((nintegrations, 2)))]
             CENTER_SHIFT += [head.get('CENTER_SHIFT', np.zeros((nintegrations, 2)))]
-            ALIGN_MASK += [head.get('ALIGN_MASK', np.zeros((1,2)))]
-            CENTER_MASK += [head.get('CENTER_MASK', np.zeros((1,2)))]
+            ALIGN_MASK += [head.get('ALIGN_MASK', np.zeros((2)))]
+            CENTER_MASK += [head.get('CENTER_MASK', np.zeros((2)))]
             VPARITY += [head.get('VPARITY', -1)]
             V3I_YANG += [head.get('V3I_YANG', 0.)]
             RA_REF += [head.get('RA_REF', np.nan)]
@@ -345,6 +345,8 @@ class Database():
         CRPIX2 = np.array(CRPIX2)
         MASKCENX = np.array(MASKCENX)
         MASKCENY = np.array(MASKCENY)
+        NANMASKCENX = np.array(NANMASKCENX)
+        NANMASKCENY = np.array(NANMASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
         CROP_SHIFTX = np.array(CROP_SHIFTX)
@@ -419,8 +421,10 @@ class Database():
                         ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
                         ww_ref = np.where(numdthpt == numdthpt_unique[1])[0]
                     else:
-                        log.warning('  --> Could not identify science and reference files based on dither pattern')
-                        raise UserWarning('Please use psflibpaths to specify reference files')
+                        ww_sci = np.where(numdthpt == numdthpt_unique[0])[0]
+                        ww_ref = None
+                        log.warning('  --> Could not identify science and reference files based on dither pattern.'
+                                    'Please use psflibpaths to specify reference files before running klip subtraction step')
 
             # Make Astropy tables for concatenations.
             tab = Table(names=('TYPE',
@@ -453,6 +457,8 @@ class Database():
                                'CRPIX2',
                                'MASKCENX',
                                'MASKCENY',
+                               'NANMASKCENX',
+                               'NANMASKCENY',
                                'STARCENX',
                                'STARCENY',
                                'CROP_SHIFTX',
@@ -466,7 +472,8 @@ class Database():
                                'ROLL_REF',
                                'BLURFWHM',
                                'FITSFILE',
-                               'MASKFILE'),
+                               'MASKFILE',
+                               'NANMASKFILE'),
                         dtype=('object',
                                'object',
                                'object',
@@ -501,6 +508,8 @@ class Database():
                                'float',
                                'float',
                                'float',
+                               'float',
+                               'float',
                                'object',
                                'object',
                                'object',
@@ -509,9 +518,11 @@ class Database():
                                'float',
                                'float',
                                'float',
+                               'object',
                                'object',
                                'object'))
-            for j in np.append(ww_sci, ww_ref):
+            ww_all = ww_sci if ww_ref is None else np.append(ww_sci, ww_ref)
+            for j in ww_all:
                 if j in ww_sci:
                     sci = True
                 else:
@@ -521,7 +532,7 @@ class Database():
                         tt = 'SCI_TA'
                     else:
                         tt = 'REF_TA'
-                elif 'BG' in TARGPROP[ww][j].upper() or 'BACK' in TARGPROP[ww][j].upper() or 'BACKGROUND' in TARGPROP[ww][j].upper():
+                elif any(bgid in TARGPROP[ww][j].upper() for bgid in ('BG', 'BKG', 'BACK', 'BACKGROUND')):
                     if sci:
                         tt = 'SCI_BG'
                     else:
@@ -546,7 +557,10 @@ class Database():
                         pipeline = Detector1Pipeline()
                         input = datamodels.open(allpaths[ww][j])
                         maskfile = pipeline.get_reference_file(input, 'psfmask')
-                        config_stpipe_log(suppress=True)  # Revert to default logging.
+                        if (maskfile is None) or (not os.path.exists(maskfile)):
+                            maskfile = 'NONE'
+
+                        config_stpipe_log(suppress=False)  # Revert to default logging.
 
                     elif EXP_TYPE[ww][j] == 'MIR_4QPM' or EXP_TYPE[ww][j] == 'MIR_LYOT':
                         if APERNAME[ww][j] == 'MIRIM_MASK1065':
@@ -560,6 +574,11 @@ class Database():
                         maskfile = os.path.join(maskbase, maskpath)
                     else:
                         maskfile = 'NONE'
+
+                nanmaskfile = allpaths[ww][j].replace('.fits', '_nanmask.fits')
+                if not os.path.exists(nanmaskfile):
+                    nanmaskfile = 'NONE'
+
                 tab.add_row((tt,
                              EXP_TYPE[ww][j],
                              DATAMODL[ww][j],
@@ -590,6 +609,8 @@ class Database():
                              CRPIX2[ww][j],
                              MASKCENX[ww][j],
                              MASKCENY[ww][j],
+                             NANMASKCENX[ww][j],
+                             NANMASKCENY[ww][j],
                              STARCENX[ww][j],
                              STARCENY[ww][j],
                              CROP_SHIFTX[ww][j],
@@ -603,7 +624,8 @@ class Database():
                              ROLL_REF[ww][j] - V3I_YANG[ww][j] * VPARITY[ww][j],
                              BLURFWHM[ww][j],
                              allpaths[ww][j],
-                             maskfile))
+                             maskfile,
+                             nanmaskfile))
             self.obs[HASH_unique[i]] = tab.copy()
             del tab
 
@@ -628,18 +650,18 @@ class Database():
                 for j in range(len(self.obs[HASH_unique[i]])):
                     if self.obs[HASH_unique[i]]['TYPE'][j] in ['SCI_TA', 'SCI_BG']:
                         targprop = self.obs[HASH_unique[i]]['TARGPROP'][self.obs[HASH_unique[i]]['TYPE'] == 'SCI']
-                        ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
+                        ww = np.array([s == self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                         if np.sum(ww) == 0:
                             targprop = self.obs[HASH_unique[i]]['TARGPROP'][self.obs[HASH_unique[i]]['TYPE'] == 'REF']
-                            ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
+                            ww = np.array([s == self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                             if np.sum(ww) != 0:
                                 self.obs[HASH_unique[i]]['TYPE'][j] = self.obs[HASH_unique[i]]['TYPE'][j].replace('SCI', 'REF')
                     if self.obs[HASH_unique[i]]['TYPE'][j] in ['REF_TA', 'REF_BG']:
                         targprop = self.obs[HASH_unique[i]]['TARGPROP'][self.obs[HASH_unique[i]]['TYPE'] == 'REF']
-                        ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
+                        ww = np.array([s == self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                         if np.sum(ww) == 0:
                             targprop = self.obs[HASH_unique[i]]['TARGPROP'][self.obs[HASH_unique[i]]['TYPE'] == 'SCI']
-                            ww = np.array([s in self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
+                            ww = np.array([s == self.obs[HASH_unique[i]]['TARGPROP'][j] for s in targprop])
                             if np.sum(ww) != 0:
                                 self.obs[HASH_unique[i]]['TYPE'][j] = self.obs[HASH_unique[i]]['TYPE'][j].replace('REF', 'SCI')
 
@@ -653,7 +675,7 @@ class Database():
                           datapaths,
                           cr_from_siaf=False):
         """
-        Read JWST stage 3 data (this can be \*i2d data from the official JWST
+        Read JWST stage 3 data (this can be i2d data from the official JWST
         pipeline, or data products from the pyKLIP and classical PSF
         subtraction pipelines implemented in spaceKLIP) into the Database.red
         dictionary. It contains a table of metadata for each concatenation,
@@ -710,6 +732,8 @@ class Database():
         CRPIX2 = []  # pix
         MASKCENX = []  # pix
         MASKCENY = []  # pix
+        NANMASKCENX = []  # pix
+        NANMASKCENY = []  # pix
         STARCENX = []  # pix
         STARCENY = []  # pix
         CROP_SHIFTX = []  # pix
@@ -736,19 +760,21 @@ class Database():
             FILTER += [head['FILTER']]
             PUPIL += [head.get('PUPIL', 'NONE')]
             if TELESCOP[-1] == 'JWST':
-                if INSTRUME[-1] == 'NIRCAM':
-                    if PUPIL[-1] in wave_nircam.keys():
-                        CWAVEL += [wave_nircam[PUPIL[-1]]]
-                        DWAVEL += [weff_nircam[PUPIL[-1]]]
-                    else:
-                        CWAVEL += [wave_nircam[FILTER[-1]]]
-                        DWAVEL += [weff_nircam[FILTER[-1]]]
+                if INSTRUME[-1] in ('NIRCAM', 'MIRI'):
+                    try:
+                        _pce = get_pce_info(INSTRUME[-1], FILTER[-1], DETECTOR[-1],
+                                            head.get('EXP_TYPE', 'UNKNOWN'))
+                        CWAVEL += [_pce['WavelengthPivot'] / 1e4]  # angstrom -> micron
+                        DWAVEL += [_pce['WidthEff'] / 1e4]  # angstrom -> micron
+                    except KeyError:
+                        log.warning(f'PCE data not found for {INSTRUME[-1]} {FILTER[-1]} '
+                                    f'{DETECTOR[-1]}. Using NaN for CWAVEL/DWAVEL.')
+                        CWAVEL += [np.nan]
+                        DWAVEL += [np.nan]
                 elif INSTRUME[-1] == 'NIRISS':
-                    CWAVEL += [wave_niriss[FILTER[-1]]]
-                    DWAVEL += [weff_niriss[FILTER[-1]]]
-                elif INSTRUME[-1] == 'MIRI':
-                    CWAVEL += [wave_miri[FILTER[-1]]]
-                    DWAVEL += [weff_miri[FILTER[-1]]]
+                    log.warning('NIRISS PCE data not available. Using NaN for CWAVEL/DWAVEL.')
+                    CWAVEL += [np.nan]
+                    DWAVEL += [np.nan]
                 else:
                     raise UserWarning('Data originates from unknown JWST instrument')
             else:
@@ -813,6 +839,8 @@ class Database():
                 CRPIX2 += [head.get('CRPIX2', np.nan)]
             MASKCENX += [head.get('MASKCENX', CRPIX1[i])]
             MASKCENY += [head.get('MASKCENY', CRPIX2[i])]
+            NANMASKCENX += [head.get('NANMASKCENX', CRPIX1[i])]
+            NANMASKCENY += [head.get('NANMASKCENY', CRPIX2[i])]
             STARCENX += [head.get('STARCENX', np.nan)]
             STARCENY += [head.get('STARCENY', np.nan)]
             CROP_SHIFTX += [head.get('CROP_SHIFTX', 0.)]
@@ -850,6 +878,8 @@ class Database():
         CRPIX2 = np.array(CRPIX2)
         MASKCENX = np.array(MASKCENX)
         MASKCENY = np.array(MASKCENY)
+        NANMASKCENX = np.array(NANMASKCENX)
+        NANMASKCENY = np.array(NANMASKCENY)
         STARCENX = np.array(STARCENX)
         STARCENY = np.array(STARCENY)
         CROP_SHIFTX = np.array(CROP_SHIFTX)
@@ -1118,10 +1148,10 @@ class Database():
             print_tab = copy.deepcopy(self.obs[key])
             if include_fitsfiles:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER',
-                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF'])
+                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'NANMASKCENX', 'NANMASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF'])
             else:
                 print_tab.remove_columns(['TARG_RA', 'TARG_DEC', 'EXPSTART', 'APERNAME', 'PPS_APER',
-                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
+                                          'CRPIX1', 'CRPIX2', 'MASKCENX', 'MASKCENY', 'NANMASKCENX', 'NANMASKCENY', 'STARCENX', 'STARCENY', 'RA_REF', 'DEC_REF', 'FITSFILE', 'MASKFILE'])
             print_tab['XOFFSET'] *= 1e3
             print_tab['XOFFSET'] = np.round(print_tab['XOFFSET'])
             print_tab['XOFFSET'][print_tab['XOFFSET'] == 0.] = 0.
@@ -1197,6 +1227,7 @@ class Database():
                    index,
                    fitsfile,
                    maskfile=None,
+                   nanmaskfile=None,
                    nints=None,
                    effinttm=None,
                    xoffset=None,
@@ -1205,6 +1236,8 @@ class Database():
                    crpix2=None,
                    maskcenx=None,
                    maskceny=None,
+                   nanmaskcenx=None,
+                   nanmaskceny=None,
                    starcenx=None,
                    starceny=None,
                    crop_shiftx=None,
@@ -1229,6 +1262,9 @@ class Database():
         maskfile : path, optional
             New PSF mask path for the observation to be updated. The default is
             None.
+        nanmaskfile : path, optional
+            New NaNs mask path for the observation to be updated. The default is
+            None.
         nints : int, optional
             New number of integrations for the observation to be updated. The
             default is None.
@@ -1252,6 +1288,12 @@ class Database():
             updated. The default is None.
         maskceny : float, optional
             New mask y-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        nanmaskcenx : float, optional
+            New nanmask x-position (pix, 1-indexed) for the observation to be
+            updated. The default is None.
+        nanmaskceny : float, optional
+            New nanmask y-position (pix, 1-indexed) for the observation to be
             updated. The default is None.
         starcenx : float, optional
             New star x-position (pix, 1-indexed) for the observation to be
@@ -1311,6 +1353,10 @@ class Database():
             self.obs[key]['MASKCENX'][index] = maskcenx
         if maskceny is not None:
             self.obs[key]['MASKCENY'][index] = maskceny
+        if nanmaskcenx is not None:
+            self.obs[key]['NANMASKCENX'][index] = nanmaskcenx
+        if nanmaskceny is not None:
+            self.obs[key]['NANMASKCENY'][index] = nanmaskceny
         if starcenx is not None:
             self.obs[key]['STARCENX'][index] = starcenx
         if starceny is not None:
@@ -1332,6 +1378,8 @@ class Database():
         self.obs[key]['FITSFILE'][index] = fitsfile
         if maskfile is not None:
             self.obs[key]['MASKFILE'][index] = maskfile
+        if nanmaskfile is not None:
+            self.obs[key]['NANMASKFILE'][index] = nanmaskfile
         if update_pxar:
             try:
                 pxar = fits.getheader(self.obs[key]['FITSFILE'][index], 'SCI')['PIXAR_SR']
@@ -1471,7 +1519,7 @@ class Database():
 
 
 def create_database(output_dir,
-                    pid,
+                    pid=None,
                     obsids=None,
                     input_dir=None,
                     psflibpaths=None,
@@ -1539,7 +1587,9 @@ def create_database(output_dir,
         products. By default, only levels 0,1,2 data will be read and indexed.
     """
 
-    if input_dir is None:
+    if (pid is None) and (input_dir is None):
+        raise ValueError("Must provide either a pid or an input_dir")
+    elif input_dir is None:
         mast_dir = os.getenv('JWSTDOWNLOAD_OUTDIR')
         input_dir = os.path.join(mast_dir, f'{pid:05d}')
 
@@ -1548,7 +1598,7 @@ def create_database(output_dir,
         obsids = [obsids]
 
     # Cycle through all obsids and get the files in a single list
-    fitsfiles = [get_files(input_dir, pid, obsid=oid, **kwargs) for oid in obsids]
+    fitsfiles = [get_files(input_dir, pid=pid, obsid=oid, **kwargs) for oid in obsids]
     fitsfiles = [f for sublist in fitsfiles for f in sublist]
     datapaths = [os.path.join(input_dir, f) for f in fitsfiles]
 

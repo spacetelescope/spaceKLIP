@@ -36,18 +36,26 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-
+SPACEKLIP_PLOT_STYLE = os.path.join(os.path.dirname(__file__),'sk_style.mplstyle')
 # =============================================================================
 # MAIN
 # =============================================================================
 
-def load_plt_style(style='spaceKLIP.sk_style'):
+def set_default_style(style):
+    " Adjust the default matplotlib style for spaceKLIP plots. "
+    global SPACEKLIP_PLOT_STYLE
+    SPACEKLIP_PLOT_STYLE = style
+
+def load_plt_style(style=None):
     """
     Load the matplotlib style for spaceKLIP plots.
-    
-    Load the style sheet in `sk_style.mplstyle`, which is a modified version of the
+
+    Load the style sheet (default of `sk_style.mplstyle`), which is a modified version of the
     style sheet from the `webbpsf_ext` package.
     """
+    # Wrap in an is None to ensure it uses the current value of SPACEKLIP_PLOT_STYLE
+    if style is None:
+        style = SPACEKLIP_PLOT_STYLE
     plt.style.use(style)
 
 def annotate_compass(ax,
@@ -209,7 +217,6 @@ def annotate_secondary_axes_arcsec(ax,
     secay.tick_params(labelsize='small', color='white', which='both')
 
 
-@plt.style.context('spaceKLIP.sk_style')
 def display_coron_image(filename,
                         vmin=None,
                         vmax=None,
@@ -217,7 +224,8 @@ def display_coron_image(filename,
                         bbox_color='#4B0082',
                         dq_only=False,
                         zoom_center=3,
-                        ax=None):
+                        ax=None,
+                        plot_style=None):
     """
     Display and annotate a coronagraphic image.
     
@@ -247,7 +255,10 @@ def display_coron_image(filename,
     -------
     None.
     """
-        
+
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
+
     # Early exit for unsupported file types.
     if 'uncal' in filename:
         raise RuntimeError("Display code does not support stage 0 uncal files. Reduce the data further before trying to display it.")
@@ -390,7 +401,7 @@ def display_coron_image(filename,
     fig.show()
     return ax
 
-@plt.style.context('spaceKLIP.sk_style')
+
 def display_coron_dataset(database,
                           restrict_to=None,
                           save_filename=None,
@@ -401,7 +412,8 @@ def display_coron_dataset(database,
                           zoom_center=3,
                           dq_only=False,
                           interactive=False,
-                          bbox_color='#4B0082'):
+                          bbox_color='#4B0082',
+                          plot_style=None):
     """
     Display multiple files in a coronagraphic dataset.
 
@@ -439,6 +451,9 @@ def display_coron_dataset(database,
     None.
 
     """
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
+
     # Initialize PDF saving if a filename is provided.
     pdf = PdfPages(save_filename) if save_filename else None
 
@@ -488,8 +503,7 @@ def display_coron_dataset(database,
     if pdf:
         pdf.close()
 
-        
-@plt.style.context('spaceKLIP.sk_style')
+
 def display_image_comparisons(database,
                               base_dirs,
                               restrict_to=None,
@@ -500,7 +514,8 @@ def display_image_comparisons(database,
                               zoom_center=None,
                               interactive=False,
                               dq_only=False,
-                              subtract_first=False):
+                              subtract_first=False,
+                              plot_style=None):
     """
     Compare images before and after processing.
     
@@ -537,6 +552,9 @@ def display_image_comparisons(database,
     -------
     None.
     """
+
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
     
     # Initialize PDF saving if a filename is provided.
     pdf = PdfPages(save_filename) if save_filename else None
@@ -565,15 +583,18 @@ def display_image_comparisons(database,
 
         # Check if any SCI data remains after filtering.
         if not any(row['TYPE'] == 'SCI' for row in filtered_table):
-            print(f"No SCI type files found in key: {key}."
-            f" Exiting. Check 'restrict_to' criteria.")
-            return
+            print(f"No SCI type files found in key: {key}.")
+            continue
        
         # Identify the first SCI frame for subtraction, store it for later use.
         first_sci_file = next((row['FITSFILE'] for row in filtered_table if row['TYPE'] == 'SCI'), None)
         root_dir = first_sci_file.split(os.sep)[0]
         for base_dir in base_dirs:
             image_files[base_dir]['first_sci_file'] = os.path.join(root_dir, base_dir, os.path.basename(first_sci_file))
+
+    if len(filtered_files)==0:
+        print("No files found. Check 'restrict_to' criteria. Exiting.")
+        return 
 
     # Create figure of appropriate size.
     num_dirs = len(base_dirs)
@@ -644,13 +665,21 @@ def display_image_comparisons(database,
         if pdf:
             pdf.close()
             
-@plt.style.context('spaceKLIP.sk_style')
-def plot_contrast_images(meta, data, data_masked, pxsc=None, savefile='./maskimage.pdf'):
+
+def plot_contrast_images(meta,
+                         data,
+                         data_masked,
+                         pxsc=None,
+                         savefile='./maskimage.pdf',
+                         plot_style=None):
     """
     Plot subtracted images to be used for contrast estimation, one with
     companions marked, one with the masking adopted.
 
     """
+
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
 
     # Set some quick information depending on whether a pixel scale was passed
     if pxsc == None:
@@ -696,11 +725,19 @@ def plot_contrast_images(meta, data, data_masked, pxsc=None, savefile='./maskima
 
     return
 
-@plt.style.context('spaceKLIP.sk_style')
-def plot_contrast_raw(meta, seps, cons, labels='default', savefile='./rawcontrast.pdf'):
+
+def plot_contrast_raw(meta,
+                      seps,
+                      cons,
+                      labels='default',
+                      savefile='./rawcontrast.pdf',
+                      plot_style=None):
     """
     Plot raw contrast curves for different KL modes.
     """
+
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
 
     # Initialize figure
     plt.figure(figsize=(6.4, 4.8))
@@ -736,11 +773,22 @@ def plot_contrast_raw(meta, seps, cons, labels='default', savefile='./rawcontras
 
     return
 
-@plt.style.context('spaceKLIP.sk_style')
-def plot_injected_locs(meta, data, transmission, seps, pas, pxsc=None, savefile='./injected.pdf'):
+
+def plot_injected_locs(meta,
+                       data,
+                       transmission,
+                       seps,
+                       pas,
+                       pxsc=None,
+                       savefile='./injected.pdf',
+                       plot_style=None):
     '''
     Plot subtracted image and 2D transmission alongside locations of injected planets. 
     '''
+
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
+
     #Set some quick information depending on whether a pixel scale was passed
     if pxsc == None:
         extent=(-0.5, data.shape[1]-0.5, data.shape[1]-0.5, -0.5)
@@ -798,11 +846,22 @@ def plot_injected_locs(meta, data, transmission, seps, pas, pxsc=None, savefile=
 
     return
 
-@plt.style.context('spaceKLIP.sk_style')
-def plot_contrast_calibrated(thrput, med_thrput, fit_thrput, con_seps, cons, corr_cons, savefile='./calcontrast.pdf'):
+
+def plot_contrast_calibrated(thrput,
+                             med_thrput,
+                             fit_thrput,
+                             con_seps,
+                             cons,
+                             corr_cons,
+                             savefile='./calcontrast.pdf',
+                             plot_style=None):
     '''
     Plot calibrated throughput alongside calibrated contrast curves. 
     '''
+
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
+
     f, ax = plt.subplots(1, 2, figsize=(2*6.4, 1*4.8))
     ax[0].plot(med_thrput['seps'], med_thrput['tps'], color='mediumaquamarine', label='Median throughput')
     ax[0].scatter(thrput['seps'], thrput['tps'], s=75, color='mediumaquamarine', alpha=0.5)
@@ -830,12 +889,22 @@ def plot_contrast_calibrated(thrput, med_thrput, fit_thrput, con_seps, cons, cor
 
     return
 
-@plt.style.context('spaceKLIP.sk_style')
-def plot_fm_psf(meta, fm_frame, data_frame, guess_flux, pxsc=None, j=0, savefile='./fmpsf.pdf'):
+
+def plot_fm_psf(meta,
+                fm_frame,
+                data_frame,
+                guess_flux,
+                pxsc=None,
+                j=0,
+                savefile='./fmpsf.pdf',
+                plot_style=None):
     '''
     Plot forward model psf
     '''
-    
+
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
+
     #Set some quick information depending on whether a pixel scale was passed
     if pxsc == None:
         extent=(-0.5, fm_frame.shape[1]-0.5, fm_frame.shape[1]-0.5, -0.5)
@@ -874,11 +943,12 @@ def plot_fm_psf(meta, fm_frame, data_frame, guess_flux, pxsc=None, j=0, savefile
 
     return
 
-@plt.style.context('spaceKLIP.sk_style')
+
 def plot_chains(chain, savefile):
     '''
     Plot MCMC chains from companion fitting
     '''
+
     f, ax = plt.subplots(4, 1, figsize=(1*6.4, 2*4.8))
     ax[0].plot(chain[:, :, 0].T, color='black', alpha=1./3.)
     ax[0].set_xlabel('Steps')
@@ -897,12 +967,12 @@ def plot_chains(chain, savefile):
     plt.savefig(savefile)
     plt.close()
 
-@plt.style.context('spaceKLIP.sk_style')
+
 def plot_subimages(imgdirs, subdirs, filts, submodes, numKL, 
                    window_size=2.5, cmaps_list=['viridis'],
                    imgVmin=[-40], imgVmax=[40], subVmin=[-10], subVmax=[10],
                    labelpos=[0.04, 0.05], imtext_col='w', showKL=True, useticklabels=True, cbar_textoff=1,
-                   hspace=0.05, wspace=0.05):
+                   hspace=0.05, wspace=0.05, plot_style=None):
     '''
     Create a "publication ready" plot of the coronagraphic images, alongside
     the PSF subtracted images. A grid of images will be made. Rows will correspond to 
@@ -948,6 +1018,9 @@ def plot_subimages(imgdirs, subdirs, filts, submodes, numKL,
     '''
 
     from matplotlib.ticker import MultipleLocator, MaxNLocator
+
+    # Intialize the matplotlib style.
+    load_plt_style(plot_style)
 
     # Get the files we care about
     imgfiles = sorted(list(chain.from_iterable([glob.glob(imgdir+'*.fits') for imgdir in imgdirs])))

@@ -16,7 +16,6 @@ import numpy as np
 import pysiaf
 import astropy.io.fits as pyfits
 from astroquery.svo_fps import SvoFps
-from astropy.nddata.bitmask import _is_bit_flag
 
 # scipy imports
 import scipy.ndimage.interpolation as sinterp
@@ -333,7 +332,8 @@ def read_msk(maskfile):
 
 def write_msk(maskfile,
               mask,
-              fitsfile):
+              fitsfile,
+              mask_ext = '_psfmask.fits'):
     """
     Write a PSF mask to a FITS file.
 
@@ -345,6 +345,9 @@ def write_msk(maskfile,
         PSF mask. None if not available.
     fitsfile : path
         Path of output FITS file (to save the PSF mask in the same directory).
+    mask_ext: str
+        Extension to append to the input fitsfile name to create the output
+        maskfile name. Default is '_psfmask.fits'.
 
     Returns
     -------
@@ -357,7 +360,7 @@ def write_msk(maskfile,
     if mask is not None:
         hdul = pyfits.open(maskfile)
         hdul['SCI'].data = mask
-        maskfile = fitsfile.replace('.fits', '_psfmask.fits')
+        maskfile = fitsfile.replace('.fits', mask_ext)
         hdul.writeto(maskfile, output_verify='fix', overwrite=True)
         hdul.close()
     else:
@@ -447,7 +450,10 @@ def write_fitpsf_images(fitpsf,
     # Write FITS file.
     pri = pyfits.PrimaryHDU()
     for key in row.keys():
-        if key in ['FLUX_SI', 'FLUX_SI_ERR', 'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
+        if key in ['FLUX_FLAM', 'FLUX_FLAM_ERR', 'FLUX_WM2UM', 'FLUX_WM2UM_ERR',
+                   'FSTAR_JY', 'FSTAR_JY_ERR', 'FSTAR_FLAM', 'FSTAR_FLAM_ERR',
+                   'FSTAR_WM2UM', 'FSTAR_WM2UM_ERR',
+                   'LN(Z/Z0)', 'TP_CORONMSK', 'TP_COMSUBST','GSCALE_ERROR', 'SIGMA_X_ERROR', 'SIGMA_Y_ERROR',
                    'THETA_ERROR'] and np.isnan(row[key]):
             pri.header[key] = 'NONE'
         else:
@@ -626,6 +632,18 @@ def alignlsq(shift,
     imres : 1D-array
         Residual image collapsed into one dimension.
     """
+    
+    # Ensure data type is float64.
+    image = np.asarray(image, dtype=np.float64)
+    ref_image = np.asarray(ref_image, dtype=np.float64)
+    if mask is not None:
+        mask = np.asarray(mask, dtype=np.float64)
+
+    # Ensure data type is float64.
+    image = np.asarray(image, dtype=np.float64)
+    ref_image = np.asarray(ref_image, dtype=np.float64)
+    if mask is not None:
+        mask = np.asarray(mask, dtype=np.float64)
 
     if mask is None:
         return (ref_image - shift[2] * imshift(image, shift[:2], method=method, pad=False, kwargs=kwargs)).ravel()
@@ -692,67 +710,6 @@ def subtractlsq(shift,
         return res.ravel()
     else:
         return res[mask]
-
-
-def _get_tp_comsubst(instrume,
-                     subarray,
-                     filt):
-    """
-    Get the COM substrate transmission averaged over the respective filter
-    profile.
-
-    *** Deprecated - use `get_tp_comsubst` instead. ***
-
-    Parameters
-    ----------
-    instrume : 'NIRCAM', 'NIRISS', or 'MIRI'
-        JWST instrument in use.
-    subarray : str
-        JWST subarray in use.
-    filt : str
-        JWST filter in use.
-
-    Returns
-    -------
-    tp_comsubst : float
-        COM substrate transmission averaged over the respective filter profile
-    """
-
-    log.warning('This function is deprecated. Use `get_tp_comsubst` instead.')
-
-    # Default return.
-    tp_comsubst = 1.
-
-    # If NIRCam.
-    if instrume == 'NIRCAM':
-
-        # If coronagraphy subarray.
-        if '210R' in subarray or '335R' in subarray or '430R' in subarray or 'SWB' in subarray or 'LWB' in subarray:
-
-            # Read bandpass.
-            try:
-                with importlib.resources.open_text(f'spaceKLIP.resources.PCEs.{instrume}', f'{filt}.txt') as bandpass_file:
-                    bandpass_data = np.genfromtxt(bandpass_file).transpose()
-                    bandpass_wave = bandpass_data[0]  # micron
-                    bandpass_throughput = bandpass_data[1]
-            except FileNotFoundError:
-                log.error('--> Filter ' + filt + ' not found for instrument ' + instrume)
-
-            # Read COM substrate transmission.
-            with importlib.resources.open_text('spaceKLIP.resources.transmissions', 'ModA_COM_Substrate_Transmission_20151028_JKrist.dat') as comsubst_file:
-                comsubst_data = np.genfromtxt(comsubst_file).transpose()
-                comsubst_wave = comsubst_data[0][1:]  # micron
-                comsubst_throughput = comsubst_data[1][1:]
-
-            # Compute COM substrate transmission averaged over the respective
-            # filter profile.
-            bandpass_throughput = np.interp(comsubst_wave, bandpass_wave, bandpass_throughput)
-            int_tp_bandpass = simpson(bandpass_throughput, comsubst_wave)
-            int_tp_bandpass_comsubst = simpson(bandpass_throughput * comsubst_throughput, comsubst_wave)
-            tp_comsubst = int_tp_bandpass_comsubst / int_tp_bandpass
-
-    # Return.
-    return tp_comsubst
 
 
 def write_starfile(starfile,
@@ -870,9 +827,123 @@ def get_tp_comsubst(instrume,
     return tp_comsubst
 
 
-def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
+# Module-level cache for consolidated PCE data
+_PCE_DATA = None
+
+
+def load_pce_data():
     """
-    Load filter information from the SVO Filter Profile Service or webbpsf
+    Load the consolidated PCE data from all_pces.npz.
+
+    Returns the data as a dict-like NpzFile object, cached at module level
+    so it is only loaded once.
+
+    Returns
+    -------
+    data : dict-like
+        The loaded NpzFile object containing all PCE arrays and metadata.
+    """
+    global _PCE_DATA
+    if _PCE_DATA is None:
+        pce_path = os.path.join(os.path.dirname(__file__), 'resources', 'PCEs', 'all_pces.npz')
+        _PCE_DATA = dict(np.load(pce_path, allow_pickle=False))
+    return _PCE_DATA
+
+
+def get_pce_info(instrume, filt, detector, exp_type):
+    """
+    Look up PCE data and filter metadata for a given instrument, filter,
+    detector, and exposure type combination.
+
+    The observing mode is resolved automatically from the exposure type
+    and detector name:
+      - NIRCam: 'coronagraphy' if exp_type == 'NRC_CORON',
+                'lw_imaging' if detector in ('NRCALONG', 'NRCBLONG'),
+                'sw_imaging' otherwise.
+      - MIRI:   'coronagraphy' if exp_type in ('MIR_4QPM', 'MIR_LYOT'),
+                'imaging' otherwise.
+
+    Parameters
+    ----------
+    instrume : str
+        Instrument name (e.g. 'NIRCAM', 'MIRI').
+    filt : str
+        Filter name (e.g. 'F356W', 'F1065C').
+    detector : str
+        Detector name (e.g. 'NRCALONG', 'NRCA1', 'MIRIMAGE').
+    exp_type : str
+        Exposure type from the FITS header (e.g. 'NRC_CORON', 'NRC_IMAGE',
+        'MIR_4QPM', 'MIR_LYOT', 'MIR_IMAGE').
+
+    Returns
+    -------
+    info : dict
+        Dictionary with keys: 'wavelengths', 'pce', 'WavelengthMean',
+        'WavelengthPivot', 'WidthEff', 'ZeroPointJy', 'ZeroPointFlam',
+        'ZeroPointWm2um'. Wavelengths and widths are in Angstrom,
+        zero points in their respective units.
+
+    Raises
+    ------
+    KeyError
+        If the requested combination is not found in the PCE data.
+    """
+    instrume_lower = instrume.lower()
+    filt_lower = filt.lower()
+    detector_upper = detector.upper()
+
+    # Resolve the observing mode
+    if instrume_lower == 'nircam':
+        if exp_type == 'NRC_CORON':
+            mode = 'coronagraphy'
+        elif detector_upper in ('NRCALONG', 'NRCBLONG'):
+            mode = 'lw_imaging'
+        else:
+            mode = 'sw_imaging'
+    elif instrume_lower == 'miri':
+        if exp_type in ('MIR_4QPM', 'MIR_LYOT'):
+            mode = 'coronagraphy'
+        else:
+            mode = 'imaging'
+    else:
+        raise ValueError(f'Unsupported instrument: {instrume}')
+
+    # Map generic detector names to specific detector IDs
+    if detector_upper == 'NRCALONG':
+        detector_upper = 'NRCA5'
+    elif detector_upper == 'NRCBLONG':
+        detector_upper = 'NRCB5'
+
+    # Build the key prefix and look up in the consolidated data
+    key_prefix = f'{instrume_lower}__{mode}__{filt_lower}__{detector_upper}'
+    data = load_pce_data()
+
+    # Check that this combination exists
+    wav_key = f'{key_prefix}__wavelengths'
+    if wav_key not in data:
+        raise KeyError(
+            f'PCE data not found for {instrume} {filt} {detector} (mode={mode}). '
+            f'Key prefix: {key_prefix}'
+        )
+
+    fields = ['wavelengths', 'pce', 'WavelengthMean', 'WavelengthPivot',
+              'WidthEff', 'ZeroPointJy', 'ZeroPointFlam', 'ZeroPointWm2um']
+    info = {}
+    for field in fields:
+        full_key = f'{key_prefix}__{field}'
+        info[field] = float(data[full_key]) if data[full_key].ndim == 0 else data[full_key]
+
+    return info
+
+
+def get_filter_info(instrument, timeout=1, do_svo=False, return_more=False):
+    """
+    Load filter information from the SVO Filter Profile Service or webbpsf.
+
+    .. deprecated::
+        This function is deprecated. Use :func:`get_pce_info` instead,
+        which provides per-detector filter information from the consolidated
+        PCE data.
 
     Load NIRCam, NIRISS, and MIRI filters from the SVO Filter Profile Service.
     http://svo2.cab.inta-csic.es/theory/fps/
@@ -892,6 +963,9 @@ def get_filter_info(instrument, timeout=1, do_svo=True, return_more=False):
     return_more : bool
         If True, also return `do_svo` variable, whether SVO was used or not.
     """
+
+    log.warning('get_filter_info is deprecated. Use get_pce_info instead for '
+                'per-detector filter information from the consolidated PCE data.')
 
     iname_upper = instrument.upper()
 
@@ -1201,22 +1275,44 @@ def gaussian_kernel(sigma_x=1, sigma_y=1, theta_degrees=0, n=6):
     return kernel
 
 
-def get_dqmask(dqarr, bitvalues):
-    """
-    Get DQ mask from DQ array.
+def get_dqmask(dqarr, bitvalues, return_bool=False):
+    """ Get DQ mask from DQ array.
 
-    Given some DQ array and a list of bit values, return a mask
-    for the pixels that have any of the specified bit values.
+    Given some DQ array and a list of bit values, return a filtered
+    bit mask for the pixels that have the specified bit values.
+
+    To get a bad pixel mask of certain types, for instance:
+        bp_mask = get_dqmask(dq, ['SATURATED', 'JUMP_DET', 'RC']) > 0
 
     Parameters
     ----------
     dqarr : ndarray
         DQ array. Either 2D or 3D.
     bitvalues : list
-        List of bit values to use for DQ mask.
-        These values must be powers of 2 (e.g., 1, 2, 4, 8, 16, ...),
+        List of bit values or mnemonics to use for DQ mask. 
+        Numbered values must be powers of 2 (e.g., 1, 2, 4, 8, 16, ...),
         representing the specific DQ bit flags.
+    return_bool : bool
+        If True, return a boolean mask instead of an integer DQ mask.
+        Returns a boolean pixel mask showing which pixels have any of 
+        the specified bit values set.
+
+    Returns
+    -------
+    ndarray
+        DQ mask with only requested bit values set to True.
     """
+
+    from astropy.nddata.bitmask import _is_bit_flag
+    from jwst.datamodels import dqflags
+
+    # Ensure bitvalues is a list or ndarray
+    if not isinstance(bitvalues, (list, np.ndarray)):
+        bitvalues = [bitvalues]
+
+    # Convert any string mnemonics to bit values
+    bitvalues = [dqflags.pixel[val] if isinstance(val, str) else val 
+                 for val in bitvalues]
 
     for v in bitvalues:
         if not _is_bit_flag(v):
@@ -1228,7 +1324,10 @@ def get_dqmask(dqarr, bitvalues):
     for bitval in bitvalues:
         dqmask = dqmask | (dqarr & bitval)
 
-    return dqmask
+    if return_bool:
+        return dqmask > 0
+    else:
+        return dqmask
 
 
 def pop_pxar_kw(filepaths):
