@@ -1,5 +1,7 @@
 from . import analysistools
 from . import classpsfsubpipeline
+from . import widefield1pipeline
+from . import widefield2pipeline
 from . import coron1pipeline
 from . import coron2pipeline
 from . import coron3pipeline
