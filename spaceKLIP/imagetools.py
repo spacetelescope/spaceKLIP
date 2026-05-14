@@ -1237,7 +1237,7 @@ class ImageTools():
     def find_bad_pixels(self,
                         method='dqarr',
                         set_dq_zero=True,
-                        dqarr_kwargs={},
+                        pixles2nans_mask={},
                         sigclip_kwargs={},
                         custom_kwargs={},
                         timeints_kwargs={},
@@ -1267,9 +1267,8 @@ class ImageTools():
             Toggle to start a new empty DQ array, or built upon the existing array.
 
             The default is True
-        dqarr_kwargs : dict, optional
-            Keyword arguments for the 'dqarr' identification method. Available keywords are:
-
+        pixles2nans_mask : dict, optional
+            list of coordinates to put to Nans before running the nanmask.
             The default is {}.
         sigclip_kwargs : dict, optional
             Keyword arguments for the 'sigclip' identification methods. Available keywords are:
@@ -1307,7 +1306,7 @@ class ImageTools():
         None
 
         """
-        def nan_clusters_mask(image, min_nancluster):
+        def nan_clusters_mask(image, min_nancluster=None, pixles2nans_mask={}, key=None):
             """
             Create a 3D boolean mask where NaN clusters larger than min_nancluster are marked as True,
             but only checking within each 2D slice (ignoring connections along the Z-axis).
@@ -1319,6 +1318,10 @@ class ImageTools():
             Returns:
             - 3D boolean numpy array with the same shape as input
             """
+            if pixles2nans_mask and (key is not None) and (key in pixles2nans_mask):
+                image = image.copy()
+                image[pixles2nans_mask[key].astype(bool)] = np.nan
+
             # Initialize the output mask (same shape as image)
             output_mask = np.zeros_like(image, dtype=bool)
 
@@ -1361,7 +1364,7 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 if min_nancluster is not None:
-                    nanmask = nan_clusters_mask(data, min_nancluster)
+                    nanmask = nan_clusters_mask(data, min_nancluster, pixles2nans_mask=pixles2nans_mask, key=key)
                 else:
                     nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                     nanmask = ut.read_msk(nanmaskfile)
