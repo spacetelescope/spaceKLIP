@@ -1306,7 +1306,7 @@ class ImageTools():
         None
 
         """
-        def nan_clusters_mask(image, min_nancluster=None, pixles2nans_mask={}, key=None):
+        def nan_clusters_mask(fitsfile, min_nancluster=None, pixles2nans_mask={}, key=None):
             """
             Create a 3D boolean mask where NaN clusters larger than min_nancluster are marked as True,
             but only checking within each 2D slice (ignoring connections along the Z-axis).
@@ -1318,8 +1318,9 @@ class ImageTools():
             Returns:
             - 3D boolean numpy array with the same shape as input
             """
+            data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+            image = data.copy()
             if pixles2nans_mask and (key is not None) and (key in pixles2nans_mask):
-                image = image.copy()
                 image[pixles2nans_mask[key].astype(bool)] = np.nan
 
             # Initialize the output mask (same shape as image)
@@ -1338,7 +1339,16 @@ class ImageTools():
                         if np.sum(cluster_mask) >= min_nancluster:  # Only keep clusters larger than min_nancluster
                             output_mask[z][sl][cluster_mask] = True
 
-            return np.nanmedian(output_mask.astype(int), axis=0)
+            nan_mask = np.nanmedian(output_mask.astype(int), axis=0)
+            new_dq = pxdq.copy()
+            new_dq[:,nan_mask.astype(bool)] = dqflags.pixel['DO_NOT_USE']
+
+            # Write FITS file and PSF mask.
+            fitsfile = ut.write_obs(fitsfile, output_dir, image, erro, new_dq, head_pri, head_sci, is2d,
+                                    align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                    center_mask=center_mask, maskoffs=maskoffs)
+
+            return nan_mask, fitsfile
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -1357,17 +1367,17 @@ class ImageTools():
             # Loop through FITS files.
             nfitsfiles = len(self.database.obs[key])
             for j in range(nfitsfiles):
-
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
-                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
-                maskfile = self.database.obs[key]['MASKFILE'][j]
-                mask = ut.read_msk(maskfile)
                 if min_nancluster is not None:
-                    nanmask = nan_clusters_mask(data, min_nancluster, pixles2nans_mask=pixles2nans_mask, key=key)
+                    nanmask, fitsfile = nan_clusters_mask(fitsfile,min_nancluster, pixles2nans_mask=pixles2nans_mask, key=key)
                 else:
                     nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                     nanmask = ut.read_msk(nanmaskfile)
+
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
                 pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
 
                 if set_dq_zero:  # set_dq_zero
