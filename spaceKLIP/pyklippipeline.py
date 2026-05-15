@@ -98,6 +98,8 @@ def run_obs(database,
         kwargs['numbasis'] = [1, 2, 5, 10, 20, 50, 100]
     if not isinstance(kwargs['numbasis'], list):
         kwargs['numbasis'] = [kwargs['numbasis']]
+    if 'IWA' not in kwargs.keys():
+        kwargs['IWA'] = 1.
     kwargs_temp = kwargs.copy()
     if 'movement' not in kwargs_temp.keys():
         kwargs_temp['movement'] = 1.
@@ -145,6 +147,7 @@ def run_obs(database,
                                highpass=kwargs_temp['highpass'],
                                center_include_offset=False,
                                center_keywords=['STARCENX','STARCENY'])
+            dataset.IWA = kwargs['IWA']
             kwargs_temp['dataset'] = dataset
             kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
             kwargs_temp['psf_library'] = dataset.psflib
@@ -166,6 +169,7 @@ def run_obs(database,
                     # Need to cleanup some kwargs that we're using but pyKLIP doesn't
                     del kwargs_temp_temp['save_full_output']
                     del kwargs_temp_temp['save_rolls']
+                    del kwargs_temp_temp['IWA']
                     parallelized.klip_dataset(**kwargs_temp_temp)
 
                     # Get reduction path.
