@@ -4,12 +4,31 @@ import sep
 from pathlib import Path
 from typing import Any, Literal, SupportsFloat, SupportsIndex, cast
 from astropy.wcs import WCS
-from astropy.io import fits
-from astropy.table import Table, vstack
+import matplotlib.pylab as plt
+from astropy.table import Table
+from astropy.visualization import simple_norm
+from astropy.nddata import NDData
+from photutils.psf import extract_stars
 
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+
+def stars_extractor(data,xs,ys, size=61, showplots=False):
+    #  Create a Table of star positions for extraction
+    star_tbl = Table([xs, ys], names=['x', 'y'])
+    # Extract stars from the masked data (cutout size is set to 25x25)
+    nddata = NDData(data)  # Input masked data for cutout extraction
+    stars = extract_stars(nddata, star_tbl, size=size)
+    if showplots:
+        for el in range(len(stars)):
+            norm = simple_norm(stars[el].data, 'log')
+            plt.imshow(stars[el].data, origin='lower', norm=norm)
+            plt.colorbar()
+            plt.title(f'Extracted Star {el}')
+            plt.show()
+
+    return stars
 
 def sextractor_flag_short(flag: int) -> str:
     """Return a short description for a SExtractor/SEP FLAGS bitmask.
@@ -425,73 +444,6 @@ def write_ds9_regions_from_sep_objects(
 
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
     return out
-
-def load_data(fits_path, err_mode):
-    """Load a JWST-style FITS file and return background-subtracted data.
-
-    Parameters
-    ----------
-    fits_path : str
-        Path to an input FITS file containing a ``SCI`` extension.
-    err_mode : {'jwst_err', 'bkg_rms', 'global', 'sqrt'}
-        Error model used to return ``err``.
-
-    Returns
-    -------
-    header : astropy.io.fits.Header
-        SCI header used for WCS conversion.
-    data_sub : 2D-array
-        Background-subtracted SCI image (first integration).
-    err : float or 2D-array
-        Error estimate (scalar or per-pixel map depending on ``err_mode``).
-    mask : 2D-array (bool)
-        Mask of invalid pixels for SEP.
-
-    """
-    # Read image and WCS from the *same* HDU.
-    # In JWST calints products, the sky WCS lives in the SCI extension header.
-    with fits.open(fits_path) as hdul:
-        sci = hdul["SCI"]
-        header = sci.header
-        data = sci.data[0]
-        _err0 = hdul["ERR"].data[0] if "ERR" in hdul else None
-    data = data.astype(data.dtype.newbyteorder("="))
-
-    # # Optional per-pixel uncertainty map (recommended if present).
-    # err_map: np.ndarray | None = None
-    if _err0 is not None:
-        err_map = np.asarray(_err0, dtype=float)
-        err_map = err_map.astype(err_map.dtype.newbyteorder("="))
-    else:
-        err_map = None
-
-    # Mask invalid pixels early. SEP does not like NaNs.
-    mask = ~np.isfinite(data) | (data<=0)
-    if err_map is not None:
-        mask |= ~np.isfinite(err_map) | (err_map <= 0)
-
-    # measure a spatially varying background on the image
-    bkg = sep.Background(data, mask=mask)
-
-    # subtract the background
-    data_sub = data - bkg
-
-    # err: float | np.ndarray
-    # NOTE: some modes (e.g. 'sqrt') are applied later inside
-    # sources_extraction; here we still return a reasonable scalar/array that
-    # can be used as a noise floor.
-    if err_mode == "jwst_err":
-        err = err_map if err_map is not None else float(bkg.globalrms)
-    elif err_mode == "bkg_rms":
-        err = bkg.rms()
-    elif err_mode in ("global", "sqrt"):
-        err = float(bkg.globalrms)
-    else:
-        raise ValueError(
-            "Unknown err_mode. Expected one of: 'jwst_err', 'bkg_rms', 'global', 'sqrt'. "
-            f"Got: {err_mode!r}"
-        )
-    return header,data_sub,err,mask
 
 def sources_extraction(
     header,
