@@ -9,12 +9,314 @@ from astropy.table import Table
 from astropy.visualization import simple_norm
 from astropy.nddata import NDData
 from photutils.psf import extract_stars
+from photutils.psf import FittableImageModel
+from astropy.stats import sigma_clipped_stats
+from astropy.modeling import fitting
 
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-def estimate_nan_core(data, center=None, margin=1) -> tuple[int, float, float]:
+def estimate_bkg_and_rms(data2d, edge_width=5):
+    """Estimate background median and RMS from cutout border pixels.
+
+    Parameters
+    ----------
+    data2d : 2D-array
+        Image cutout.
+    edge_width : int, optional
+        Width (pixels) of the border used for the estimate.
+
+    Returns
+    -------
+    bkg : float
+        Background median.
+    rms : float
+        Robust RMS estimate.
+
+    """
+    data2d = np.asarray(data2d, dtype=float)
+    ny, nx = data2d.shape
+    ew = int(max(1, min(edge_width, ny // 2, nx // 2)))
+    edge = np.zeros_like(data2d, dtype=bool)
+    edge[:ew, :] = True
+    edge[-ew:, :] = True
+    edge[:, :ew] = True
+    edge[:, -ew:] = True
+    vals = data2d[edge]
+    vals = vals[np.isfinite(vals)]
+    if vals.size < 10:
+        vals = data2d[np.isfinite(data2d)]
+    if vals.size == 0:
+        return 0.0, 1.0
+
+    mean, med, std = sigma_clipped_stats(vals, sigma=3.0, maxiters=5)
+    return float(med), float(std if std > 0 else 1.0)
+
+def fit_psf(
+    masked_psf_data,
+    data,
+    oversampling=1,
+    radius_core=0,
+    fit_radius=None,
+    initial_center="auto",
+    search_radius=None,
+    snr_threshold=10.0,
+    bkg_subtract=True,
+    edge_bkg_width=8,
+    two_pass=True,
+    showplots=False,
+    cmap='Greys_r',
+    stretch='linear'
+):
+    """Fit a (possibly oversampled) PSF model to an image cutout.
+
+    Parameters
+    ----------
+    masked_psf_data : 2D-array
+        PSF model image (may be oversampled; see ``oversampling``).
+    data : 2D-array
+        Image cutout to fit.
+    mask_size : int, optional
+        Reserved/legacy argument (kept for API compatibility).
+    oversampling : int, optional
+        Oversampling factor of the PSF model relative to the data.
+    radius_core : float, optional
+        Radius (in *data* pixels) of the saturated/NaN core to exclude from the
+        fit.
+    fit_radius : float, optional
+        Radius (in data pixels) defining the fitting region. If None, fits the
+        full cutout.
+    initial_center : {'auto', 'max', 'center', 'matched_filter'} or (x, y), optional
+        Initial guess for the center.
+    search_radius : float, optional
+        Search radius (pixels) for the matched-filter initialization.
+    snr_threshold : float, optional
+        If peak SNR is below this value, default initialization switches to a
+        matched filter.
+    bkg_subtract : bool, optional
+        If True, subtract a robust background estimate.
+    edge_bkg_width : int, optional
+        Border width (pixels) for background/RMS estimation.
+    two_pass : bool, optional
+        If True and ``fit_radius`` is set, do a broad pass followed by a tighter
+        pass.
+    showplots : bool, optional
+        If True, show a diagnostic plot.
+
+    Returns
+    -------
+    fitted_x_pos, fitted_y_pos, fitted_flux : float
+        Best-fit PSF center and flux in cutout coordinates.
+
+    Notes
+    -----
+    Photutils/Astropy convention: ``x`` is the *column* coordinate and ``y`` is
+    the *row* coordinate.
+
+    """
+
+    data_cutout = np.asarray(data, dtype=float)
+
+    # Robust background subtraction is critical at low S/N.
+    bkg, rms = estimate_bkg_and_rms(data_cutout, edge_width=edge_bkg_width)
+    if bkg_subtract:
+        data_fit = data_cutout - bkg
+    else:
+        data_fit = data_cutout
+
+    # Use the PSF as the model (with the core optionally masked).
+    # IMPORTANT: if the PSF is oversampled w.r.t. the data, tell photutils.
+    psf_model = FittableImageModel(masked_psf_data, oversampling=oversampling)
+
+    # Use the LevMarLSQFitter to fit the PSF to the data.
+    fitter = fitting.LevMarLSQFitter()
+
+    ny, nx = data_fit.shape
+    yy, xx = np.mgrid[0:ny, 0:nx]
+
+    # For saturated stars we want to keep the masked core fixed on the NaN core.
+    core_mask_x = (nx - 1) / 2
+    core_mask_y = (ny - 1) / 2
+    if radius_core and radius_core > 0 and np.any(~np.isfinite(data_cutout)):
+        _, core_mask_x, core_mask_y = estimate_nan_core(data_cutout, margin=0)
+
+    def _make_weights(center_x, center_y, _fit_radius):
+        w = np.zeros_like(data_fit, dtype=float)
+        w[finite] = 1.0 / (rms**2 + 1e-30)
+
+        if _fit_radius is not None:
+            rr2 = (xx - float(center_x)) ** 2 + (yy - float(center_y)) ** 2
+            w[rr2 > float(_fit_radius) ** 2] = 0.0
+
+        if radius_core and radius_core > 0:
+            rr2 = (xx - float(core_mask_x)) ** 2 + (yy - float(core_mask_y)) ** 2
+            w[rr2 < float(radius_core) ** 2] = 0.0
+        return w
+
+    # Reasonable initial guesses matter a lot for position fitting.
+    x_center = (nx - 1) / 2
+    y_center = (ny - 1) / 2
+    x0_init = x_center
+    y0_init = y_center
+
+    # Allow explicitly providing the initial center as (x, y).
+    if isinstance(initial_center, (tuple, list, np.ndarray)) and len(initial_center) == 2:
+        x0_init = float(initial_center[0])
+        y0_init = float(initial_center[1])
+        mode = "given"
+    else:
+        mode = initial_center
+
+    finite = np.isfinite(data_fit)
+    if np.any(finite):
+        peak_snr = float(np.nanmax(data_fit[finite]) / (rms + 1e-12))
+    else:
+        peak_snr = 0.0
+
+    # Saturated stars (NaNs in the core): fitting only the wings is much more stable if
+    # we (1) initialize with a matched-filter and (2) restrict the fitting region.
+    if radius_core and radius_core > 0:
+        if fit_radius is None:
+            fit_radius = float((min(nx, ny) - 1) / 2)
+        if search_radius is None:
+            search_radius = min(20.0, float(fit_radius))
+
+    if mode == "auto":
+        # At high S/N, the brightest pixel is usually reliable.
+        # At low S/N, use a matched-filter (cross-correlation) initial guess.
+        if radius_core and radius_core > 0:
+            # Wing-only (ring-like) correlations can be ambiguous; start at the NaN core.
+            mode = "center"
+        else:
+            mode = "matched_filter" if peak_snr < float(snr_threshold) else "max"
+
+    if mode == "max" and np.any(finite):
+        iy, ix = np.unravel_index(np.nanargmax(data_fit), data_fit.shape)
+        x0_init, y0_init = float(ix), float(iy)
+    elif mode == "center":
+        # For saturated stars: use NaN-core centroid if available.
+        x0_init, y0_init = float(core_mask_x), float(core_mask_y)
+    elif mode == "matched_filter" and np.any(finite):
+        try:
+            from scipy.signal import fftconvolve
+
+            psf_det = _downsample_psf_to_detector(masked_psf_data, oversampling)
+            psf_det = np.asarray(psf_det, dtype=float)
+            if np.all(psf_det == 0) or not np.isfinite(psf_det).any():
+                raise ValueError("PSF is all zeros or non-finite")
+            # Normalize for correlation stability.
+            psf_det = psf_det / (np.nansum(psf_det) + 1e-30)
+            # Cross-correlation peak gives a good starting point for faint sources.
+            corr = fftconvolve(
+                np.nan_to_num(data_fit, nan=0.0),
+                psf_det[::-1, ::-1],
+                mode="same",
+            )
+
+            # Restrict peak search to an area where we expect the source to be.
+            # This greatly reduces catastrophic failures at very low S/N.
+            sr = search_radius
+            if sr is None:
+                sr = fit_radius
+            if sr is not None:
+                rr2 = (xx - x_center) ** 2 + (yy - y_center) ** 2
+                corr = corr.copy()
+                corr[rr2 > float(sr) ** 2] = -np.inf
+
+            iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
+
+            # Subpixel peak estimate via quadratic interpolation in x and y.
+            def _quad_peak(v_minus, v0, v_plus):
+                denom = (v_minus - 2.0 * v0 + v_plus)
+                if denom == 0:
+                    return 0.0
+                return 0.5 * (v_minus - v_plus) / denom
+
+            dx = 0.0
+            dy = 0.0
+            if 1 <= ix < (nx - 1):
+                dx = _quad_peak(corr[iy, ix - 1], corr[iy, ix], corr[iy, ix + 1])
+                dx = float(np.clip(dx, -1.0, 1.0))
+            if 1 <= iy < (ny - 1):
+                dy = _quad_peak(corr[iy - 1, ix], corr[iy, ix], corr[iy + 1, ix])
+                dy = float(np.clip(dy, -1.0, 1.0))
+
+            x0_init, y0_init = float(ix) + dx, float(iy) + dy
+        except Exception:
+            # Safe fallback if scipy is missing or correlation fails.
+            pass
+
+    psf_model.x_0.value = x0_init
+    psf_model.y_0.value = y0_init
+
+    # Flux guess: keep it positive; use peak*SOMETHING as crude initial scale.
+    if np.any(finite):
+        psf_model.flux.value = max(float(np.nanmax(data_fit[finite])), 0.0)
+    else:
+        psf_model.flux.value = 0.0
+
+    # Parameter bounds: helps stability.
+    # For saturated stars with masked cores, the position can become weakly constrained;
+    # restrict it to remain near the initial guess.
+    if radius_core and radius_core > 0:
+        delta = float(max(3, int(radius_core)))
+        psf_model.x_0.bounds = (max(0.0, x0_init - delta), min(float(nx - 1), x0_init + delta))
+        psf_model.y_0.bounds = (max(0.0, y0_init - delta), min(float(ny - 1), y0_init + delta))
+    else:
+        psf_model.x_0.bounds = (0.0, float(nx - 1))
+        psf_model.y_0.bounds = (0.0, float(ny - 1))
+    psf_model.flux.bounds = (0.0, np.inf)
+
+    # Perform the fit.
+    # For low S/N, restricting too aggressively to a small radius around a potentially-wrong
+    # initial guess can lock the optimizer onto the wrong solution. In that case we do a
+    # broader first pass, then a tighter second pass.
+    if fit_radius is not None and two_pass:
+        first_pass_radius = float(fit_radius)
+        if peak_snr < 10:
+            first_pass_radius = float(fit_radius) * 2.0
+
+        weights1 = _make_weights(psf_model.x_0.value, psf_model.y_0.value, first_pass_radius)
+        fit1 = fitter(psf_model, xx, yy, data_fit, weights=weights1, filter_non_finite=True)
+
+        # Recenter for second pass.
+        psf_model.x_0.value = fit1.x_0.value
+        psf_model.y_0.value = fit1.y_0.value
+        psf_model.flux.value = max(float(fit1.flux.value), 0.0)
+
+        weights2 = _make_weights(psf_model.x_0.value, psf_model.y_0.value, float(fit_radius))
+        fit_result = fitter(psf_model, xx, yy, data_fit, weights=weights2, filter_non_finite=True)
+    else:
+        weights = _make_weights(psf_model.x_0.value, psf_model.y_0.value, fit_radius)
+        fit_result = fitter(psf_model, xx, yy, data_fit, weights=weights, filter_non_finite=True)
+
+    # Step 8: Output the fitted flux and position
+    fitted_flux = fit_result.flux.value
+    fitted_x_pos = fit_result.x_0.value
+    fitted_y_pos = fit_result.y_0.value
+
+    if showplots:
+        log.info(f"Fitted Flux: {fitted_flux}")
+        log.info(f"Fitted X Position: {fitted_x_pos}")
+        log.info(f"Fitted Y Position: {fitted_y_pos}")
+        log.info(f"Estimated background (median): {bkg}")
+        log.info(f"Estimated RMS: {rms}")
+
+        norm = simple_norm(data_fit, stretch)
+        # Plot in the same convention used elsewhere in this script.
+        plt.imshow(data_fit, origin='lower', cmap=cmap, norm=norm)
+        plt.plot(fitted_x_pos, (ny - 1) - fitted_y_pos, 'ob')
+        plt.colorbar()
+        plt.title('Data to fit with fitted center')
+        plt.show()
+
+    return fitted_x_pos,fitted_y_pos,fitted_flux
+
+def estimate_nan_core(data,
+                      center=None,
+                      margin=1,
+) -> tuple[int, float, float]:
     """Estimate centroid and radius of a connected non-finite (NaN/Inf) core.
 
     Parameters
@@ -84,7 +386,14 @@ def estimate_nan_core(data, center=None, margin=1) -> tuple[int, float, float]:
     radius = int(np.ceil(np.nanmax(rr[region])) + int(margin))
     return radius, x_cent, y_cent
 
-def stars_extractor(data,xs,ys, size=61, showplots=False):
+def stars_extractor(data,
+                    xs,
+                    ys,
+                    size=61,
+                    showplots=False,
+                    cmap='Greys_r',
+                    stretch='linear'
+):
     #  Create a Table of star positions for extraction
     star_tbl = Table([xs, ys], names=['x', 'y'])
     # Extract stars from the masked data (cutout size is set to 25x25)
@@ -92,8 +401,8 @@ def stars_extractor(data,xs,ys, size=61, showplots=False):
     stars = extract_stars(nddata, star_tbl, size=size)
     if showplots:
         for el in range(len(stars)):
-            norm = simple_norm(stars[el].data, 'log')
-            plt.imshow(stars[el].data, origin='lower', norm=norm)
+            norm = simple_norm(stars[el].data, stretch)
+            plt.imshow(stars[el].data, origin='lower', norm=norm,cmap=cmap)
             plt.colorbar()
             plt.title(f'Extracted Star {el}')
             plt.show()
