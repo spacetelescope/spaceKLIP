@@ -12,21 +12,23 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 def sextractor_flag_short(flag: int) -> str:
-    """Return a short human-readable description for a SExtractor/SEP FLAGS bitmask.
+    """Return a short description for a SExtractor/SEP FLAGS bitmask.
 
-    SExtractor-style flags are a *bitmask* (multiple bits can be set at once).
-    Since you asked for a 1–2 word summary, we apply a simple priority order and
-    return the most "important" issue.
+    Parameters
+    ----------
+    flag : int
+        SExtractor-style FLAGS value (bitmask).
 
-    Common bits (SExtractor convention)
-    ----------------------------------
-    - 1: edge      (object truncated / near image boundary)
-    - 2: blended   (deblended from a neighbor)
-    - 4: saturated (contains saturated pixels)
-    - 8: neighbor  (affected by bright neighbor / deblending/cleaning issue)
-    - 16: badpix   (contains bad/masked pixels)
+    Returns
+    -------
+    str
+        One-word summary (e.g. ``'ok'``, ``'saturated'``, ``'badpix'``).
 
-    Higher bits exist but are less consistently used across configs/versions.
+    Notes
+    -----
+    The input is a bitmask; if multiple bits are set, this routine returns the
+    highest-priority label.
+
     """
     f = int(flag)
     if f == 0:
@@ -47,23 +49,22 @@ def sextractor_flag_short(flag: int) -> str:
 
 
 def aperture_flag_short(ap_flag: int) -> str:
-    """Return a short human-readable description for SEP aperture flags.
+    """Return a short description for SEP aperture-photometry flags.
 
-    This decodes the `flags` returned by `sep.sum_circle` (and friends).
-    The values are bitmasks with SEP-defined bits:
+    Parameters
+    ----------
+    ap_flag : int
+        Bitmask flag returned by ``sep.sum_circle`` (or similar).
 
-    - sep.APER_TRUNC (16): aperture truncated by image boundary
-    - sep.APER_HASMASKED (32): some masked pixels inside aperture
-    - sep.APER_ALLMASKED (64): all pixels masked (may not always be set; see note)
-    - sep.APER_NONPOSITIVE (128): non-positive variance/noise term encountered
+    Returns
+    -------
+    str
+        One-word summary (e.g. ``'ok'``, ``'truncated'``, ``'maskedpixels'``).
 
-    Since you asked for a 1–2 word description, we use a priority rule.
+    Notes
+    -----
+    This routine decodes a bitmask and returns the highest-priority label.
 
-    Note
-    ----
-    In practice, some SEP builds will return NaN sums/errors when everything is
-    masked but still only set APER_HASMASKED. For that reason, it is best to
-    ALSO check for non-finite `sum`/`sumerr`.
     """
     f = int(ap_flag)
     if f == 0:
@@ -80,10 +81,20 @@ def aperture_flag_short(ap_flag: int) -> str:
 
 
 def _as_fixed_str_array(values: list[str], *, width: int = 64) -> np.ndarray:
-    """Return a numpy unicode array with a fixed width.
+    """Return a fixed-width unicode array for safe insertion into Astropy tables.
 
-    This avoids an Astropy edge case: assigning an *empty* python list to a Table
-    column may default to float dtype, which later breaks `astropy.table.vstack`.
+    Parameters
+    ----------
+    values : list of str
+        Input strings.
+    width : int, optional
+        Fixed string width (characters).
+
+    Returns
+    -------
+    numpy.ndarray
+        Unicode array with dtype ``U<width>``.
+
     """
     if width <= 0:
         width = 1
@@ -100,32 +111,39 @@ def select_table(
     ap_flag_sel: list[int] | None = None,
     window_shape: Literal["circle", "square"] = "circle",
 ) -> Table:
-    """Select detections using filters + non-maximum suppression on `peak`.
-
-    For every detection, look for other detections within `separation_pix` and
-    keep only the one with the highest `peak` value (ties broken by lower index).
-
-    This is equivalent to a greedy non-maximum suppression (NMS): sort by peak
-    descending, keep a detection if it hasn't been suppressed, then suppress
-    all neighbors within the given radius.
+    """Select detections using filters + non-maximum suppression.
 
     Parameters
     ----------
-    objects_tbl
-        SEP output as an Astropy table.
-    separation_pix
-        Radius in pixels within which only one detection is kept.
-    center
-        Which coordinates to use for the distance check: "peak" uses SEP
-        xpeak/ypeak; "centroid" uses x/y.
-    peak_col
-        Column used to rank detections (default: "peak").
-    flag_sel
-        If not None, keep only rows whose SEP detection flag (column ``'flag'``)
-        is exactly in this list of integers.
-    ap_flag_sel
-        If not None, keep only rows whose SEP aperture-photometry flag (column
-        ``'ap_flag'``) is exactly in this list of integers.
+    objects_tbl : astropy.table.Table
+        SEP detections table.
+    separation_pix : float, optional
+        If provided, keep only the brightest detection within this radius.
+    center : {'centroid', 'peak'}, optional
+        Coordinates used for the separation check.
+    peak_col : str, optional
+        Column used to rank detections (default: ``'peak'``).
+    ap_snr : float, optional
+        If provided, apply an SNR cut (uses ``'peak_snr'`` if ``peak_col='peak'``
+        else uses ``'ap_snr'``).
+    maxrat : float, optional
+        If provided, remove elongated detections using the ``'ellipt'`` column.
+    flag_sel : list of int, optional
+        Keep only rows whose SEP detection flag (``'flag'``) is exactly in this list.
+    ap_flag_sel : list of int, optional
+        Keep only rows whose aperture flag (``'ap_flag'``) is exactly in this list.
+    window_shape : {'circle', 'square'}, optional
+        Neighborhood shape for the separation check.
+
+    Returns
+    -------
+    astropy.table.Table
+        Filtered table with a ``'ds9_id'`` column added.
+
+    Notes
+    -----
+    SEP coordinates are 0-indexed numpy pixel coordinates.
+
     """
     # Work on a copy: this function is a selector and should not mutate inputs.
     objects_tbl = objects_tbl.copy()
@@ -267,28 +285,44 @@ def write_ds9_regions_from_sep_objects(
     round_ratio: tuple[float, float] = (0.7, 1.3),
     only_round: bool = True,
 ) -> Path:
-    """Write a DS9 region file (image/pixel coords) from SEP detections.
+    """Write a DS9 region file (image/pixel coordinates) from SEP detections.
+
+    Parameters
+    ----------
+    objects_tbl : astropy.table.Table
+        SEP detections table (requires at least x/y/a/b/theta; and xpeak/ypeak if
+        ``center='peak'`` is used).
+    output_path : str or pathlib.Path
+        Output ``.reg`` path.
+    shape : {'ellipse', 'circle', 'square'}, optional
+        Region primitive.
+    center : {'centroid', 'peak'}, optional
+        Centering convention for regions.
+    color : str, optional
+        DS9 region color.
+    scale : float, optional
+        Scale factor applied to SEP a/b when deriving region sizes.
+    circle_radius : {'geom', 'mean', 'max'} or float or None, optional
+        Circle radius rule for ``shape='circle'``/``'square'``. If a float, use
+        a fixed radius in pixels. If None, read a per-row radius from
+        ``circle_radius_col``.
+    circle_radius_col : str, optional
+        Column name used when ``circle_radius is None``.
+    round_ratio : tuple of float, optional
+        Allowed ``a/b`` ratio range when ``only_round`` is True.
+    only_round : bool, optional
+        If True, keep only approximately round detections.
+
+    Returns
+    -------
+    pathlib.Path
+        Output region-file path.
 
     Notes
     -----
-    - SEP returns x/y (centroid) in 0-indexed numpy pixel coordinates.
-      It also provides xpeak/ypeak (peak pixel). Set `center="peak"` to
-      center circles/ellipses on that peak pixel instead of the centroid.
-    - DS9 "image" coordinates are 1-indexed, so we add +1.
-    - DS9 ellipse syntax is: ellipse(x, y, r1, r2, angle)
-      where r1/r2 are *radii* in pixels.
-    - DS9 circle syntax is: circle(x, y, r)
-    - SEP a/b are RMS sizes (roughly Gaussian sigma along axes); the script
-      currently plots diameters of 6*a and 6*b. We therefore write radii of
-      (6/2)*a = 3*a (controlled by `scale`).
+    DS9 image coordinates are 1-indexed; SEP x/y are 0-indexed. This routine
+    applies the +1 conversion automatically.
 
-    Circle radii
-    ------------
-    For ``shape='circle'`` you can set ``circle_radius`` in two ways:
-
-    - One of: "geom", "mean", "max" (computed from SEP a/b, then multiplied by ``scale``)
-    - A numeric value (float/int): interpreted as a *fixed* radius in pixels
-      (``scale`` is ignored in that case).
     """
     out = Path(output_path).expanduser().resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -393,6 +427,27 @@ def write_ds9_regions_from_sep_objects(
     return out
 
 def load_data(fits_path, err_mode):
+    """Load a JWST-style FITS file and return background-subtracted data.
+
+    Parameters
+    ----------
+    fits_path : str
+        Path to an input FITS file containing a ``SCI`` extension.
+    err_mode : {'jwst_err', 'bkg_rms', 'global', 'sqrt'}
+        Error model used to return ``err``.
+
+    Returns
+    -------
+    header : astropy.io.fits.Header
+        SCI header used for WCS conversion.
+    data_sub : 2D-array
+        Background-subtracted SCI image (first integration).
+    err : float or 2D-array
+        Error estimate (scalar or per-pixel map depending on ``err_mode``).
+    mask : 2D-array (bool)
+        Mask of invalid pixels for SEP.
+
+    """
     # Read image and WCS from the *same* HDU.
     # In JWST calints products, the sky WCS lives in the SCI extension header.
     with fits.open(fits_path) as hdul:
@@ -450,6 +505,35 @@ def sources_extraction(
     *,
     err_mode: str = "global",
 ):
+    """Run SEP source extraction + aperture photometry + WCS coordinate conversion.
+
+    Parameters
+    ----------
+    header : astropy.io.fits.Header
+        Header providing a 2D celestial WCS.
+    data_sub : 2D-array
+        Background-subtracted image.
+    err : float or 2D-array
+        Error estimate from ``load_data``.
+    mask : 2D-array (bool)
+        Bad-pixel mask.
+    thresh_sigma : float
+        Detection threshold in units of ``err``.
+    region_center : {'centroid', 'peak'}
+        Which coordinates are converted to RA/Dec.
+    aperture_radius_pix : float, optional
+        Aperture radius (pixels) for ``sep.sum_circle``.
+    minarea : int, optional
+        Minimum number of connected pixels above threshold.
+    err_mode : {'jwst_err', 'bkg_rms', 'global', 'sqrt'}, optional
+        Error model used inside SEP.
+
+    Returns
+    -------
+    astropy.table.Table
+        SEP detections including aperture photometry, SNR columns, and RA/DEC.
+
+    """
     # When using a low threshold on large images (especially with a spatially
     # varying `err` map), SEP can exceed its default internal pixel buffer.
     # Bump the limit to (at least) the image size.
@@ -555,25 +639,41 @@ def sources_extraction(
     return objects_tbl
 
 def as_list(x: Any) -> list[Any]:
+    """Return ``x`` as a python list.
+
+    Parameters
+    ----------
+    x : object
+        Scalar or list-like.
+
+    Returns
+    -------
+    list
+        ``x`` converted to a list (scalars become a single-element list).
+
+    """
     if isinstance(x, (list, tuple, np.ndarray)):
         return list(x)
     return [x]
 
 def broadcast(value: Any, n: int, newshape=True) -> list[Any]:
-    """Broadcast a scalar or list-like value to *per-run* values.
+    """Broadcast a scalar (or selection list) to per-run values.
 
-    This is intentionally simple:
+    Parameters
+    ----------
+    value : object
+        Scalar or list-like input.
+    n : int
+        Number of runs.
+    newshape : bool, optional
+        Backwards-compatibility toggle. If False, list-like values are deep-copied
+        to length ``n``. If True, list-like values are returned unchanged.
 
-    - If ``value`` is a scalar (e.g. a number/string), return ``[value] * n``.
-    - If ``value`` is list-like, return a *list of lists* of length ``n``,
-      where each entry is a (deep) copy of the provided list.
+    Returns
+    -------
+    list
+        Per-run values.
 
-    Examples
-    --------
-    >>> broadcast(3, 4)
-    [3, 3, 3, 3]
-    >>> broadcast([0, 32], 3)
-    [[0, 32], [0, 32], [0, 32]]
     """
     import copy
 
