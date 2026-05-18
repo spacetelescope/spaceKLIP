@@ -406,8 +406,10 @@ def stars_extractor(data,
     if shifts is None:
         tile = data[int(round(coords[1]))-fow//2:int(round(coords[1]))+fow//2+1, int(round(coords[0]))-fow//2:int(round(coords[0]))+fow//2+1]
     else:
-        tile = ut.imshift(data, [shifts[0], shifts[1]],
-                               pad_amount=shiftpad, method=method, kwargs=kwargs)
+        shifteddata = ut.imshift(data, [shifts[0], shifts[1]],
+                               pad_amount=int(np.ceil(np.sum(np.abs(shifts)))), method=method, kwargs=kwargs)
+        tile = shifteddata[int(round(coords[1]))-fow//2:int(round(coords[1]))+fow//2+1, int(round(coords[0]))-fow//2:int(round(coords[0]))+fow//2+1]
+
     if showplots:
         norm = simple_norm(tile, stretch)
         plt.imshow(tile, origin='lower', norm=norm,cmap=cmap)
