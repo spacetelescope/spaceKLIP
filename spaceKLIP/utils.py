@@ -203,7 +203,8 @@ def write_obs(fitsfile,
               center_mask=None,
               maskoffs=None,
               var_poisson=None,
-              var_rnoise=None):
+              var_rnoise=None,
+              new_fitsfile=None):
     """
     Write an observation to a FITS file.
 
@@ -244,7 +245,8 @@ def write_obs(fitsfile,
         'VAR_POISSON' extension data. The default is None.
     var_rnoise : 3D-array, optional
         'VAR_RNOISE' extension data. The default is None.
-
+    new_fitsfile : path, None
+        If None, path to the new FITS file to save.
     Returns
     -------
     fitsfile : path
@@ -297,7 +299,10 @@ def write_obs(fitsfile,
         hdul['VAR_POISSON'].data = var_poisson
     if var_rnoise is not None:
         hdul['VAR_RNOISE'].data = var_rnoise
-    fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
+    if new_fitsfile is None:
+        fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
+    else:
+        fitsfile = os.path.join(output_dir, os.path.split(new_fitsfile)[1])
     hdul.writeto(fitsfile, output_verify='fix', overwrite=True)
     hdul.close()
 
