@@ -12,6 +12,7 @@ from photutils.psf import extract_stars
 from photutils.psf import FittableImageModel
 from astropy.stats import sigma_clipped_stats
 from astropy.modeling import fitting
+import spaceKLIP.utils as ut
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -387,27 +388,34 @@ def estimate_nan_core(data,
     return radius, x_cent, y_cent
 
 def stars_extractor(data,
-                    xs,
-                    ys,
-                    size=61,
+                    coords,
+                    fow = 101,
+                    shifts = None,
+                    method='fourier',
+                    shiftpad=5,
                     showplots=False,
                     cmap='Greys_r',
-                    stretch='linear'
+                    stretch='linear',
+                    kwargs={}
 ):
-    #  Create a Table of star positions for extraction
-    star_tbl = Table([xs, ys], names=['x', 'y'])
-    # Extract stars from the masked data (cutout size is set to 25x25)
-    nddata = NDData(data)  # Input masked data for cutout extraction
-    stars = extract_stars(nddata, star_tbl, size=size)
+    # #  Create a Table of star positions for extraction
+    # star_tbl = Table([xs, ys], names=['x', 'y'])
+    # # Extract stars from the masked data (cutout size is set to 25x25)
+    # nddata = NDData(data)  # Input masked data for cutout extraction
+    # stars = extract_stars(nddata, star_tbl, size=size)
+    if shifts is None:
+        tile = data[int(round(coords[1]))-fow//2:int(round(coords[1]))+fow//2+1, int(round(coords[0]))-fow//2:int(round(coords[0]))+fow//2+1]
+    else:
+        tile = ut.imshift(data, [shifts[0], shifts[1]],
+                               pad_amount=shiftpad, method=method, kwargs=kwargs)
     if showplots:
-        for el in range(len(stars)):
-            norm = simple_norm(stars[el].data, stretch)
-            plt.imshow(stars[el].data, origin='lower', norm=norm,cmap=cmap)
-            plt.colorbar()
-            plt.title(f'Extracted Star {el}')
-            plt.show()
+        norm = simple_norm(tile, stretch)
+        plt.imshow(tile, origin='lower', norm=norm,cmap=cmap)
+        plt.colorbar()
+        plt.title(f'Extracted Star on integer coordinates')
+        plt.show()
 
-    return stars
+    return tile
 
 def sextractor_flag_short(flag: int) -> str:
     """Return a short description for a SExtractor/SEP FLAGS bitmask.
