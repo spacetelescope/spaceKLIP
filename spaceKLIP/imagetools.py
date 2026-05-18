@@ -19,8 +19,8 @@ import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
 import sep
-from spaceKLIP.widefield_utils import broadcast, sources_extraction, select_table, write_ds9_regions_from_sep_objects,stars_extractor,estimate_nan_core
-from astropy.table import vstack
+from spaceKLIP.widefield_utils import broadcast, sources_extraction, select_table, write_ds9_regions_from_sep_objects,stars_extractor,estimate_nan_core,fit_psf
+from astropy.table import vstack, Table
 
 # astropy imports
 import pysiaf
@@ -55,7 +55,7 @@ from spaceKLIP.xara import core
 from spaceKLIP.utils import gaussian_kernel
 from spaceKLIP.psf import get_offsetpsf
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
-from spaceKLIP import mcmc_tools
+from spaceKLIP import mcmc_tools,database
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.plotting import load_plt_style
@@ -3903,6 +3903,7 @@ class ImageTools():
                                 region_path = os.path.join(output_dir, region_name)
                                 catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
 
+                                # TODO: fix RA/DEC in the objects_tbl
                                 objects_tbl = sources_extraction(
                                     head_pri,
                                     data_sub,
@@ -4049,6 +4050,174 @@ class ImageTools():
                                          nanmaskfile=nanmaskfile)
 
             pass
+
+    def extract_tiles(self,
+                      fov_pixels=101,
+                      oversample=2,
+                      kwargs={},
+                      subdir='tiles',
+                      catdir='pretiles'):
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Find science and reference files.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+
+            # Loop through FITS files.
+            for j in ww_sci:
+
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(
+                    fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
+
+                maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1 indexed
+                maskceny = self.database.obs[key]['MASKCENY'][j]  # 1 indexed
+                nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j]  # 1 indexed
+                nanmaskceny = self.database.obs[key]['NANMASKCENY'][j]  # 1 indexed
+
+                # Recenter frames. Use different algorithms based on data type.
+                head, tail = os.path.split(fitsfile)
+                log.info('--> Extract Tiles from: ' + tail)
+                tile_fitsfile_list=[]
+                targets_table = Table.read(os.path.join(self.database.output_dir,catdir,tail.replace('.fits','_combined.csv')), format="csv")  # explicit
+                if np.sum(np.isnan(data)) != 0:
+                    raise UserWarning('Please replace nan pixels before attempting to recenter frames')
+
+                filt = self.database.obs[key]['FILTER'][j]
+                # Generate the PSF using stpsf
+                nircam = stpsf.NIRCam()
+                nircam.filter = filt
+                # Generate the PSF for a 101x101 pixel field of view and oversample by 4x
+                psf = nircam.calc_psf(fov_pixels=fov_pixels, oversample=oversample)
+                psf_no_coronmsk = psf[0].data
+
+                for k in range(data.shape[0]):
+                    if k == 0:
+                        for el,source in enumerate(targets_table[np.isin(targets_table['ds9_id'],[37])]):
+                            log.info(f'--> Extract Tiles for source: {source["ds9_id"]}')
+                            # Assume we know the coordinates of the source (x_extract, y_extract)
+                            x_extract, y_extract = source['x'], source['y']
+
+                            # Extract tiles around the coordinate of the stars
+                            tile = stars_extractor(data[k], [x_extract, y_extract],showplots=False)
+                            x_guess, y_guess = data[k].shape[0]//2,data[k].shape[1]//2
+
+                            # Estimate NaN core radius (detector pixels).
+                            # For stability, fit with the *full* PSF model and mask only the DATA core during the fit.
+                            radius, _, _ = estimate_nan_core(tile, center=None, margin=1)
+                            radius*=1.2
+                            log.info(f"--> Estimated NaN core radius (detector px): {radius}")
+
+                            if radius ==0:
+                                fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(psf_no_coronmsk,
+                                                                                  tile,
+                                                                                  oversampling=oversample,
+                                                                                  radius_core=radius,
+                                                                                  showplots=False)
+
+                                shifts = np.array([-(fitted_x_pos - tile.shape[1]//2), -(fitted_y_pos - tile.shape[0]//2)])
+                                log.info(f"--> Estimated shifts: {shifts}")
+
+                            if radius >0:
+                                MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j],
+                                                                 kwargs=kwargs)
+
+                                # masked_psf_data = psf_data
+                                # Optional visualization of the masked PSF core:
+                                # _ = mask_core(psf_data, radius * oversample, showplots=True)
+
+                                MCMCTools.run(np.median(tile, axis=0).copy(),
+                                              psf_no_coronmsk,
+                                              x_guess=MCMCTools.x_guess,
+                                              y_guess=MCMCTools.y_guess,
+                                              r=MCMCTools.r,
+                                              nsteps=MCMCTools.nsteps,
+                                              ndim=len(MCMCTools.initial_guess),
+                                              nwalkers=MCMCTools.nwalkers,
+                                              initial_guess=MCMCTools.initial_guess,
+                                              limits=MCMCTools.limits,
+                                              verbose=MCMCTools.verbose,
+                                              size=MCMCTools.size,
+                                              binarity=MCMCTools.binarity,
+                                              filename=output_dir + '/' +self.database.obs[key]['FITSFILE'][j].split('/')[-1].split('.fits')[0])
+
+                                    # Apply the same shift to all SCI and REF frames.
+                                shifts = [np.array([-(MCMCTools.best_fit_params[0] - (data.shape[-1]) // 2),
+                                                     -(MCMCTools.best_fit_params[1] - (data.shape[-2]) // 2)])]
+
+                            # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
+                            # TODO: fix pad_amount that is giving weird results when padding and extracting the tile
+                            tile = stars_extractor(data[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
+
+                            errotile = stars_extractor(erro[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
+                            pxdqtile = stars_extractor(pxdq[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
+                            datatile = np.array(tile)
+                            errotile = np.array(errotile)
+                            pxdqtile = np.array(pxdqtile)
+
+                            if nanmask is not None:
+                                nanmasktile = stars_extractor(nanmask, [x_extract, y_extract], shifts=shifts,
+                                                            fow=fov_pixels, showplots=False)
+
+
+                                nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
+                                nanmasktile[nanmasktile.astype(np.bool)] = 1
+                                nanmasktile = np.array(nanmasktile)
+
+                                nanmaskcenx = fitted_x_pos
+                                nanmaskceny = fitted_y_pos
+
+                            # Update star center.
+                            starcenx = fitted_x_pos
+                            starceny = fitted_y_pos
+
+                            # TODO: update CRPIX accordingly
+                            # Update CRPIX values.
+                            crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0]
+                            crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[1]
+
+                            # Write FITS file and PSF mask.
+                            head_sci['STARCENX'] = starcenx
+                            head_sci['STARCENY'] = starceny
+                            head_sci['MASKCENX'] = maskcenx
+                            head_sci['MASKCENY'] = maskceny
+                            head_sci['NANMASKCENX'] = nanmaskcenx
+                            head_sci['NANMASKCENY'] = nanmaskceny
+                            head_sci['CRPIX1'] = crpix1
+                            head_sci['CRPIX2'] = crpix2
+
+                            DETECTOR = self.database.obs[key]['DETECTOR'][j]
+                            tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["ds9_id"]}_{DETECTOR.lower()}')
+                            # Save fits file.
+                            # TODO: fix WCS in fits tile
+                            tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,
+                                                    is2d,
+                                                    align_shift=align_shift, center_shift=center_shift,
+                                                    align_mask=align_mask,
+                                                    center_mask=center_mask, maskoffs=maskoffs,new_fitsfile=tile_fitsfile)
+                            tile_fitsfile_list.append(tile_fitsfile)
+                            maskfile = ut.write_msk(maskfile, mask, tile_fitsfile)
+                            nanmaskfile = ut.write_msk(nanmaskfile, nanmasktile,tile_fitsfile, '_nanmask.fits')
+
+                # I need to create a new database from scratch since I'm creating snapshots of stars from the original
+                # dataset and the old structure of the original database does not work anymore
+                self.database = database.Database(output_dir=output_dir)
+                self.database.read_jwst_s012_data(datapaths=tile_fitsfile_list)
+
+                pass
+
 
     def calculate_centers_binary(self,
                                 kwargs={},
