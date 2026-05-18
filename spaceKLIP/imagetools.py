@@ -19,8 +19,8 @@ import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
 import sep
-from .widefield_utils import broadcast, sources_extraction, select_table, write_ds9_regions_from_sep_objects
-from astropy.table import Table, vstack
+from spaceKLIP.widefield_utils import broadcast, sources_extraction, select_table, write_ds9_regions_from_sep_objects,stars_extractor,estimate_nan_core
+from astropy.table import vstack
 
 # astropy imports
 import pysiaf
@@ -46,6 +46,7 @@ from webbpsf_ext import robust
 from webbpsf_ext.coords import dist_image
 from webbpsf_ext.webbpsf_ext_core import _transmission_map
 from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
+import stpsf
 
 # spaceKLIP imports
 from spaceKLIP import utils as ut
@@ -3820,7 +3821,6 @@ class ImageTools():
         min_rad = broadcast(min_rad, n)
         enforce_sep_on_final = broadcast(enforce_sep_on_final, n)
 
-        database_temp = deepcopy(self.database.obs)
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Concatenation ' + key)
