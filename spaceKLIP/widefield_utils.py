@@ -13,6 +13,7 @@ from photutils.psf import FittableImageModel
 from astropy.stats import sigma_clipped_stats
 from astropy.modeling import fitting
 import spaceKLIP.utils as ut
+from scipy.signal import fftconvolve
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -54,13 +55,42 @@ def estimate_bkg_and_rms(data2d, edge_width=5):
     mean, med, std = sigma_clipped_stats(vals, sigma=3.0, maxiters=5)
     return float(med), float(std if std > 0 else 1.0)
 
+def downsample_psf_to_detector(psf, oversampling):
+    """Downsample an oversampled PSF to detector sampling by summing blocks.
+
+    Parameters
+    ----------
+    psf : 2D-array
+        Oversampled PSF.
+    oversampling : int
+        Oversampling factor (PSF pixels per detector pixel).
+
+    Returns
+    -------
+    2D-array
+        PSF on detector sampling.
+
+    """
+    if oversampling == 1:
+        return np.asarray(psf, dtype=float)
+
+    psf = np.asarray(psf, dtype=float)
+    ny_os, nx_os = psf.shape
+    if (ny_os % oversampling) != 0 or (nx_os % oversampling) != 0:
+        raise ValueError(
+            f"PSF shape {psf.shape} not divisible by oversampling={oversampling}."
+        )
+    ny = ny_os // oversampling
+    nx = nx_os // oversampling
+    # Sum (not mean) preserves total flux normalization.
+    return psf.reshape(ny, oversampling, nx, oversampling).sum(axis=(1, 3))
+
 def fit_psf(
     masked_psf_data,
     data,
     oversampling=1,
     radius_core=0,
     fit_radius=None,
-    initial_center="auto",
     search_radius=None,
     snr_threshold=10.0,
     bkg_subtract=True,
@@ -88,8 +118,6 @@ def fit_psf(
     fit_radius : float, optional
         Radius (in data pixels) defining the fitting region. If None, fits the
         full cutout.
-    initial_center : {'auto', 'max', 'center', 'matched_filter'} or (x, y), optional
-        Initial guess for the center.
     search_radius : float, optional
         Search radius (pixels) for the matched-filter initialization.
     snr_threshold : float, optional
@@ -161,92 +189,54 @@ def fit_psf(
     x0_init = x_center
     y0_init = y_center
 
-    # Allow explicitly providing the initial center as (x, y).
-    if isinstance(initial_center, (tuple, list, np.ndarray)) and len(initial_center) == 2:
-        x0_init = float(initial_center[0])
-        y0_init = float(initial_center[1])
-        mode = "given"
-    else:
-        mode = initial_center
-
     finite = np.isfinite(data_fit)
     if np.any(finite):
         peak_snr = float(np.nanmax(data_fit[finite]) / (rms + 1e-12))
     else:
         peak_snr = 0.0
 
-    # Saturated stars (NaNs in the core): fitting only the wings is much more stable if
-    # we (1) initialize with a matched-filter and (2) restrict the fitting region.
-    if radius_core and radius_core > 0:
-        if fit_radius is None:
-            fit_radius = float((min(nx, ny) - 1) / 2)
-        if search_radius is None:
-            search_radius = min(20.0, float(fit_radius))
+    psf_det = downsample_psf_to_detector(masked_psf_data, oversampling)
+    psf_det = np.asarray(psf_det, dtype=float)
+    if np.all(psf_det == 0) or not np.isfinite(psf_det).any():
+        raise ValueError("PSF is all zeros or non-finite")
+    # Normalize for correlation stability.
+    psf_det = psf_det / (np.nansum(psf_det) + 1e-30)
+    # Cross-correlation peak gives a good starting point for faint sources.
+    corr = fftconvolve(
+        np.nan_to_num(data_fit, nan=0.0),
+        psf_det[::-1, ::-1],
+        mode="same",
+    )
 
-    if mode == "auto":
-        # At high S/N, the brightest pixel is usually reliable.
-        # At low S/N, use a matched-filter (cross-correlation) initial guess.
-        if radius_core and radius_core > 0:
-            # Wing-only (ring-like) correlations can be ambiguous; start at the NaN core.
-            mode = "center"
-        else:
-            mode = "matched_filter" if peak_snr < float(snr_threshold) else "max"
+    # Restrict peak search to an area where we expect the source to be.
+    # This greatly reduces catastrophic failures at very low S/N.
+    sr = search_radius
+    if sr is None:
+        sr = fit_radius
+    if sr is not None:
+        rr2 = (xx - x_center) ** 2 + (yy - y_center) ** 2
+        corr = corr.copy()
+        corr[rr2 > float(sr) ** 2] = -np.inf
 
-    if mode == "max" and np.any(finite):
-        iy, ix = np.unravel_index(np.nanargmax(data_fit), data_fit.shape)
-        x0_init, y0_init = float(ix), float(iy)
-    elif mode == "center":
-        # For saturated stars: use NaN-core centroid if available.
-        x0_init, y0_init = float(core_mask_x), float(core_mask_y)
-    elif mode == "matched_filter" and np.any(finite):
-        try:
-            from scipy.signal import fftconvolve
+    iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
 
-            psf_det = _downsample_psf_to_detector(masked_psf_data, oversampling)
-            psf_det = np.asarray(psf_det, dtype=float)
-            if np.all(psf_det == 0) or not np.isfinite(psf_det).any():
-                raise ValueError("PSF is all zeros or non-finite")
-            # Normalize for correlation stability.
-            psf_det = psf_det / (np.nansum(psf_det) + 1e-30)
-            # Cross-correlation peak gives a good starting point for faint sources.
-            corr = fftconvolve(
-                np.nan_to_num(data_fit, nan=0.0),
-                psf_det[::-1, ::-1],
-                mode="same",
-            )
+    # Subpixel peak estimate via quadratic interpolation in x and y.
+    def _quad_peak(v_minus, v0, v_plus):
+        denom = (v_minus - 2.0 * v0 + v_plus)
+        if denom == 0:
+            return 0.0
+        return 0.5 * (v_minus - v_plus) / denom
 
-            # Restrict peak search to an area where we expect the source to be.
-            # This greatly reduces catastrophic failures at very low S/N.
-            sr = search_radius
-            if sr is None:
-                sr = fit_radius
-            if sr is not None:
-                rr2 = (xx - x_center) ** 2 + (yy - y_center) ** 2
-                corr = corr.copy()
-                corr[rr2 > float(sr) ** 2] = -np.inf
+    dx = 0.0
+    dy = 0.0
+    if 1 <= ix < (nx - 1):
+        dx = _quad_peak(corr[iy, ix - 1], corr[iy, ix], corr[iy, ix + 1])
+        dx = float(np.clip(dx, -1.0, 1.0))
+    if 1 <= iy < (ny - 1):
+        dy = _quad_peak(corr[iy - 1, ix], corr[iy, ix], corr[iy + 1, ix])
+        dy = float(np.clip(dy, -1.0, 1.0))
 
-            iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
-
-            # Subpixel peak estimate via quadratic interpolation in x and y.
-            def _quad_peak(v_minus, v0, v_plus):
-                denom = (v_minus - 2.0 * v0 + v_plus)
-                if denom == 0:
-                    return 0.0
-                return 0.5 * (v_minus - v_plus) / denom
-
-            dx = 0.0
-            dy = 0.0
-            if 1 <= ix < (nx - 1):
-                dx = _quad_peak(corr[iy, ix - 1], corr[iy, ix], corr[iy, ix + 1])
-                dx = float(np.clip(dx, -1.0, 1.0))
-            if 1 <= iy < (ny - 1):
-                dy = _quad_peak(corr[iy - 1, ix], corr[iy, ix], corr[iy + 1, ix])
-                dy = float(np.clip(dy, -1.0, 1.0))
-
-            x0_init, y0_init = float(ix) + dx, float(iy) + dy
-        except Exception:
-            # Safe fallback if scipy is missing or correlation fails.
-            pass
+    x0_init, y0_init = float(ix) + dx, float(iy) + dy
 
     psf_model.x_0.value = x0_init
     psf_model.y_0.value = y0_init
@@ -307,7 +297,7 @@ def fit_psf(
         norm = simple_norm(data_fit, stretch)
         # Plot in the same convention used elsewhere in this script.
         plt.imshow(data_fit, origin='lower', cmap=cmap, norm=norm)
-        plt.plot(fitted_x_pos, (ny - 1) - fitted_y_pos, 'ob')
+        plt.plot(fitted_x_pos, fitted_y_pos, 'ob')
         plt.colorbar()
         plt.title('Data to fit with fitted center')
         plt.show()
@@ -390,9 +380,9 @@ def estimate_nan_core(data,
 def stars_extractor(data,
                     coords,
                     fow = 101,
+                    pad_amount=0,
                     shifts = None,
                     method='fourier',
-                    shiftpad=5,
                     showplots=False,
                     cmap='Greys_r',
                     stretch='linear',
@@ -406,8 +396,7 @@ def stars_extractor(data,
     if shifts is None:
         tile = data[int(round(coords[1]))-fow//2:int(round(coords[1]))+fow//2+1, int(round(coords[0]))-fow//2:int(round(coords[0]))+fow//2+1]
     else:
-        shifteddata = ut.imshift(data, [shifts[0], shifts[1]],
-                               pad_amount=int(np.ceil(np.sum(np.abs(shifts)))), method=method, kwargs=kwargs)
+        shifteddata = ut.imshift(data, [shifts[0], shifts[1]], pad_amount=pad_amount, method=method, kwargs=kwargs)
         tile = shifteddata[int(round(coords[1]))-fow//2:int(round(coords[1]))+fow//2+1, int(round(coords[0]))-fow//2:int(round(coords[0]))+fow//2+1]
 
     if showplots:
