@@ -14,6 +14,76 @@ from photutils.psf import extract_stars
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
+def estimate_nan_core(data, center=None, margin=1) -> tuple[int, float, float]:
+    """Estimate centroid and radius of a connected non-finite (NaN/Inf) core.
+
+    Parameters
+    ----------
+    data : 2D-array
+        Image cutout.
+    center : tuple of float, optional
+        Starting point ``(x, y)`` for the flood-fill. If None, uses the image
+        center.
+    margin : int, optional
+        Extra pixels added to the returned radius.
+
+    Returns
+    -------
+    radius : int
+        Radius in pixels of the connected non-finite region.
+    x_center, y_center : float
+        Region centroid in cutout coordinates.
+
+    """
+    data = np.asarray(data)
+    ny, nx = data.shape
+    if center is None:
+        cx, cy = (nx - 1) / 2, (ny - 1) / 2
+    else:
+        cx, cy = center
+
+    bad = ~np.isfinite(data)
+
+    sx = int(np.clip(round(cx), 0, nx - 1))
+    sy = int(np.clip(round(cy), 0, ny - 1))
+
+    # If the exact center is finite, look for a bad pixel close to the center.
+    if not bad[sy, sx]:
+        found = False
+        for dy in range(-2, 3):
+            for dx in range(-2, 3):
+                y = sy + dy
+                x = sx + dx
+                if 0 <= y < ny and 0 <= x < nx and bad[y, x]:
+                    sy, sx = y, x
+                    found = True
+                    break
+            if found:
+                break
+        if not found:
+            return 0, float(cx), float(cy)
+
+    # Flood-fill the connected bad region (4-connected).
+    region = np.zeros_like(bad, dtype=bool)
+    stack = [(sy, sx)]
+    region[sy, sx] = True
+    while stack:
+        y, x = stack.pop()
+        for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+            if 0 <= yy < ny and 0 <= xx < nx and bad[yy, xx] and not region[yy, xx]:
+                region[yy, xx] = True
+                stack.append((yy, xx))
+
+    if not np.any(region):
+        return 0, float(cx), float(cy)
+
+    yy, xx = np.indices(data.shape)
+    x_cent = float(np.mean(xx[region]))
+    y_cent = float(np.mean(yy[region]))
+    rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
+    radius = int(np.ceil(np.nanmax(rr[region])) + int(margin))
+    return radius, x_cent, y_cent
+
 def stars_extractor(data,xs,ys, size=61, showplots=False):
     #  Create a Table of star positions for extraction
     star_tbl = Table([xs, ys], names=['x', 'y'])
