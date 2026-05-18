@@ -18,6 +18,9 @@ import lmfit
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
+import sep
+from .widefield_utils import broadcast, sources_extraction, select_table, write_ds9_regions_from_sep_objects
+from astropy.table import Table, vstack
 
 # astropy imports
 import pysiaf
@@ -3675,6 +3678,291 @@ class ImageTools():
 
         pass
 
+    def prepare_tiles_for_extraction(self,
+                      err_mode= 'bkg_rms',
+                      thresh_sigma = [3, 10, 50, 100],
+                      ap_radius = 5,
+                      min_area = [3, 5, 10, 15],
+                      snr = [6, 8, 8, 10],
+                      peak_col = ["peak", "peak", "peak", "apflux"],
+                      max_rat = [0.25, 0.25, 0.25, None],
+                      separation_pix = 125,
+                      flag_sel= 0,
+                      ap_flag_sel = [0,32],
+                      min_rad = 1,
+                      enforce_sep_on_final = True,
+                      kwargs={},
+                      subdir='pretiles'):
+        """
+        Evaluate initial guess to center tiles using SEX-Extractor. Then use refined methods to center correctly the
+        tile and extract them form the original fits file.
+        Create a DS9 region file to show the position of each tile on the original fits file.
+
+        Parameters
+        ----------
+        err_mode : string or list of strings
+
+
+        """
+
+        #reading kwargs for ds9 region file
+        color = kwargs.get('color', 'green')
+        region_shape = kwargs.get('region_shape', 'square')
+        region_center = kwargs.get('region_center', 'peak')
+        save_inner_catalogs = kwargs.get('save_inner_catalogs', False)
+        circle_radius_mode = kwargs.get('circle_radius_mode', None)
+
+        # Set output directory.
+        output_dir = os.path.join(self.database.output_dir, subdir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        if len(thresh_sigma) == 0:
+            raise ValueError("_thresh_sigma must be a list contain at least one entry")
+        n = len(thresh_sigma)
+
+        err_mode = broadcast(err_mode, n)
+        ap_radius = broadcast(ap_radius, n)
+        min_area = broadcast(min_area, n)
+        snr = broadcast(snr, n)
+        peak_col = broadcast(peak_col, n)
+        max_rat = broadcast(max_rat, n)
+        separation_pix = broadcast(separation_pix, n)
+        flag_sel = broadcast(flag_sel, n)
+        ap_flag_sel = broadcast(ap_flag_sel, n, newshape=False)
+        min_rad = broadcast(min_rad, n)
+        enforce_sep_on_final = broadcast(enforce_sep_on_final, n)
+
+        database_temp = deepcopy(self.database.obs)
+        # Loop through concatenations.
+        for i, key in enumerate(self.database.obs.keys()):
+            log.info('--> Concatenation ' + key)
+
+            # Find science and reference files.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+            ww_sci_ta = np.where(self.database.obs[key]['TYPE'] == 'SCI_TA')[0]
+            ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
+            ww_ref_ta = np.where(self.database.obs[key]['TYPE'] == 'REF_TA')[0]
+
+            # Loop through FITS files.
+            ww_all = np.append(ww_sci, ww_ref)
+            ww_all = np.append(ww_all, ww_sci_ta)
+            ww_all = np.append(ww_all, ww_ref_ta)
+            shifts_all = []
+            for j in ww_all:
+
+                # Read FITS file and PSF mask.
+                fitsfile = self.database.obs[key]['FITSFILE'][j]
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                maskfile = self.database.obs[key]['MASKFILE'][j]
+                mask = ut.read_msk(maskfile)
+                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmask = ut.read_msk(nanmaskfile)
+
+                # Recenter frames. Use different algorithms based on data type.
+                head, tail = os.path.split(fitsfile)
+                log.info('  --> Extract Tiles from: ' + tail)
+                if np.sum(np.isnan(data)) != 0:
+                    raise UserWarning('Please replace nan pixels before attempting to recenter frames')
+                # SCI and REF data.
+                if j in ww_sci or j in ww_ref:
+                    for k in range(data.shape[0]):
+                        if k == 0:
+                            combined_selected_tables = []
+                            for _err_mode, _thresh_sigma, _ap_radius, _min_area, _min_rad, _ap_snr, _peak_col, _max_rat, _msep, _color, _flag_sel, _ap_flag_sel in zip(
+                                    err_mode,
+                                    thresh_sigma,
+                                    ap_radius,
+                                    min_area,
+                                    min_rad,
+                                    snr,
+                                    peak_col,
+                                    max_rat,
+                                    separation_pix,
+                                    color,
+                                    flag_sel,
+                                    ap_flag_sel,
+                            ):
+                                data_temp = data[k].astype(data[k].dtype.newbyteorder("="))
+                                err_temp = erro[k].astype(erro[k].dtype.newbyteorder("="))
+                                # Mask invalid pixels early. SEP does not like NaNs.
+                                good_pix_mask = ~np.isfinite(data_temp) | (data_temp <= 0)
+                                good_pix_mask |= ~np.isfinite(err_temp) | (err_temp <= 0)
+                                # measure a spatially varying background on the image
+                                bkg = sep.Background(data_temp, mask=good_pix_mask)
+
+                                # subtract the background
+                                data_sub = data_temp - bkg
+
+                                # err: float | np.ndarray
+                                # NOTE: some modes (e.g. 'sqrt') are applied later inside
+                                # sources_extraction; here we still return a reasonable scalar/array that
+                                # can be used as a noise floor.
+                                if _err_mode == "jwst_err":
+                                    err = err_temp if err_temp is not None else float(bkg.globalrms)
+                                elif _err_mode == "bkg_rms":
+                                    err = bkg.rms()
+                                elif _err_mode in ("global", "sqrt"):
+                                    err = float(bkg.globalrms)
+                                else:
+                                    raise ValueError(
+                                        "Unknown err_mode. Expected one of: 'jwst_err', 'bkg_rms', 'global', 'sqrt'. "
+                                        f"Got: {_err_mode!r}"
+                                    )
+
+                                label = f"threshold{_thresh_sigma}"
+
+                                region_name = f'{tail.replace(".fits","")}_{label}.reg'
+                                region_path = os.path.join(output_dir, region_name)
+                                catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
+
+                                objects_tbl = sources_extraction(
+                                    head_pri,
+                                    data_sub,
+                                    err,
+                                    good_pix_mask,
+                                    _thresh_sigma,
+                                    region_center,
+                                    aperture_radius_pix=float(_ap_radius),
+                                    minarea=int(_min_area),
+                                    err_mode=_err_mode,
+                                )
+
+                                objects_tbl_selected = select_table(
+                                    objects_tbl,
+                                    separation_pix=_msep,  # 20
+                                    center=region_center,  # use the same coord convention as the DS9 output
+                                    peak_col=_peak_col,
+                                    ap_snr=_ap_snr,
+                                    maxrat=_max_rat,
+                                    flag_sel=_flag_sel,
+                                    ap_flag_sel=_ap_flag_sel,
+                                    window_shape=region_shape,
+                                )
+
+                                objects_tbl_selected = objects_tbl_selected.copy()
+                                objects_tbl_selected["run_label"] = label
+                                # Track which detection threshold produced each source.
+                                # Use a numeric column so it is easy to filter/group later.
+                                objects_tbl_selected["thresh_sigma"] = np.full(len(objects_tbl_selected),
+                                                                               float(_thresh_sigma), dtype=float)
+                                objects_tbl_selected["run_color"] = color
+                                objects_tbl_selected["separation_pix"] = float(_msep)
+                                objects_tbl_selected["aperture_radius_pix"] = float(_ap_radius)
+                                combined_selected_tables.append(objects_tbl_selected)
+
+                                if save_inner_catalogs:
+                                    objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
+                                    log.info(f"Wrote CSV catalog: {catalog_path} ({len(objects_tbl_selected)} SEP detections)")
+
+                                    out = write_ds9_regions_from_sep_objects(
+                                        objects_tbl_selected,
+                                        region_path,
+                                        shape=region_shape,
+                                        center=region_center,
+                                        circle_radius=(
+                                            circle_radius_mode
+                                            if circle_radius_mode is not None
+                                            else (float(_msep) if float(_msep) > 0 else float(_ap_radius))
+                                        ),
+                                        color=color,
+                                        only_round=False,
+                                    )
+                                    log.info(f"Wrote DS9 region file: {out} ({len(objects_tbl_selected)} SEP detections)")
+
+                            # -----------------
+                            # Final merge step
+                            # -----------------
+                            if len(combined_selected_tables) == 0:
+                                log.warning(f"No targets in {tail}. This could be an error! Please check yur options and try again if needed. Skipping for now.")
+
+                            # Stack all detections from all runs, then do a final NMS-like de-duplication.
+                            combined_tbl = vstack(combined_selected_tables, metadata_conflicts="silent")
+
+                            # When the same source appears in multiple threshold runs, prefer the
+                            # detection from the *highest* threshold catalog.
+                            # Tie-break (within the same threshold) using SNR when available.
+                            if "thresh_sigma" in combined_tbl.colnames:
+                                rank = np.asarray(combined_tbl["thresh_sigma"], dtype=float) * 1.0e6
+                                if "ap_snr" in combined_tbl.colnames:
+                                    snr = np.asarray(combined_tbl["ap_snr"], dtype=float)
+                                    snr = np.nan_to_num(snr, nan=0.0, posinf=0.0, neginf=0.0)
+                                    rank = rank + snr
+                                combined_tbl["merge_rank"] = rank
+
+                            if _min_rad is not None and _min_rad > 0:
+                                combined_tbl_selected = select_table(
+                                    combined_tbl,
+                                    separation_pix=_min_rad,
+                                    center=region_center,
+                                    peak_col=("merge_rank" if "merge_rank" in combined_tbl.colnames else "ap_snr"),
+                                    ap_snr=None,
+                                    maxrat=None,
+                                    flag_sel=None,
+                                    ap_flag_sel=None,
+                                    window_shape=region_shape,
+                                )
+                            else:
+                                # Still reset ds9_id for consistency.
+                                combined_tbl_selected = combined_tbl.copy()
+                                combined_tbl_selected["ds9_id"] = np.arange(len(combined_tbl_selected),
+                                                                            dtype=int)
+
+                            # Optional: enforce the requested min separation on the FINAL catalog.
+                            # This does *not* change the meaning of `min_rad` (still just
+                            # for duplicates). It ensures the combined catalog also respects the
+                            # `separation_pix` rule.
+                            if enforce_sep_on_final:
+                                combined_tbl_selected = select_table(
+                                    combined_tbl_selected,
+                                    separation_pix=_msep,
+                                    center=region_center,
+                                    peak_col=("merge_rank" if "merge_rank" in combined_tbl_selected.colnames else "ap_snr"),
+                                    ap_snr=None,
+                                    maxrat=None,
+                                    flag_sel=None,
+                                    ap_flag_sel=None,
+                                    window_shape=region_shape,
+                                )
+                                combined_tbl_selected["ds9_id"] = np.arange(len(combined_tbl_selected),
+                                                                            dtype=int)
+
+                            combined_label = f"combined"
+                            combined_catalog_path = os.path.join(output_dir,f'{tail.replace(".fits", "")}_{combined_label}.csv')
+                            combined_region_path = os.path.join(output_dir, f'{tail.replace(".fits", "")}_{combined_label}.reg')
+                            combined_tbl_selected.write(combined_catalog_path, format="csv", overwrite=True)
+
+                            log.info(
+                                f"Wrote COMBINED CSV catalog: {combined_catalog_path} "
+                                f"({len(combined_tbl_selected)} unique SEP detections)"
+                            )
+
+                            out = write_ds9_regions_from_sep_objects(
+                                combined_tbl_selected,
+                                combined_region_path,
+                                shape=region_shape,
+                                center=region_center,
+                                circle_radius=(circle_radius_mode if circle_radius_mode is not None else None),
+                                circle_radius_col=(None if circle_radius_mode is not None else "separation_pix"),
+                                color="red",
+                                only_round=False,
+                            )
+                            log.info(f"Wrote COMBINED DS9 region file: {out} ({len(combined_tbl_selected)} detections)")
+                            pass
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
+
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
+
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile,
+                                         center_shift=center_shift, center_mask=center_mask,
+                                         nanmaskfile=nanmaskfile)
+
+            pass
+
     def calculate_centers_binary(self,
                                 kwargs={},
                                 subdir='recentered'):
@@ -4454,9 +4742,9 @@ class ImageTools():
             ax[1].imshow(model_psf, origin='lower', cmap='Reds')
             ax[1].contourf(masksub, levels=[0.00, 0.25, 0.50, 0.75], cmap='Greys_r', vmin=0., vmax=2., alpha=0.5)
             ax[1].set_title('Model PSF & transmission mask')
-            ax[2].scatter((xsciref), (ysciref), marker='+', color='black', label='SIAF reference point')
-            ax[2].scatter((maskcenx + 1), (maskceny + 1), marker='x', color='skyblue', label='True mask center')
-            ax[2].scatter((xc + 1), (yc + 1), marker='*', color='red', label='Computed star position')
+            ax[2].scatter((xsciref), (ysciref), marker='+', _color='black', label='SIAF reference point')
+            ax[2].scatter((maskcenx + 1), (maskceny + 1), marker='x', _color='skyblue', label='True mask center')
+            ax[2].scatter((xc + 1), (yc + 1), marker='*', _color='red', label='Computed star position')
             ax[2].set_aspect('equal')
             xlim = ax[2].get_xlim()
             ylim = ax[2].get_ylim()
@@ -4776,16 +5064,16 @@ class ImageTools():
             # Intialize the matplotlib style.
             load_plt_style(plot_style)
 
-            colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+            colors = plt.rcParams['axes.prop_cycle'].by_key()['_color']
             fig = plt.figure(figsize=(6.4, 4.8))
             ax = plt.gca()
             for index, j in enumerate(ww_sci):
                 ax.scatter(shifts_all[index][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
                            shifts_all[index][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
-                           s=5, color=colors[index % len(colors)], marker='o',
+                           s=5, _color=colors[index % len(colors)], marker='o',
                            label='PA = %.0f deg' % self.database.obs[key]['ROLL_REF'][j])
-            ax.axhline(0., color='gray', lw=1, zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
-            ax.axvline(0., color='gray', lw=1, zorder=-1)
+            ax.axhline(0., _color='gray', lw=1, zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
+            ax.axvline(0., _color='gray', lw=1, zorder=-1)
 
             ax.set_aspect('equal')
             xlim = ax.get_xlim()
@@ -4811,7 +5099,7 @@ class ImageTools():
 
             # Plot reference frame alignment.
             if len(ww_ref) > 0:
-                colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                colors = plt.rcParams['axes.prop_cycle'].by_key()['_color']
                 fig = plt.figure(figsize=(6.4, 4.8))
                 ax = plt.gca()
                 seen = []
@@ -4823,23 +5111,23 @@ class ImageTools():
                     if this not in seen:
                         ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
                                    shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
-                                   s=5, color=colors[len(seen) % len(colors)], marker=syms[0],
+                                   s=5, _color=colors[len(seen) % len(colors)], marker=syms[0],
                                    label='dither %.0f' % (len(seen) + 1))
                         ax.hlines((-database_temp[key]['YOFFSET'][j] + yoffset) * 1000,
                                   (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 - 4.,
                                   (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 + 4.,
-                                  color=colors[len(seen) % len(colors)], lw=1)
+                                  _color=colors[len(seen) % len(colors)], lw=1)
                         ax.vlines((-database_temp[key]['XOFFSET'][j] + xoffset) * 1000,
                                   (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 - 4.,
                                   (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 + 4.,
-                                  color=colors[len(seen) % len(colors)], lw=1)
+                                  _color=colors[len(seen) % len(colors)], lw=1)
                         seen += [this]
                         reps += [1]
                     else:
                         ww = np.where(np.array(seen) == this)[0][0]
                         ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
                                    shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
-                                   s=5, color=colors[ww % len(colors)], marker=syms[reps[ww]])
+                                   s=5, _color=colors[ww % len(colors)], marker=syms[reps[ww]])
                         reps[ww] += 1
                 ax.set_aspect('equal')
                 xlim = ax.get_xlim()
@@ -5161,16 +5449,16 @@ class ImageTools():
             # Intialize the matplotlib style.
             load_plt_style(plot_style)
 
-            colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+            colors = plt.rcParams['axes.prop_cycle'].by_key()['_color']
             fig = plt.figure(figsize=(6.4, 4.8))
             ax = plt.gca()
             for index, j in enumerate(ww_sci):
                 ax.scatter(shifts_all[index][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
                            shifts_all[index][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
-                           s=5, color=colors[index % len(colors)], marker='o',
+                           s=5, _color=colors[index % len(colors)], marker='o',
                            label='PA = %.0f deg' % self.database.obs[key]['ROLL_REF'][j])
-            ax.axhline(0., color='gray', lw=1, zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
-            ax.axvline(0., color='gray', lw=1, zorder=-1)
+            ax.axhline(0., _color='gray', lw=1, zorder=-1)  # set zorder to ensure lines are drawn behind all the scatter points
+            ax.axvline(0., _color='gray', lw=1, zorder=-1)
 
             ax.set_aspect('equal')
             xlim = ax.get_xlim()
@@ -5196,7 +5484,7 @@ class ImageTools():
 
             # Plot reference frame alignment.
             if len(ww_ref) > 0:
-                colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                colors = plt.rcParams['axes.prop_cycle'].by_key()['_color']
                 fig = plt.figure(figsize=(6.4, 4.8))
                 ax = plt.gca()
                 seen = []
@@ -5208,23 +5496,23 @@ class ImageTools():
                     if this not in seen:
                         ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
                                    shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
-                                   s=5, color=colors[len(seen) % len(colors)], marker=syms[0],
+                                   s=5, _color=colors[len(seen) % len(colors)], marker=syms[0],
                                    label='dither %.0f' % (len(seen) + 1))
                         ax.hlines((-database_temp[key]['YOFFSET'][j] + yoffset) * 1000,
                                   (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 - 4.,
                                   (-database_temp[key]['XOFFSET'][j] + xoffset) * 1000 + 4.,
-                                  color=colors[len(seen) % len(colors)], lw=1)
+                                  _color=colors[len(seen) % len(colors)], lw=1)
                         ax.vlines((-database_temp[key]['XOFFSET'][j] + xoffset) * 1000,
                                   (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 - 4.,
                                   (-database_temp[key]['YOFFSET'][j] + yoffset) * 1000 + 4.,
-                                  color=colors[len(seen) % len(colors)], lw=1)
+                                  _color=colors[len(seen) % len(colors)], lw=1)
                         seen += [this]
                         reps += [1]
                     else:
                         ww = np.where(np.array(seen) == this)[0][0]
                         ax.scatter(shifts_all[index + add][:, 0] * self.database.obs[key]['PIXSCALE'][j] * 1000,
                                    shifts_all[index + add][:, 1] * self.database.obs[key]['PIXSCALE'][j] * 1000,
-                                   s=5, color=colors[ww % len(colors)], marker=syms[reps[ww]])
+                                   s=5, _color=colors[ww % len(colors)], marker=syms[reps[ww]])
                         reps[ww] += 1
                 ax.set_aspect('equal')
                 xlim = ax.get_xlim()
