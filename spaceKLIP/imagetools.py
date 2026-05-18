@@ -3803,39 +3803,39 @@ class ImageTools():
                 else:
                     maskoffs = maskoffs_temp
 
-                    # Compute shift distances.
-                    dist = np.sqrt(np.sum(shifts[:, :2] ** 2, axis=1))  # pix
-                    dist *= self.database.obs[key]['PIXSCALE'][j] * 1000  # mas
-                    head, tail = os.path.split(self.database.obs[key]['FITSFILE'][j])
-                    log.info('  --> Calculate centers: median measured shift = %.2f mas' % np.median(dist))
+                # Compute shift distances.
+                dist = np.sqrt(np.sum(shifts[:, :2] ** 2, axis=1))  # pix
+                dist *= self.database.obs[key]['PIXSCALE'][j] * 1000  # mas
+                head, tail = os.path.split(self.database.obs[key]['FITSFILE'][j])
+                log.info('  --> Calculate centers: median measured shift = %.2f mas' % np.median(dist))
 
-                    # Write FITS file and PSF mask.
-                    head_pri['XOFFSET'] = xoffset  # arcsec
-                    head_pri['YOFFSET'] = yoffset  # arcsec
-                    head_sci['STARCENX'] = starcenx
-                    head_sci['STARCENY'] = starceny
-                    if maskcenx is not None:
-                        head_sci['MASKCENX'] = maskcenx
-                        head_sci['MASKCENY'] = maskceny
-                    # Reading in CRPIX1/2 from database for updates from update_nircam_centers.
-                    head_sci['CRPIX1'] = self.database.obs[key]['CRPIX1'][j]
-                    head_sci['CRPIX2'] = self.database.obs[key]['CRPIX2'][j]
+                # Write FITS file and PSF mask.
+                head_pri['XOFFSET'] = xoffset  # arcsec
+                head_pri['YOFFSET'] = yoffset  # arcsec
+                head_sci['STARCENX'] = starcenx
+                head_sci['STARCENY'] = starceny
+                if maskcenx is not None:
+                    head_sci['MASKCENX'] = maskcenx
+                    head_sci['MASKCENY'] = maskceny
+                # Reading in CRPIX1/2 from database for updates from update_nircam_centers.
+                head_sci['CRPIX1'] = self.database.obs[key]['CRPIX1'][j]
+                head_sci['CRPIX2'] = self.database.obs[key]['CRPIX2'][j]
 
-                    fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
-                                            align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
-                                            center_mask=center_mask, maskoffs=maskoffs)
-                    maskfile = ut.write_msk(maskfile, mask, fitsfile)
-                    nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
+                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
+                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
+                                        center_mask=center_mask, maskoffs=maskoffs)
+                maskfile = ut.write_msk(maskfile, mask, fitsfile)
+                nanmaskfile = ut.write_msk(nanmaskfile, nanmask, fitsfile, '_nanmask.fits')
 
-                    # Update spaceKLIP database.
-                    self.database.update_obs(key, j, fitsfile, maskfile,
-                                             xoffset=xoffset, yoffset=yoffset,
-                                             starcenx=starcenx, starceny=starceny,
-                                             maskcenx=maskcenx, maskceny=maskceny,
-                                             center_shift=center_shift, center_mask=center_mask,
-                                             nanmaskfile=nanmaskfile)
+                # Update spaceKLIP database.
+                self.database.update_obs(key, j, fitsfile, maskfile,
+                                         xoffset=xoffset, yoffset=yoffset,
+                                         starcenx=starcenx, starceny=starceny,
+                                         maskcenx=maskcenx, maskceny=maskceny,
+                                         center_shift=center_shift, center_mask=center_mask,
+                                         nanmaskfile=nanmaskfile)
 
-                pass
+            pass
 
     def calculate_centers(self,
                           method='fourier',
