@@ -4160,7 +4160,7 @@ class ImageTools():
                             # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
                             # TODO: fix pad_amount that is giving weird results when padding and extracting the tile
                             tile = stars_extractor(data[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
-
+                            # TODO: fix error, dq, and nanmask after shift
                             errotile = stars_extractor(erro[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
                             pxdqtile = stars_extractor(pxdq[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
                             datatile = np.array(tile)
@@ -4168,8 +4168,7 @@ class ImageTools():
                             pxdqtile = np.array(pxdqtile)
 
                             if nanmask is not None:
-                                nanmasktile = stars_extractor(nanmask, [x_extract, y_extract], shifts=shifts,
-                                                            fow=fov_pixels, showplots=False)
+                                nanmasktile = stars_extractor(nanmask, [x_extract, y_extract], shifts=shifts, fow=fov_pixels, showplots=False)
 
 
                                 nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
