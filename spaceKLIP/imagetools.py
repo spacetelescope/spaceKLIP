@@ -3694,14 +3694,101 @@ class ImageTools():
                       kwargs={},
                       subdir='pretiles'):
         """
-        Evaluate initial guess to center tiles using SEX-Extractor. Then use refined methods to center correctly the
-        tile and extract them form the original fits file.
-        Create a DS9 region file to show the position of each tile on the original fits file.
+        Detect candidate point sources and write catalogs/DS9 regions for later tile extraction.
+        This routine runs `SEP <https://sep.readthedocs.io/>`_ (a Python implementation
+        of SExtractor) on each SCI/REF FITS file in the current database to build an
+        *initial* catalog of point-source candidates.
 
         Parameters
         ----------
-        err_mode : string or list of strings
+        err_mode : str or list of str, optional
+            Uncertainty model passed to :func:`spaceKLIP.widefield_utils.sources_extraction`.
+            If a list is provided it must match ``len(thresh_sigma)``.
 
+            Supported modes are:
+
+            - ``'jwst_err'``: use the JWST ``ERR`` extension (per-pixel) when available;
+            - ``'bkg_rms'``: use SEP's spatial background RMS map (per-pixel);
+            - ``'global'``: use SEP's global background RMS (scalar);
+            - ``'sqrt'``: Poisson-like noise ``sqrt(max(data_sub, 0))`` with a noise floor.
+
+            The default is ``'bkg_rms'``.
+        thresh_sigma : list of float, optional
+            Detection threshold(s) in units of sigma above background.
+            Each value results in one SEP run. The default is ``[3, 10, 50, 100]``.
+        ap_radius : float or list of float, optional
+            Aperture radius in pixels used for aperture photometry (and SNR
+            estimates) inside :func:`spaceKLIP.widefield_utils.sources_extraction`.
+            Can be a scalar or a list with one value per threshold run.
+        min_area : int or list of int, optional
+            Minimum number of connected pixels above threshold for a detection
+            (SEP ``minarea``). Can be scalar or list.
+        snr : float or list of float, optional
+            Minimum signal-to-noise ratio required in the *selection* step.
+            This is forwarded to :func:`spaceKLIP.widefield_utils.select_table` as
+            ``ap_snr``. Can be scalar or list.
+        peak_col : str or list of str, optional
+            Column used to rank detections during de-duplication/non-maximum
+            suppression in :func:`spaceKLIP.widefield_utils.select_table`.
+            Common options are ``'peak'`` (peak pixel value) and ``'apflux'``
+            (aperture flux). Can be scalar or list.
+        max_rat : float or list of float or None, optional
+            Maximum allowed SEP ellipticity metric used by
+            :func:`spaceKLIP.widefield_utils.select_table` (passed as ``maxrat``).
+            Set to ``None`` to disable this filter. Can be scalar or list.
+        separation_pix : float or list of float, optional
+            Minimum separation radius in pixels used to keep only one detection
+            within a neighborhood (greedy non-maximum suppression). Can be scalar
+            or list.
+        flag_sel : int or list of int or None, optional
+            Allowed SEP detection flags (exact integer match). Passed to
+            :func:`spaceKLIP.widefield_utils.select_table` as ``flag_sel``.
+            Set to ``None`` to disable flag filtering.
+        ap_flag_sel : list of int or list of list[int] or None, optional
+            Allowed SEP aperture-photometry flags (exact integer match). Passed to
+            :func:`spaceKLIP.widefield_utils.select_table` as ``ap_flag_sel``.
+            By default, keeps sources with aperture flags 0 or 32.
+        min_rad : float or list of float, optional
+            De-duplication radius (pixels) used during the *final merge* across
+            all threshold runs. This helps remove duplicates that are detected in
+            multiple runs. Set to ``None`` or ``<= 0`` to disable this merge.
+        enforce_sep_on_final : bool or list of bool, optional
+            If True, re-apply the per-run ``separation_pix`` rule to the *final*
+            combined catalog after the merge step. This is useful when the final
+            catalog should also respect your neighborhood suppression setting.
+        kwargs : dict, optional
+            Extra configuration for the diagnostic DS9 region output.
+
+            Available keywords are:
+
+            - color : str
+                Region color. The default is ``'green'``.
+            - region_shape : {'circle', 'square'}
+                Neighborhood geometry used by :func:`spaceKLIP.widefield_utils.select_table`.
+                The default is ``'square'``.
+            - region_center : {'peak', 'centroid'}
+                Coordinate convention for region centers and for de-duplication.
+                The default is ``'peak'``.
+            - save_inner_catalogs : bool
+                If True, also write the per-threshold CSV catalogs and DS9 region
+                files. The default is False. (The combined products are always written.)
+            - circle_radius_mode : {'geom', 'mean', 'max'} or float or None
+                Passed through to :func:`spaceKLIP.widefield_utils.write_ds9_regions_from_sep_objects`.
+                If None, a run-dependent fallback radius is used.
+        subdir : str, optional
+            Name of the sub-directory (inside ``database.output_dir``) where the
+            updated FITS/mask products and catalogs/regions will be written. The
+            default is ``'pretiles'``.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        *Broadcasting*: for convenience, most scalar parameters may also be given
+        as lists with one element per entry in ``thresh_sigma``. Scalars are
+        automatically broadcast.
 
         """
 
