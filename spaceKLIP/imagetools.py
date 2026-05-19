@@ -19,7 +19,7 @@ import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
 import sep
-from spaceKLIP.widefield_utils import broadcast, sources_extraction, select_table, write_ds9_regions_from_sep_objects,stars_extractor,estimate_nan_core,fit_psf
+from spaceKLIP.widefield_utils import broadcast, sources_extraction, select_table, write_ds9_regions_from_sep_objects,stars_extractor,estimate_nan_core,fit_psf, mask_core
 from astropy.table import vstack, Table
 
 # astropy imports
@@ -4062,7 +4062,8 @@ class ImageTools():
                       oversample=2,
                       kwargs={},
                       subdir='tiles',
-                      catdir='pretiles'):
+                      catdir='pretiles',
+                      mcmc_for_all=False):
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -4092,59 +4093,85 @@ class ImageTools():
                 nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j]  # 1 indexed
                 nanmaskceny = self.database.obs[key]['NANMASKCENY'][j]  # 1 indexed
 
+                DETECTOR = self.database.obs[key]['DETECTOR'][j]
+                filt = self.database.obs[key]['FILTER'][j]
+
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
-                log.info('--> Extract Tiles from: ' + tail)
+                log.info('--> Extracting tiles from: ' + tail)
                 tile_fitsfile_list=[]
                 targets_table = Table.read(os.path.join(self.database.output_dir,catdir,tail.replace('.fits','_combined.csv')), format="csv")  # explicit
                 if np.sum(np.isnan(data)) != 0:
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
 
-                filt = self.database.obs[key]['FILTER'][j]
                 # Generate the PSF using stpsf
-                nircam = stpsf.NIRCam()
-                nircam.filter = filt
-                # Generate the PSF for a 101x101 pixel field of view and oversample by 4x
-                psf = nircam.calc_psf(fov_pixels=fov_pixels, oversample=oversample)
-                psf_no_coronmsk = psf[0].data
+                apername = self.database.obs[key]['APERNAME'][j]
+                date = fits.getheader(self.database.obs[key]['FITSFILE'][ww_sci[0]], 0)['DATE-BEG']
+                offsetpsf_func = JWST_PSF(apername,
+                                          filt,
+                                          date=date,
+                                          fov_pix=fov_pixels + 1 if fov_pixels % 2 == 0 else fov_pixels,
+                                          oversample=2,
+                                          sp=None,
+                                          use_coeff=False)
+                psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
+                psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
+                imaging_psf = psf_no_coronmsk.copy()
 
                 for k in range(data.shape[0]):
                     if k == 0:
-                        for el,source in enumerate(targets_table[np.isin(targets_table['ds9_id'],[34])]):
-                            log.info(f'--> Extract Tiles for source: {source["ds9_id"]}')
+                        for el,source in enumerate(targets_table[np.isin(targets_table['ds9_id'],[34,37])]):
+                            tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["ds9_id"]}_{DETECTOR.lower()}')
+                            log.info(f'--> Extracting tile for source: {source["ds9_id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
-                            x_extract, y_extract = source['x']+3, source['y']-2
+                            x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
                             tile = stars_extractor(data[k], [x_extract, y_extract],showplots=False)
+                            nantile = stars_extractor(nanmask, [x_extract, y_extract],showplots=False)
                             x_guess, y_guess = data[k].shape[0]//2,data[k].shape[1]//2
 
                             # Estimate NaN core radius (detector pixels).
                             # For stability, fit with the *full* PSF model and mask only the DATA core during the fit.
-                            radius, _, _ = estimate_nan_core(tile, center=None, margin=1)
-                            radius*=1.2
+                            radius, _, _ = estimate_nan_core(tile, center=None, margin=1, nanmask=nantile)
+                            radius=np.ceil(radius*1.2)
                             log.info(f"--> Estimated NaN core radius (detector px): {radius}")
 
-                            if radius ==0:
-                                fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(psf_no_coronmsk,
+                            if radius ==0 and not mcmc_for_all:
+                                fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(imaging_psf,
                                                                                   tile,
-                                                                                  oversampling=oversample,
+                                                                                  oversampling=1,
                                                                                   radius_core=radius,
                                                                                   showplots=False)
 
-                                shifts = np.array([-(fitted_x_pos - tile.shape[1]//2), -(fitted_y_pos - tile.shape[0]//2)])
-                                log.info(f"--> Estimated shifts: {shifts}")
+                            else:
+                                if 'r' not in kwargs.keys():
+                                   kwargs['r'] = radius
+                                if 'size' not in kwargs.keys():
+                                   if fov_pixels//4 > 51:
+                                       kwargs['size'] = fov_pixels//4 + 1 if fov_pixels//4 % 2 == 0 else fov_pixels//4
+                                   elif fov_pixels >=51:
+                                       kwargs['size'] = 51
+                                   else:
+                                       raise ValueError(f'fov_pixels: {fov_pixels} is too small, please recreate tiles with at leas a fov_pixels of 51')
+                                if 'x_guess' not in kwargs.keys():
+                                   kwargs['x_guess'] = tile.shape[1]//2
+                                if 'y_guess' not in kwargs.keys():
+                                    kwargs['y_guess'] = tile.shape[0]//2
+                                if 'binarity' not in kwargs.keys():
+                                    kwargs['binarity'] = False
+                                if 'verbose' not in kwargs.keys():
+                                    kwargs['verbose'] = True
+                                if 'nsteps' not in kwargs.keys():
+                                    kwargs['nsteps'] = 1000
 
-                            if radius >0:
                                 MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j],
                                                                  kwargs=kwargs)
+                                if not os.path.exists(output_dir + '/mcmcfit/'):
+                                    os.makedirs(output_dir + '/mcmcfit/')
 
-                                # masked_psf_data = psf_data
-                                # Optional visualization of the masked PSF core:
-                                # _ = mask_core(psf_data, radius * oversample, showplots=True)
-
-                                MCMCTools.run(np.median(tile, axis=0).copy(),
-                                              psf_no_coronmsk,
+                                MCMCTools.run(tile.copy(),
+                                              imaging_psf,
                                               x_guess=MCMCTools.x_guess,
                                               y_guess=MCMCTools.y_guess,
                                               r=MCMCTools.r,
@@ -4156,12 +4183,13 @@ class ImageTools():
                                               verbose=MCMCTools.verbose,
                                               size=MCMCTools.size,
                                               binarity=MCMCTools.binarity,
-                                              filename=output_dir + '/' +self.database.obs[key]['FITSFILE'][j].split('/')[-1].split('.fits')[0])
+                                              filename=output_dir + '/mcmcfit/' +tile_fitsfile.split('/')[-1].split('.fits')[0])
 
-                                    # Apply the same shift to all SCI and REF frames.
-                                shifts = [np.array([-(MCMCTools.best_fit_params[0] - (data.shape[-1]) // 2),
-                                                     -(MCMCTools.best_fit_params[1] - (data.shape[-2]) // 2)])]
+                                fitted_x_pos = MCMCTools.best_fit_params[0]
+                                fitted_y_pos = MCMCTools.best_fit_params[1]
 
+                            shifts = np.array([-(fitted_x_pos - tile.shape[1]//2), -(fitted_y_pos - tile.shape[0]//2)])
+                            log.info(f"--> Estimated shifts: {shifts}")
                             # Need to determine largest potential shift for padding purposes
                             max_shift = np.max(np.abs(shifts))
                             shiftpad = int(np.ceil(max_shift))
@@ -4203,8 +4231,6 @@ class ImageTools():
                             head_sci['CRPIX1'] = crpix1
                             head_sci['CRPIX2'] = crpix2
 
-                            DETECTOR = self.database.obs[key]['DETECTOR'][j]
-                            tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["ds9_id"]}_{DETECTOR.lower()}')
                             # Save fits file.
                             # TODO: fix WCS in fits tile
                             tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,
