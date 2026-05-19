@@ -301,6 +301,7 @@ def fit_psf(
 def estimate_nan_core(data,
                       center=None,
                       margin=1,
+                      nanmask=None
 ) -> tuple[int, float, float]:
     """Estimate centroid and radius of a connected non-finite (NaN/Inf) core.
 
@@ -313,6 +314,9 @@ def estimate_nan_core(data,
         center.
     margin : int, optional
         Extra pixels added to the returned radius.
+    nanmask: list, None, optional
+        nanmask is a boolean array of the same shape as data, where True values indicate pixels to be treated as NaN
+        in the analysis.
 
     Returns
     -------
@@ -323,6 +327,9 @@ def estimate_nan_core(data,
 
     """
     data = np.asarray(data)
+    if nanmask is not None:
+        data[nanmask.astype(bool)] = np.nan
+
     ny, nx = data.shape
     if center is None:
         cx, cy = (nx - 1) / 2, (ny - 1) / 2
