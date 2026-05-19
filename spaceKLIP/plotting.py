@@ -32,6 +32,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
 
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -215,6 +218,345 @@ def annotate_secondary_axes_arcsec(ax,
     secay.set_ylabel('Offset [arcsec]', fontsize='small')
     secax.tick_params(labelsize='small', color='white', which='both')
     secay.tick_params(labelsize='small', color='white', which='both')
+
+
+def compare_clean_methods(files,
+                          kwargs_list=None,
+                          zoom_region=None,
+                          interactive=False):
+    """
+    Plot and compare spaceKLIP clean methods.
+    For the Bad Pixel Tutorial Notebook.
+
+    Parameters
+    ----------
+    files : list of str
+        FITS files containing cleaned products.
+    kwargs_list : list of dict
+        List of parameter dictionaries corresponding to each run.
+    zoom_region : tuple, optional
+        (x0, x1, y0, y1) zoom region.
+
+    Returns
+    -------
+    None.
+    """
+
+    # Load all runs.
+    runs = []
+    all_data = []
+
+    for i, file in enumerate(files):
+
+        # Get the cleaned data.
+        data = fits.getdata(file, ext=1)
+        data = data if data.ndim == 2 else data[-1]
+        data = np.asarray(data, dtype=np.float32)
+
+        all_data.append(data)
+
+        # Build annotation.
+        text = []
+        if kwargs_list:
+            method = kwargs_list[i].get("method", f"Run {i+1}")
+            text.append(f"method = {method}")
+            if method != "custom":
+                flat = []
+                for k, v in kwargs_list[i].items():
+                    if isinstance(v, dict):
+                        flat.extend(
+                            f"{k2} = {v2}"
+                            for k2, v2 in v.items()
+                        )
+                    else:
+                        flat.append(f"{k} = {v}")
+
+                text.extend(
+                    ", ".join(flat[j:j+2])
+                    for j in range(0, len(flat), 2)
+                )
+
+        runs.append(dict(data=data, txt="\n".join(text), html="<br>".join(text)))
+
+    # Shared scaling.
+    flat = np.concatenate([d.ravel() for d in all_data])
+    zmin, zmax = np.nanpercentile(flat, [1, 98])
+    unit = fits.getval(files[0], "BUNIT", ext=1)
+
+    # STATIC PLOTS.
+    if not interactive:
+
+        # Setup the figure.
+        n = len(runs)
+        ncols = min(2, n)
+        nrows = (n + ncols - 1) // ncols
+        fig, axes = plt.subplots(nrows * 2, ncols, figsize=(5 * ncols, 7 * nrows),
+                                 gridspec_kw={"height_ratios": [4, 1] * nrows}, squeeze=False)
+
+        fig.suptitle(r"Bad Pixel $\it{Clean}$ Method Comparison")
+
+        for i, run in enumerate(runs):
+
+            row = (i // ncols) * 2
+            col = i % ncols
+
+            ax = axes[row, col]
+            txt = axes[row + 1, col]
+
+            im = ax.imshow(run["data"], origin="lower",
+                           cmap="viridis", vmin=zmin, vmax=zmax)
+
+            ax.set_title(f"Run {i+1}")
+            ax.set_xlabel("Pixel X")
+            ax.set_ylabel("Pixel Y")
+
+            if zoom_region:
+                x0, x1, y0, y1 = zoom_region
+                ax.set_xlim(x0, x1)
+                ax.set_ylim(y0, y1)
+
+            txt.text(0.02, 0.95, run["txt"], va="top", fontsize=8)
+            txt.set_facecolor("#f7f7f7")
+            txt.axis("off")
+
+        # Hide unused panels.
+        total = nrows * ncols
+        for j in range(n, total):
+            row = (j // ncols) * 2
+            col = j % ncols
+            axes[row, col].axis("off")
+            axes[row + 1, col].axis("off")
+
+        cax = fig.add_axes([0.93, 0.15, 0.015, 0.7])
+        fig.colorbar(im, cax=cax, label=unit)
+
+        plt.tight_layout(rect=[0.02, 0.02, 0.90, 0.97])
+        plt.show()
+
+    # INTERACTIVE PLOTS
+    else:
+
+        # Setup figure.
+        ncols = min(2, len(runs))
+        nrows = int(np.ceil(len(runs) / 2))
+        fig = make_subplots(rows=nrows * 2, cols=ncols,
+                            row_heights=[0.8, 0.2] * nrows,
+                            vertical_spacing=0.06)
+
+        for i, run in enumerate(runs):
+
+            row = 2 * (i // 2) + 1
+            col = (i % 2) + 1
+
+            fig.add_trace(go.Heatmap(z=run["data"], zmin=zmin, zmax=zmax,
+                                     colorscale="Viridis", showscale=(i == 0),
+                                     colorbar=dict(title=unit) if i == 0 else None,
+                                     hovertemplate=("x: %{x}<br>y: %{y}<br>value: %{z:.2f}<extra></extra>")),
+                                     row=row, col=col)
+
+            fig.add_trace(go.Scatter(x=[0.5], y=[0.5], text=[run["html"]],
+                                     mode="text", textfont=dict(size=11),
+                                     showlegend=False), row=row + 1, col=col)
+
+            fig.update_xaxes(title="Pixel X", matches="x", row=row, col=col)
+
+            fig.update_yaxes(title="Pixel Y", matches="y",
+                             scaleanchor="x", scaleratio=1,
+                             row=row, col=col)
+
+            fig.update_xaxes(row=row + 1, col=col, visible=False)
+            fig.update_yaxes(row=row + 1, col=col, visible=False)
+
+            if zoom_region:
+                x0, x1, y0, y1 = zoom_region
+                fig.update_xaxes(range=[x0, x1], row=row, col=col)
+                fig.update_yaxes(range=[y0, y1], row=row, col=col)
+
+        fig.update_layout(
+            title="Bad Pixel <i>Clean</i> Method Comparison",
+            height=450 * nrows, width=900,
+            margin=dict(l=50, r=50, t=100, b=75))
+
+        fig.show()
+
+
+def compare_find_methods(files,
+                         kwargs_list=None,
+                         zoom_region=None,
+                         interactive=True):
+    """
+    Plot and compare bad-pixel masks from multiple runs on a given image.
+    For the Bad Pixel Tutorial Notebook.
+
+    Parameters
+    ----------
+    files : list of str
+        FITS files containing DQ and science data.
+
+    kwargs_list : list of dict, optional
+        Parameter dictionaries corresponding to each run.
+
+    zoom_region : tuple, optional
+        (x0, x1, y0, y1) zoom region.
+
+    interactive : bool, optional
+        Interactive Plotly plot or static Matplotlib plot.
+        Default is True.
+
+    Returns
+    -------
+    None
+    """
+
+    # Use first file as reference image.
+    reference_file = files[0]
+
+    # Load reference image.
+    data = fits.getdata(reference_file, ext=1)
+    data = data if data.ndim == 2 else data[-1]
+    data = np.asarray(data, dtype=np.float32)
+
+    unit = fits.getval(reference_file, "BUNIT", ext=1)
+    zmin, zmax = np.nanpercentile(data, [1, 98])
+
+    # Load each run.
+    runs = []
+    for i, file in enumerate(files):
+
+        # Load the DQ data.
+        dq = fits.getdata(file, extname="DQ")
+        dq = dq if dq.ndim == 2 else dq[-1]
+
+        # Create DO_NOT_USE mask.
+        mask = (np.asarray(dq, dtype=np.int32) & 1) != 0
+        y, x = np.where(mask)
+        text = [r"DO_NOT_USE = " + f"{mask.sum():,}"]
+
+        # Annotate the kwargs for each run.
+        if kwargs_list and kwargs_list[i].get("method") != "custom":
+            flat = []
+            for k, v in kwargs_list[i].items():
+                if isinstance(v, dict):
+                    flat.extend(f"{k2} = {v2}" for k2, v2 in v.items())
+                else:
+                    flat.append(f"{k} = {v}")
+            text.extend(", ".join(flat[j:j+2]) for j in range(0, len(flat), 2))
+
+        runs.append(dict(x=x, y=y, txt="\n".join(text), html="<br>".join(text)))
+
+    # STATIC PLOT
+    if not interactive:
+
+        # Setup figure.
+        n = len(runs)
+        ncols = min(2, n)
+        nrows = (n + ncols - 1) // ncols
+        
+        fig, axes = plt.subplots(
+            nrows * 2, ncols,
+            figsize=(6 * ncols, 7 * nrows), squeeze=False,
+            gridspec_kw={"height_ratios": [4, 1] * nrows})
+        #axes = np.atleast_2d(axes)
+
+        fig.suptitle(r"Bad Pixel $\it{Find}$ Method Comparison")
+
+        # Plot each run.
+        for i, run in enumerate(runs):
+
+            row = (i // ncols) * 2
+            col = i % ncols
+
+            ax = axes[row, col]
+            txt = axes[row + 1, col]
+
+            im = ax.imshow(data, origin="lower",
+                           cmap="viridis", vmin=zmin, vmax=zmax)
+            
+            ax.scatter(run["x"], run["y"], s=10, marker="x",
+                       color="red", linewidths=0.5)
+            
+            ax.set_title(f"Run {i+1}")
+            ax.set_xlabel("Pixel X")
+            ax.set_ylabel("Pixel Y")
+
+            if zoom_region:
+                x0, x1, y0, y1 = zoom_region
+                ax.set_xlim(x0, x1)
+                ax.set_ylim(y0, y1)
+
+            txt.text(0.01, 0.95, r"$\times$", color="red", va="top", fontsize=10)
+            txt.text(0.06, 0.95, run["txt"], va="top", fontsize=8)
+            txt.set_facecolor("#f7f7f7")
+            txt.axis("off")
+
+        cax = fig.add_axes([0.93, 0.15, 0.015, 0.7])
+        fig.colorbar(im, cax=cax, label=unit)
+        plt.tight_layout(rect=[0.02, 0.02, 0.90, 0.97])
+        plt.show()
+
+    # INTERACTIVE PLOT.
+    else:
+
+        fig = make_subplots(rows=2, cols=1, row_heights=[0.8, 0.2], vertical_spacing=0.06)
+
+        # Plot the reference.
+        fig.add_trace(go.Heatmap(z=data, zmin=zmin, zmax=zmax,
+                                 colorscale="Viridis", colorbar=dict(title=unit)),
+                                 row=1, col=1)
+
+        # Overlay the mask.
+        for i, run in enumerate(runs):
+            fig.add_trace(go.Scattergl(x=run["x"], y=run["y"], visible=(i == 0),
+                                       mode="markers", showlegend=False,
+                                       marker=dict(symbol="x", size=5, color="red")),
+                                       row=1, col=1)
+
+        # Anootation.
+        fig.add_trace(go.Scatter(x=[0.5], y=[0.5], text=[runs[0]["html"]],
+                                 mode="text", showlegend=False),
+                                 row=2, col=1)
+
+        if zoom_region:
+            x0, x1, y0, y1 = zoom_region
+            fig.update_xaxes(range=[x0, x1], row=1, col=1)
+            fig.update_yaxes(range=[y0, y1], row=1, col=1)
+
+        fig.update_layout(
+
+            title="Bad Pixel <i>Find</i> Method Comparison",
+            height=900, width=1000,
+            margin=dict(l=50, r=200, t=100, b=50),
+
+            updatemenus=[dict(
+                x=1.25, y=1,
+
+                buttons=[dict(
+
+                    label=f"Run {i+1}",
+                    method="restyle",
+
+                    args=[{
+                        "visible":
+                            [True] +
+                            [j == i for j in range(len(runs))] +
+                            [True],
+
+                        "text":
+                            [None] * (len(fig.data)-1) +
+                            [[runs[i]["html"]]]
+
+                    }]
+
+                ) for i in range(len(runs))]
+            )]
+        )
+
+        fig.update_xaxes(title="Pixel X", row=1, col=1)
+        fig.update_xaxes(row=2, col=1, visible=False)
+        fig.update_yaxes(row=2, col=1, visible=False)
+        fig.update_yaxes(title="Pixel Y", scaleanchor="x", scaleratio=1, row=1, col=1)
+
+        fig.show()
 
 
 def display_coron_image(filename,
