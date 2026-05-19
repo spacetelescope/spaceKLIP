@@ -92,7 +92,6 @@ def fit_psf(
     radius_core=0,
     fit_radius=None,
     search_radius=None,
-    snr_threshold=10.0,
     bkg_subtract=True,
     edge_bkg_width=8,
     two_pass=True,
@@ -120,9 +119,6 @@ def fit_psf(
         full cutout.
     search_radius : float, optional
         Search radius (pixels) for the matched-filter initialization.
-    snr_threshold : float, optional
-        If peak SNR is below this value, default initialization switches to a
-        matched filter.
     bkg_subtract : bool, optional
         If True, subtract a robust background estimate.
     edge_bkg_width : int, optional
@@ -186,8 +182,6 @@ def fit_psf(
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
     y_center = (ny - 1) / 2
-    x0_init = x_center
-    y0_init = y_center
 
     finite = np.isfinite(data_fit)
     if np.any(finite):
@@ -388,17 +382,16 @@ def stars_extractor(data,
                     stretch='linear',
                     kwargs={}
 ):
-    # #  Create a Table of star positions for extraction
-    # star_tbl = Table([xs, ys], names=['x', 'y'])
-    # # Extract stars from the masked data (cutout size is set to 25x25)
-    # nddata = NDData(data)  # Input masked data for cutout extraction
-    # stars = extract_stars(nddata, star_tbl, size=size)
     if shifts is None:
+        #Just extract the tile at coordinates without shifts
         tile = data[int(round(coords[1]))-fow//2:int(round(coords[1]))+fow//2+1, int(round(coords[0]))-fow//2:int(round(coords[0]))+fow//2+1]
     else:
-        shifteddata = ut.imshift(data, [shifts[0], shifts[1]], pad_amount=pad_amount, method=method, kwargs=kwargs)
-        tile = shifteddata[int(round(coords[1]))-fow//2:int(round(coords[1]))+fow//2+1, int(round(coords[0]))-fow//2:int(round(coords[0]))+fow//2+1]
-
+        #Create a bigger tile to shift, so we don't have to shift the entire image to minimize weird artifacts
+        preshifttile = data[int(round(coords[1]))-(fow//2+pad_amount):int(round(coords[1]))+(fow//2+pad_amount+1),
+                                   int(round(coords[0]))-(fow//2+pad_amount):int(round(coords[0]))+(fow//2+pad_amount+1)]
+        shifteddata = ut.imshift(preshifttile, [shifts[0], shifts[1]], pad_amount=0, method=method, kwargs=kwargs)
+        #Crop the shifted tile to the desired dimension
+        tile = shifteddata[int(round(shifteddata.shape[1]//2))-fow//2:int(round(shifteddata.shape[1]//2))+fow//2+1, int(round(shifteddata.shape[0]//2))-fow//2:int(round(shifteddata.shape[0]//2))+fow//2+1]
     if showplots:
         norm = simple_norm(tile, stretch)
         plt.imshow(tile, origin='lower', norm=norm,cmap=cmap)
