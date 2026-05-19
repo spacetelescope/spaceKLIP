@@ -343,17 +343,17 @@ def estimate_nan_core(data,
         Region centroid in cutout coordinates.
 
     """
-    data = np.asarray(data)
+    nandata = np.asarray(data.copy())
     if nanmask is not None:
-        data[nanmask.astype(bool)] = np.nan
+        nandata[nanmask.astype(bool)] = np.nan
 
-    ny, nx = data.shape
+    ny, nx = nandata.shape
     if center is None:
         cx, cy = (nx - 1) / 2, (ny - 1) / 2
     else:
         cx, cy = center
 
-    bad = ~np.isfinite(data)
+    bad = ~np.isfinite(nandata)
 
     sx = int(np.clip(round(cx), 0, nx - 1))
     sy = int(np.clip(round(cy), 0, ny - 1))
@@ -388,7 +388,7 @@ def estimate_nan_core(data,
     if not np.any(region):
         return 0, float(cx), float(cy)
 
-    yy, xx = np.indices(data.shape)
+    yy, xx = np.indices(nandata.shape)
     x_cent = float(np.mean(xx[region]))
     y_cent = float(np.mean(yy[region]))
     rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
