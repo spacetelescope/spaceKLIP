@@ -19,6 +19,23 @@ from scipy.signal import fftconvolve
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
+def mask_core(data,radius_core,showplots=False,cmap='Greys_r'):
+    # Mask the PSF to exclude the core
+    # Define a circular mask for the saturated core in the PSF data
+    y_grid, x_grid = np.indices(data.shape)
+    data_core_mask = (x_grid - data.shape[1]//2)**2 + (y_grid - data.shape[0]//2)**2 < radius_core**2
+    # masked_data = np.ma.masked_array(data, mask=data_core_mask)
+    masked_data = data.copy()
+    masked_data[data_core_mask] = 0
+    if showplots:
+        # Display the generated PSF
+        norm = simple_norm(masked_data, 'log')
+        plt.imshow(masked_data, origin='lower', cmap=cmap,norm=norm)
+        plt.colorbar()
+        plt.title('Generated PSF for F444W (Saturated Core Excluded)')
+        plt.show()
+    return masked_data
+
 def estimate_bkg_and_rms(data2d, edge_width=5):
     """Estimate background median and RMS from cutout border pixels.
 
