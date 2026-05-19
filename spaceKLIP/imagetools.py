@@ -3687,7 +3687,7 @@ class ImageTools():
                       snr = [6, 8, 8, 10],
                       peak_col = ["peak", "peak", "peak", "apflux"],
                       max_rat = [0.25, 0.25, 0.25, None],
-                      separation_pix = 125,
+                      fov_pixels = 101,
                       flag_sel= 0,
                       ap_flag_sel = [0,32],
                       min_rad = 1,
@@ -3737,8 +3737,9 @@ class ImageTools():
             Maximum allowed SEP ellipticity metric used by
             :func:`spaceKLIP.widefield_utils.select_table` (passed as ``maxrat``).
             Set to ``None`` to disable this filter. Can be scalar or list.
-        separation_pix : float or list of float, optional
-            Minimum separation radius in pixels used to keep only one detection
+        fow_pixels : float or list of float, optional
+            Field of View of future tiles from which to derive the minimum searation parameter (i.e. fow_pixels//2)
+            Minimum separation radius is used to keep only one detection
             within a neighborhood (greedy non-maximum suppression). Can be scalar
             or list.
         flag_sel : int or list of int or None, optional
@@ -3815,6 +3816,11 @@ class ImageTools():
         snr = broadcast(snr, n)
         peak_col = broadcast(peak_col, n)
         max_rat = broadcast(max_rat, n)
+        if isinstance(fov_pixels,list):
+            separation_pix = [fow//2 for fow in fov_pixels]
+        else:
+            separation_pix = fov_pixels//2
+
         separation_pix = broadcast(separation_pix, n)
         flag_sel = broadcast(flag_sel, n)
         ap_flag_sel = broadcast(ap_flag_sel, n, newshape=False)
@@ -4075,8 +4081,7 @@ class ImageTools():
 
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
-                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(
-                    fitsfile)
+                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
@@ -4105,10 +4110,10 @@ class ImageTools():
 
                 for k in range(data.shape[0]):
                     if k == 0:
-                        for el,source in enumerate(targets_table[np.isin(targets_table['ds9_id'],[37])]):
+                        for el,source in enumerate(targets_table[np.isin(targets_table['ds9_id'],[34])]):
                             log.info(f'--> Extract Tiles for source: {source["ds9_id"]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
-                            x_extract, y_extract = source['x'], source['y']
+                            x_extract, y_extract = source['x']+3, source['y']-2
 
                             # Extract tiles around the coordinate of the stars
                             tile = stars_extractor(data[k], [x_extract, y_extract],showplots=False)
@@ -4157,20 +4162,21 @@ class ImageTools():
                                 shifts = [np.array([-(MCMCTools.best_fit_params[0] - (data.shape[-1]) // 2),
                                                      -(MCMCTools.best_fit_params[1] - (data.shape[-2]) // 2)])]
 
+                            # Need to determine largest potential shift for padding purposes
+                            max_shift = np.max(np.abs(shifts))
+                            shiftpad = int(np.ceil(max_shift))
+                            log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
+
                             # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                            # TODO: fix pad_amount that is giving weird results when padding and extracting the tile
-                            tile = stars_extractor(data[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
-                            # TODO: fix error, dq, and nanmask after shift
-                            errotile = stars_extractor(erro[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
-                            pxdqtile = stars_extractor(pxdq[k], [x_extract, y_extract], shifts = shifts, fow=fov_pixels, showplots=False)
+                            tile = stars_extractor(data[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
+                            errotile = stars_extractor(erro[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
+                            pxdqtile = stars_extractor(pxdq[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
                             datatile = np.array(tile)
                             errotile = np.array(errotile)
                             pxdqtile = np.array(pxdqtile)
 
                             if nanmask is not None:
-                                nanmasktile = stars_extractor(nanmask, [x_extract, y_extract], shifts=shifts, fow=fov_pixels, showplots=False)
-
-
+                                nanmasktile = stars_extractor(nanmask, [x_extract, y_extract], pad_amount = shiftpad, shifts=shifts, fow=fov_pixels, kwargs={'mode':'constant'},showplots=False)
                                 nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
                                 nanmasktile[nanmasktile.astype(np.bool)] = 1
                                 nanmasktile = np.array(nanmasktile)
