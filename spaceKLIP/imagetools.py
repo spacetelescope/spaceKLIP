@@ -4120,7 +4120,7 @@ class ImageTools():
 
                 for k in range(data.shape[0]):
                     if k == 0:
-                        for el,source in enumerate(targets_table[np.isin(targets_table['ds9_id'],[34,37])]):
+                        for source in targets_table:
                             tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["ds9_id"]}_{DETECTOR.lower()}')
                             log.info(f'--> Extracting tile for source: {source["ds9_id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
