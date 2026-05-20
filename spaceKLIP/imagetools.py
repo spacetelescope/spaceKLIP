@@ -1313,7 +1313,7 @@ class ImageTools():
             - cluster_dilate_radius : int, optional
                 Radius for dilating bad pixels before checking clustering. The default is 6 pixels.
                 
-            - method : str, optional
+            - mode : str, optional
                 Sigma-clipping strategy used to identify bad pixels. Available options are:
                     'local' : Flags pixels that deviate from the median of their neighboring pixels. 
                               Large negative outliers are also identified by comparing to background estimate.
@@ -2003,7 +2003,7 @@ class ImageTools():
                 Maximum size of bad pixel clusters to be flagged. If None, no limit is applied.
             - cluster_dilate_radius : int, optional
                 Radius for dilating bad pixels before checking clustering. The default is 6 pixels.
-            - method : str, optional
+            - mode : str, optional
                 Sigma-clipping strategy used to identify bad pixels. Available options are:
                     'local' : Flags pixels that deviate from the median of their neighboring pixels. 
                               Large negative outliers are also identified by comparing to background estimate.
@@ -2039,8 +2039,8 @@ class ImageTools():
             sigclip_kwargs['shift_x'] += [0]
         if 0 not in sigclip_kwargs['shift_y']:
             sigclip_kwargs['shift_y'] += [0]
-        if 'method' not in sigclip_kwargs.keys():
-            sigclip_kwargs['method'] = 'local'
+        if 'mode' not in sigclip_kwargs.keys():
+            sigclip_kwargs['mode'] = 'local'
         if 'diagonal_only' not in sigclip_kwargs.keys():
             sigclip_kwargs['diagonal_only'] = False
         if 'threshold_metric' not in sigclip_kwargs.keys():
@@ -2089,7 +2089,7 @@ class ImageTools():
         for i in range(ww.shape[0]):
 
             # Create initial mask of large negative values.
-            if sigclip_kwargs['method'] == 'local':
+            if sigclip_kwargs['mode'] == 'local':
                 # Get median background and standard deviation.
                 bg_med = np.nanmedian(data_temp[i])
                 bg_std = robust.medabsdev(data_temp[i])
@@ -2142,11 +2142,11 @@ class ImageTools():
                     data_std = robust.medabsdev(data_arr_std_trim)
                 data_std_weighted = np.sqrt(data_std**2 + erro[i]**2)
 
-                if sigclip_kwargs['method'] == 'local':
+                if sigclip_kwargs['mode'] == 'local':
                     # Find values N standard deviations above the mean of neighbors.
                     threshold = sigclip_kwargs['sigma'] * data_std
                     mask_pos = diff > threshold
-                elif sigclip_kwargs['method'] == 'local_weighted':
+                elif sigclip_kwargs['mode'] == 'local_weighted':
                     threshold = sigclip_kwargs['sigma'] * data_std_weighted
                     threshold_neg = -sigclip_kwargs['neg_sigma'] * data_std_weighted
                     mask_pos = diff > threshold
