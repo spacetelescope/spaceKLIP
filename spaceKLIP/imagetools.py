@@ -1337,13 +1337,13 @@ class ImageTools():
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
 
-            - method : str, optional
-                Method for detecting bad pixels. The default is 'per_pixel'.
+            - mode : str, optional
+                Mode for detecting bad pixels. The default is 'per_pixel'.
                     'per_pixel' : Computes the variation across integrations independently for each pixel.
                     'group_pixels' : Groups pixels by similar flux, computes the variation across integrations for each pixel, and compares each pixel’s variation to that of its corresponding flux group.
 
             - n_groups : int, optional
-                The number of groups if method == 'group_pixels'. The default is 25.
+                The number of groups if mode == 'group_pixels'. The default is 25.
 
             - diagnostic_plots : bool, optional
                 Plot diagnostics?
@@ -2231,13 +2231,13 @@ class ImageTools():
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
 
-            - method : str, optional
-                Method for detecting bad pixels. The default is 'per_pixel'.
+            - mode : str, optional
+                Mode for detecting bad pixels. The default is 'per_pixel'.
                     'per_pixel' : Computes the variation across integrations independently for each pixel.
                     'group_pixels' : Groups pixels by similar flux, computes the variation across integrations for each pixel, and compares each pixel’s variation to that of its corresponding flux group.
 
             - n_groups : int, optional
-                The number of groups if method == 'group_pixels'. The default is 25.
+                The number of groups if mode == 'group_pixels'. The default is 25.
 
             - diagnostic_plots : bool, optional
                 Plot diagnostics?
@@ -2258,9 +2258,9 @@ class ImageTools():
         # Check inputs.
         if 'sigma' not in timeints_kwargs.keys():
             timeints_kwargs['sigma'] = 10.
-        if 'method' not in timeints_kwargs.keys():
-            timeints_kwargs['method'] = "per_pixel"
-        if timeints_kwargs['method'] not in ("group_pixels", "per_pixel"):
+        if 'mode' not in timeints_kwargs.keys():
+            timeints_kwargs['mode'] = "per_pixel"
+        if timeints_kwargs['mode'] not in ("group_pixels", "per_pixel"):
             raise ValueError(f"Unknown timeints method: {method!r}")
         if 'n_groups' not in timeints_kwargs.keys():
             timeints_kwargs['n_groups'] = 25  # Number of pixel groups.
@@ -2279,7 +2279,7 @@ class ImageTools():
         med_ints = np.nanmedian(data_temp, axis=0)
         mad_ints = robust.medabsdev(data_temp, axis=0)
         absdiff = np.abs((data_temp - med_ints))
-        if timeints_kwargs['method'] == "group_pixels":
+        if timeints_kwargs['mode'] == "group_pixels":
             # Low flux / negative pixels can be overflagged.
             # Compute some floor.
             bg_data = data_temp[data_temp < np.nanpercentile(data_temp, 50)]
@@ -2294,7 +2294,7 @@ class ImageTools():
         groupID_map = None
         group_bounds = None
         group_stats = []
-        if timeints_kwargs['method'] == "group_pixels":
+        if timeints_kwargs['mode'] == "group_pixels":
             # Positive, finite median values for clustering.
             finite_mask = np.isfinite(med_ints)
             pos_mask = finite_mask & (med_ints > 0)
@@ -2304,7 +2304,7 @@ class ImageTools():
                 print(f"[timeints] Only {med_ints_flat.size} positive pixels; "
                       f"cannot form {timeints_kwargs['n_groups']} groups. "
                       "Falling back to per-pixel temporal outlier detection.")
-                timeints_kwargs['method'] = "per_pixel"
+                timeints_kwargs['mode'] = "per_pixel"
             else:
                 # Define flux groups in log-space.
                 X = np.log10(med_ints_flat).reshape(-1, 1)
@@ -2359,7 +2359,7 @@ class ImageTools():
 
         # Find bad pixels.
         bad_pixels = np.zeros_like(data_temp, dtype=bool)
-        if timeints_kwargs['method'] == "group_pixels":
+        if timeints_kwargs['mode'] == "group_pixels":
             # Compare each pixel to its associated group statistics.
             for g in group_stats:
                 gid  = g["group_id"]
@@ -2394,7 +2394,7 @@ class ImageTools():
             n_int, ny, nx = data_temp.shape
 
             # Plot grouping diagnostics.
-            if timeints_kwargs['method'] == "group_pixels":
+            if timeints_kwargs['mode'] == "group_pixels":
 
                 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(17, 6))
 
