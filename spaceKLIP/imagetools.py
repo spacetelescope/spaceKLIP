@@ -4062,7 +4062,115 @@ class ImageTools():
                       kwargs={},
                       subdir='tiles',
                       catdir='pretiles',
-                      mcmc_for_all=False):
+                      mcmc_for_all=False,
+                      medbkg_method='robust'):
+
+        """Extract and write small cutouts (tiles) centered on cataloged sources.
+
+        Parameters
+        ----------
+        fov_pixels : int
+            Tile size in detector pixels.
+        oversample : int
+            Oversampling used for the PSF model.
+        subdir : str
+            Output sub-directory under ``database.output_dir``.
+        catdir : str
+            Directory containing the per-file source catalog (CSV).
+        mcmc_for_all : bool
+            If True, use MCMC centering for all targets.
+        medbkg_method : str or None
+            If not None, subtract a median background from each extracted tile.
+
+        Returns
+        -------
+        None
+        """
+
+
+        def subtract_medbkg(data, pxdq, fitsfile, nanmask=None,method='robust'):
+            """Subtract a median background estimate from a tile.
+
+            Parameters
+            ----------
+            data : ndarray
+                2D tile image (or 3D cube) to be background-subtracted.
+            pxdq : ndarray
+                DQ array used to exclude ``DO_NOT_USE`` pixels from the estimate.
+            fitsfile : str
+                Filename used for logging.
+            nanmask : ndarray or None
+                Optional nanmask (1=bad) used to exclude pixels from the estimate.
+            method : str
+                Background estimation method.
+
+            Returns
+            -------
+            data : ndarray
+                Background-subtracted tile(s).
+            """
+            pxmask_donotuse = ut.get_dqmask(pxdq, 'DO_NOT_USE', return_bool=True)
+
+            # from the subtract median.
+            head, tail = os.path.split(fitsfile)
+            log.info('  --> Median subtraction: ' + tail)
+            data_temp = data.copy()
+            if nanmask is not None:
+                data_temp[pxmask_donotuse&(nanmask==1)] = np.nan
+            else:
+                data_temp[pxmask_donotuse] = np.nan
+
+            if method == 'robust':
+                if len(data.shape) == 2:
+                    axis = (0,1)
+                elif len(data.shape) == 3:
+                    axis = (1,2)
+                else:
+                    raise NotImplementedError("data must be 2d or 3d for this method")
+                # Robust median, using a method by Jens
+                bg_med = np.nanmedian(data_temp, axis=axis, keepdims=True)
+                bg_std = robust.medabsdev(data_temp, axis=axis, keepdims=True)
+                bg_ind = data_temp > (bg_med + 5. * bg_std)  # clip bright PSFs for final calculation
+                data_temp[bg_ind] = np.nan
+                bg_median = np.nanmedian(data_temp, axis=axis, keepdims=True)
+            elif method == 'sigma_clipped':
+                # Robust median using astropy.stats.sigma_clipped_stats
+                if len(data.shape) == 2:
+                    mean, median, stddev = astropy.stats.sigma_clipped_stats(data_temp, sigma=sigma)
+                elif len(data.shape) == 3:
+                    bg_median = np.zeros([data.shape[0], 1, 1])
+                    for iint in range(data.shape[0]):
+                        mean_i, median_i, stddev_i = astropy.stats.sigma_clipped_stats(data[iint])
+                        bg_median[iint] = median_i
+                else:
+                    raise NotImplementedError("data must be 2d or 3d for this method")
+            elif method == 'border':
+                # Use only the outer border region of the image, near the edges of the FOV
+                shape = data.shape
+                if len(shape) == 2:
+                    # only one int
+                    y, x = np.indices(shape)
+                    bordermask = (x < borderwidth) | (x > shape[1] - borderwidth) | (y < borderwidth) | (
+                                y > shape[0] - borderwidth)
+                    mean, bg_median, stddev = astropy.stats.sigma_clipped_stats(data[bordermask])
+                elif len(shape) == 3:
+                    # perform robust stats on border region of each int
+                    y, x = np.indices(data.shape[1:])
+                    bordermask = (x < borderwidth) | (x > shape[1] - borderwidth) | (y < borderwidth) | (
+                                y > shape[0] - borderwidth)
+                    bg_median = np.zeros([shape[0], 1, 1])
+                    for iint in range(shape[0]):
+                        mean_i, median_i, stddev_i = astropy.stats.sigma_clipped_stats(data[iint][bordermask])
+                        bg_median[iint] = median_i
+                else:
+                    raise NotImplementedError("data must be 2d or 3d for this method")
+            else:
+                # Plain vanilla median of the image
+                bg_median = np.nanmedian(data_temp, axis=(1, 2), keepdims=True)
+
+            data -= bg_median
+            log.info('  --> Median subtraction: mean of frame median = %.2f' % np.mean(bg_median))
+            return data
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -4136,6 +4244,11 @@ class ImageTools():
                             # Extract tiles around the coordinate of the stars
                             tile = stars_extractor(data_filled[k], [x_extract, y_extract],showplots=False)
                             nantile = stars_extractor(nanmask, [x_extract, y_extract],showplots=False)
+
+                            if medbkg_method is not None:
+                                pdxtile = stars_extractor(pxdq[k], [x_extract, y_extract], showplots=False)
+                                tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
+
                             x_guess, y_guess = data[k].shape[0]//2,data[k].shape[1]//2
 
                             # Estimate NaN core radius (detector pixels).
