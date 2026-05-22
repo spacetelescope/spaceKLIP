@@ -4253,7 +4253,7 @@ class ImageTools():
 
                 # I need to create a new database from scratch since I'm creating snapshots of stars from the original
                 # dataset and the old structure of the original database does not work anymore
-                self.database = database.Database(output_dir=output_dir)
+                self.database = database.Database(output_dir=self.database.output_dir)
                 self.database.read_jwst_s012_data(datapaths=tile_fitsfile_list)
 
                 pass
