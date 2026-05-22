@@ -11,7 +11,7 @@ import stpipe
 import importlib
 import logging
 import numpy as np
-
+from tqdm import tqdm
 # astropy imports
 import pysiaf
 import astropy.io.fits as pyfits
@@ -20,7 +20,7 @@ from astroquery.svo_fps import SvoFps
 # scipy imports
 import scipy.ndimage.interpolation as sinterp
 from scipy.integrate import simpson
-from scipy.ndimage import fourier_shift, gaussian_filter
+from scipy.ndimage import fourier_shift, gaussian_filter, median_filter
 from scipy.ndimage import shift as spline_shift
 
 # webbpsf_ext imports
@@ -1462,3 +1462,135 @@ def get_siaf(inst):
     """
     import pysiaf
     return pysiaf.Siaf(inst)
+
+def fill_bad_pixels_from_nanmask(image, nanmask, connectivity = 8,bad_threshold = 0.5, median_size=7, max_median_size=255):
+    #TODO: Currently only implemented for wide-field imaging, might be worth it to add it also for direct imaging
+    """Fill pixels flagged by a nanmask with median values.
+
+    This is meant to make subsequent interpolation/Fourier operations stable by
+    removing NaNs/zoros, while keeping the nanmask as the source of
+    truth for which pixels should be ignored scientifically.
+
+    Parameters
+    ----------
+    image : 2D ndarray
+        Image to be filled.
+    nanmask : 2D ndarray
+        Mask where 1 (or >=0.5) denotes a bad pixel.
+    median_size : int or {'adaptive'}
+        Window size for the median filter used to estimate local structure.
+        If 'adaptive', compute a window size per connected bad-pixel cluster.
+    smooth_sigma : float
+        Sigma for an optional Gaussian smoothing pass (0 disables).
+
+    Returns
+    -------
+    filled : 2D ndarray
+        Copy of the input with bad/non-finite pixels replaced.
+    """
+
+    img = np.asarray(image)
+    if img.ndim != 2:
+        raise ValueError(f"fill_bad_pixels_from_nanmask expects a 2D image; got shape {img.shape}")
+
+    # If no mask, just return a copy (no filling requested/possible).
+    if nanmask is None:
+        return img.copy()
+
+    nm = np.asarray(nanmask)
+    if nm.ndim != 2:
+        raise ValueError(f"fill_bad_pixels_from_nanmask expects a 2D nanmask; got shape {nm.shape}")
+    if nm.shape != img.shape:
+        raise ValueError(
+            f"fill_bad_pixels_from_nanmask: image and nanmask must have the same shape; got {img.shape} vs {nm.shape}"
+        )
+
+    bad = (nm >= bad_threshold)
+    if not np.any(bad):
+        return img.copy()
+
+    filled = img.copy()
+    if not np.issubdtype(filled.dtype, np.floating):
+        filled = filled.astype(float, copy=False)
+
+    # Compute the global fill value for very large clusters.
+    good_pos = (img > 0) & np.isfinite(img) & (~bad)
+    if np.any(good_pos):
+        global_med = float(np.nanmedian(img[good_pos]))
+    else:
+        good_finite = np.isfinite(img) & (~bad)
+        global_med = float(np.nanmedian(img[good_finite])) if np.any(good_finite) else 0.0
+
+    # Reuse existing dependency: SciPy ndimage labeling.
+    import scipy.ndimage
+
+    if connectivity == 8:
+        structure = np.ones((3, 3), dtype=int)
+    elif connectivity == 4:
+        structure = np.array([[0, 1, 0],
+                              [1, 1, 1],
+                              [0, 1, 0]], dtype=int)
+    else:
+        raise ValueError("connectivity must be 4 or 8")
+
+    labeled, num = scipy.ndimage.label(bad, structure=structure)
+    if num == 0:
+        return filled
+
+    objects = scipy.ndimage.find_objects(labeled)
+    ny, nx = img.shape
+
+    for label, sl in enumerate(objects, start=1):
+        if sl is None:
+            continue
+
+        sub = (labeled[sl] == label)
+        npix = int(np.sum(sub))
+        if npix == 0:
+            continue
+
+        # Fill very large clusters with the global positive median.
+        if npix > max_median_size:
+            filled[sl][sub] = global_med
+            continue
+
+        y_sl, x_sl = sl  # (rows, cols)
+        y_min, y_max = int(y_sl.start), int(y_sl.stop)  # stop is exclusive
+        x_min, x_max = int(x_sl.start), int(x_sl.stop)
+
+        # Bounding-box center in pixel coordinates.
+        x_center = (x_min + (x_max - 1)) / 2.0
+        y_center = (y_min + (y_max - 1)) / 2.0
+
+        # Half diagonal of the bounding box.
+        dx = (x_max - 1) - x_min
+        dy = (y_max - 1) - y_min
+        radius = 0.5 * float(np.hypot(dx, dy))
+
+        # Local median from a box centered on (x_center, y_center) with half-size 1.5*radius.
+        # Exclude bad pixels from the median.
+        half = int(np.ceil(1.5 * radius))
+        half = max(1, half)
+
+        xc = int(np.round(x_center))
+        yc = int(np.round(y_center))
+
+        x0 = max(0, xc - half)
+        x1 = min(nx, xc + half + 1)
+        y0 = max(0, yc - half)
+        y1 = min(ny, yc + half + 1)
+
+        region = img[y0:y1, x0:x1]
+        region_bad = bad[y0:y1, x0:x1]
+        good_region = (~region_bad) & np.isfinite(region)
+
+        if np.any(good_region):
+            local_med = float(np.nanmedian(region[good_region]))
+        else:
+            local_med = global_med
+
+        filled[sl][sub] = local_med
+
+    return filled
+
+
