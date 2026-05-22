@@ -64,7 +64,11 @@ class MCMCTools:
         if 'verbose' in kwargs.keys():
             self.verbose = kwargs['verbose']
         else:
-            self.verbose = False
+            self.verbose = False        
+        if 'center_masked' in kwargs.keys():
+            self.center_masked = kwargs['center_masked']
+        else:
+            self.center_masked = False
         if 'size' in kwargs.keys():
             self.size = kwargs['size'] + 1 if kwargs['size'] % 2 == 0 else kwargs['size']
         else:
@@ -76,8 +80,6 @@ class MCMCTools:
         if 'x_guess' in kwargs.keys() and 'y_guess' in kwargs.keys():
             self.x_guess = kwargs['x_guess']
             self.y_guess = kwargs['y_guess']
-            self.dx_guess = self.x_guess - (self.crpix1 - 1)
-            self.dy_guess = self.y_guess - (self.crpix2 - 1)
         else:
             if len(data.shape) == 3:
                 self.max_value = np.nanmax(data)
@@ -87,8 +89,6 @@ class MCMCTools:
                 self.max_index = np.where(data == self.max_value)
             self.x_guess = self.max_index[1][0]
             self.y_guess = self.max_index[0][0]
-            self. dx_guess = self.x_guess - (self.crpix1 - 1)
-            self.dy_guess = self.y_guess - (self.crpix2 - 1)
         if 'flux_guess' in kwargs.keys():
             self.flux_guess = kwargs['flux_guess']
         else:
@@ -519,9 +519,12 @@ class MCMCTools:
         log.info('--> Running MCMC fit')
         data_masked = self.extract_subarray(data.copy(), x_guess, y_guess, size=self.size,
                                             flat_and_skip_center=False)
-        #
-        psf_masked = self.extract_subarray(psf.copy(), np.where(psf == np.nanmax(psf))[1][0],
-                                           np.where(psf == np.nanmax(psf))[0][0], size=self.size+10 if self.rotate else self.size,
+
+        if self.center_masked:
+            psf_cenx, psf_cany = [(psf.shape[1]- 1.) / 2., (psf.shape[0]- 1.) / 2.]
+        else:
+           psf_cenx,psf_cany=[np.where(psf == np.nanmax(psf))[1][0],np.where(psf == np.nanmax(psf))[0][0]]
+        psf_masked = self.extract_subarray(psf.copy(),psf_cenx,psf_cany , size=self.size+10 if self.rotate else self.size,
                                            flat_and_skip_center=False)
 
         centers = [(data_masked.shape[-1] - 1.) / 2., (data_masked.shape[-1] - 1.) / 2.]
