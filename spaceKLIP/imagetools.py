@@ -52,7 +52,7 @@ import stpsf
 from spaceKLIP import utils as ut
 from spaceKLIP.psf import JWST_PSF
 from spaceKLIP.xara import core
-from spaceKLIP.utils import gaussian_kernel
+from spaceKLIP.utils import gaussian_kernel,fill_bad_pixels_from_nanmask
 from spaceKLIP.psf import get_offsetpsf
 from spaceKLIP.pyklippipeline import get_pyklip_filepaths
 from spaceKLIP import mcmc_tools,database
@@ -91,7 +91,6 @@ path = os.path.join(os.path.split(os.path.abspath(__file__))[0], path)
 file = open(path, 'r')
 filter_shifts_jarron = json.load(file)
 file.close()
-
 
 class ImageTools():
     """
@@ -4101,8 +4100,6 @@ class ImageTools():
                 log.info('--> Extracting tiles from: ' + tail)
                 tile_fitsfile_list=[]
                 targets_table = Table.read(os.path.join(self.database.output_dir,catdir,tail.replace('.fits','_combined.csv')), format="csv")  # explicit
-                if np.sum(np.isnan(data)) != 0:
-                    raise UserWarning('Please replace nan pixels before attempting to recenter frames')
 
                 # Generate the PSF using stpsf
                 apername = self.database.obs[key]['APERNAME'][j]
@@ -4118,16 +4115,26 @@ class ImageTools():
                 psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
                 imaging_psf = psf_no_coronmsk.copy()
 
+                # Fill pixels flagged by the nanmask to avoid NaNs/holes creating
+                # interpolation/Fourier artifacts during shifting. The nanmask is
+                # preserved separately for downstream masking.
+                data_filled = data.copy()
+
                 for k in range(data.shape[0]):
                     if k == 0:
-                        for source in targets_table:
+                        if nanmask is not None:
+                            data_filled[k] = fill_bad_pixels_from_nanmask(data[k], nanmask)
+                        if np.sum(~np.isfinite(data_filled)) != 0:
+                            raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
+
+                        for source in targets_table[targets_table['ds9_id']==32]:
                             tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["ds9_id"]}_{DETECTOR.lower()}')
                             log.info(f'--> Extracting tile for source: {source["ds9_id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
                             x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data[k], [x_extract, y_extract],showplots=False)
+                            tile = stars_extractor(data_filled[k], [x_extract, y_extract],showplots=False)
                             nantile = stars_extractor(nanmask, [x_extract, y_extract],showplots=False)
                             x_guess, y_guess = data[k].shape[0]//2,data[k].shape[1]//2
 
@@ -4148,8 +4155,8 @@ class ImageTools():
                                 if 'r' not in kwargs.keys():
                                    kwargs['r'] = radius
                                 if 'size' not in kwargs.keys():
-                                   if fov_pixels//4 > 51:
-                                       kwargs['size'] = fov_pixels//4 + 1 if fov_pixels//4 % 2 == 0 else fov_pixels//4
+                                   if fov_pixels//2 > 51:
+                                       kwargs['size'] = fov_pixels//2 + 1 if fov_pixels//2 % 2 == 0 else fov_pixels//4
                                    elif fov_pixels >=51:
                                        kwargs['size'] = 51
                                    else:
@@ -4164,6 +4171,8 @@ class ImageTools():
                                     kwargs['verbose'] = True
                                 if 'nsteps' not in kwargs.keys():
                                     kwargs['nsteps'] = 1000
+                                if radius >0:
+                                    kwargs['center_masked'] = False
 
                                 MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j],
                                                                  kwargs=kwargs)
@@ -4196,7 +4205,7 @@ class ImageTools():
                             log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
                             # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                            tile = stars_extractor(data[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
+                            tile = stars_extractor(data_filled[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
                             errotile = stars_extractor(erro[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
                             pxdqtile = stars_extractor(pxdq[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
                             datatile = np.array(tile)
