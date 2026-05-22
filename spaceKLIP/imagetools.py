@@ -4235,7 +4235,7 @@ class ImageTools():
                         if np.sum(~np.isfinite(data_filled)) != 0:
                             raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
 
-                        for source in targets_table[targets_table['ds9_id']==32]:
+                        for source in targets_table:
                             tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["ds9_id"]}_{DETECTOR.lower()}')
                             log.info(f'--> Extracting tile for source: {source["ds9_id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
