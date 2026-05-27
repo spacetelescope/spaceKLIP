@@ -4,8 +4,11 @@ import sep
 from pathlib import Path
 from typing import Any, Literal, SupportsFloat, SupportsIndex, cast
 from astropy.wcs import WCS
+from astropy.wcs.utils import proj_plane_pixel_scales
+from astroquery.gaia import Gaia
 import matplotlib.pylab as plt
 from astropy.table import Table
+import astropy.units as u
 from astropy.visualization import simple_norm
 from astropy.nddata import NDData
 from photutils.psf import extract_stars
@@ -18,6 +21,104 @@ from scipy.signal import fftconvolve
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+
+
+def fetch_gaia_for_image_fov(
+    image: np.ndarray,
+    header,
+    gaia_table: str = "gaiadr3.gaia_source",
+    row_limit: int = -1,
+    verbose: bool = False,
+) -> Table:
+    """Estimate image FOV from WCS and query Gaia over that footprint.
+
+    Parameters
+    ----------
+    image : 2D-array
+        Image data used only for its shape.
+    header : astropy.io.fits.Header
+        FITS header containing the celestial WCS for the image.
+    gaia_table : str, optional
+        Gaia TAP table to query. Defaults to Gaia DR3 source table.
+    row_limit : int, optional
+        Max number of returned rows. Use ``-1`` for no row limit.
+    verbose : bool, optional
+        Passed to ``Gaia.launch_job_async``.
+
+    Returns
+    -------
+    astropy.table.Table
+        New Astropy table with selected Gaia columns plus WCS-derived ``x`` and ``y``.
+
+    """
+    data = np.asarray(image)
+    if data.ndim == 3:
+        data = data[0, :, :]
+    if data.ndim == 2:
+        pass
+    else:
+        raise ValueError(f"image must be a 3D or 2D, got shape {data.shape}")
+
+    cel_wcs = WCS(header, naxis=2).celestial
+    ny, nx = data.shape
+    x_center = (nx - 1) / 2.0
+    y_center = (ny - 1) / 2.0
+
+    center_ra_deg, center_dec_deg = cel_wcs.all_pix2world(x_center, y_center, 0)
+    pix_scales = proj_plane_pixel_scales(cel_wcs) * u.deg
+    fov_x_deg = float((nx * pix_scales[0]).to_value(u.deg))
+    fov_y_deg = float((ny * pix_scales[1]).to_value(u.deg))
+    radius_deg = 0.5 * float(np.hypot(fov_x_deg, fov_y_deg))
+
+    query = (
+        "SELECT source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag FROM "
+        f"{gaia_table} "
+        "WHERE 1=CONTAINS(" 
+        "POINT('ICRS', ra, dec), "
+        f"CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f})"
+        ")"
+    )
+
+    old_table = Gaia.MAIN_GAIA_TABLE
+    old_limit = Gaia.ROW_LIMIT
+    try:
+        Gaia.MAIN_GAIA_TABLE = gaia_table
+        Gaia.ROW_LIMIT = int(row_limit)
+        job = Gaia.launch_job_async(query=query, dump_to_file=False, verbose=verbose)
+        raw_result = job.get_results()
+    finally:
+        Gaia.MAIN_GAIA_TABLE = old_table
+        Gaia.ROW_LIMIT = old_limit
+
+    source_id_col = "source_id" if "source_id" in raw_result.colnames else "SOURCE_ID"
+
+    def _plain_array(col, dtype=None):
+        arr = np.ma.asarray(col)
+        if dtype is not None:
+            arr = arr.astype(dtype)
+        if np.ma.isMaskedArray(arr) and np.any(arr.mask):
+            target_dtype = np.dtype(dtype) if dtype is not None else arr.dtype
+            fill_value = -1 if np.issubdtype(target_dtype, np.integer) else np.nan
+            filled = np.ma.filled(arr, fill_value=fill_value)
+            return np.array(filled, dtype=dtype, copy=True)
+        return np.array(np.asarray(col, dtype=dtype), copy=True)
+
+    source_id = _plain_array(raw_result[source_id_col])
+    ra = _plain_array(raw_result["ra"], dtype=float)
+    dec = _plain_array(raw_result["dec"], dtype=float)
+    parallax = _plain_array(raw_result["parallax"], dtype=float)
+    parallax_error = _plain_array(raw_result["parallax_error"], dtype=float)
+    phot_g_mean_mag = _plain_array(raw_result["phot_g_mean_mag"], dtype=float)
+    x, y = cel_wcs.all_world2pix(ra, dec, 0)
+
+    result = Table(
+        data=[source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag, x, y],
+        names=["SOURCE_ID", "ra", "dec", "parallax", "parallax_error", "phot_g_mean_mag", "x", "y"],
+        masked=False,
+    )
+
+    result.meta.clear()
+    return result
 
 def mask_core(data,radius_core,showplots=False,cmap='Greys_r'):
     # Mask the PSF to exclude the core
