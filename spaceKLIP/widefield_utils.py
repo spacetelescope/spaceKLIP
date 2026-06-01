@@ -942,7 +942,7 @@ def write_ds9_regions_from_sep_objects(
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
     return out
 
-def sources_extraction(
+def SEP_source_extraction(
     header,
     data_sub,
     err,
