@@ -9,13 +9,14 @@ from photutils.psf import FittableImageModel
 from astropy.modeling import fitting
 import spaceKLIP.utils as ut
 import numpy as np
-from scipy import ndimage
 from astropy.stats import sigma_clipped_stats
 from astropy.table import Table
 from astropy.wcs import WCS
-from scipy.ndimage import label
 from scipy.signal import fftconvolve
 from photutils.detection import DAOStarFinder
+import matplotlib.pyplot as plt
+from astropy.stats import SigmaClip
+from photutils.background import Background2D, MedianBackground
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -149,22 +150,31 @@ def estimate_bkg_and_rms(data2d, edge_width=5):
 
     """
     data2d = np.asarray(data2d, dtype=float)
-    ny, nx = data2d.shape
-    ew = int(max(1, min(edge_width, ny // 2, nx // 2)))
-    edge = np.zeros_like(data2d, dtype=bool)
-    edge[:ew, :] = True
-    edge[-ew:, :] = True
-    edge[:, :ew] = True
-    edge[:, -ew:] = True
-    vals = data2d[edge]
-    vals = vals[np.isfinite(vals)]
-    if vals.size < 10:
-        vals = data2d[np.isfinite(data2d)]
-    if vals.size == 0:
-        return 0.0, 1.0
+    # ny, nx = data2d.shape
+    # ew = int(max(1, min(edge_width, ny // 2, nx // 2)))
+    # edge = np.zeros_like(data2d, dtype=bool)
+    # edge[:ew, :] = True
+    # edge[-ew:, :] = True
+    # edge[:, :ew] = True
+    # edge[:, -ew:] = True
+    # vals = data2d[edge]
+    # vals = vals[np.isfinite(vals)]
+    # if vals.size < 10:
+    #     vals = data2d[np.isfinite(data2d)]
+    # if vals.size == 0:
+    #     return 0.0, 1.0
 
-    mean, med, std = sigma_clipped_stats(vals, sigma=3.0, maxiters=5)
-    return float(med), float(std if std > 0 else 1.0)
+    # mean, med, std = sigma_clipped_stats(vals, sigma=3.0, maxiters=5)
+    sigma_clip = SigmaClip(sigma=3.0, maxiters=10)
+    bkg_estimator = MedianBackground()
+    bkg = Background2D(
+        data2d,
+        box_size=(50, 50),
+        filter_size=(3, 3),
+        sigma_clip=sigma_clip,
+        bkg_estimator=bkg_estimator
+    )
+    return bkg.background, bkg.background_rms
 
 def downsample_psf_to_detector(psf, oversampling):
     """Downsample an oversampled PSF to detector sampling by summing blocks.
@@ -199,6 +209,7 @@ def downsample_psf_to_detector(psf, oversampling):
 def fit_psf(
     masked_psf_data,
     data,
+    nanmask,
     oversampling=1,
     radius_core=0,
     fit_radius=None,
@@ -218,6 +229,9 @@ def fit_psf(
         PSF model image (may be oversampled; see ``oversampling``).
     data : 2D-array
         Image cutout to fit.
+    nanmask: list, None, optional
+        nanmask is a boolean array of the same shape as data, where True values indicate pixels to be treated as NaN
+        in the analysis.
     mask_size : int, optional
         Reserved/legacy argument (kept for API compatibility).
     oversampling : int, optional
@@ -251,15 +265,26 @@ def fit_psf(
     the *row* coordinate.
 
     """
+    # TODO: understand why we are exceeding search radius when refitting the source
+    def _make_weights(data_fit, rms, center_x, center_y, core_mask_x, core_mask_y, fit_radius, radius_core):
+        w = np.zeros_like(data_fit, dtype=float)
+        w[finite] = 1.0 / (np.nanmax(rms[finite])**2 + 1e-30)
 
-    data_cutout = np.asarray(data, dtype=float)
+        if fit_radius > 0 :
+            rr2 = (xx - float(center_x)) ** 2 + (yy - float(center_y)) ** 2
+            w[rr2 > float(fit_radius) ** 2] = 0.0
+
+        if radius_core > 0:
+            rr2 = (xx - float(core_mask_x)) ** 2 + (yy - float(core_mask_y)) ** 2
+            w[rr2 < float(radius_core) ** 2] = 0.0
+        return w
 
     # Robust background subtraction is critical at low S/N.
-    bkg, rms = estimate_bkg_and_rms(data_cutout, edge_width=edge_bkg_width)
+    bkg, rms = estimate_bkg_and_rms(data, edge_width=edge_bkg_width)
     if bkg_subtract:
-        data_fit = data_cutout - bkg
+        data_fit = data - bkg
     else:
-        data_fit = data_cutout
+        data_fit = data
 
     # Use the PSF as the model (with the core optionally masked).
     # IMPORTANT: if the PSF is oversampled w.r.t. the data, tell photutils.
@@ -274,21 +299,9 @@ def fit_psf(
     # For saturated stars we want to keep the masked core fixed on the NaN core.
     core_mask_x = (nx - 1) / 2
     core_mask_y = (ny - 1) / 2
-    if radius_core and radius_core > 0 and np.any(~np.isfinite(data_cutout)):
-        _, core_mask_x, core_mask_y = estimate_nan_core(data_cutout, margin=0)
-
-    def _make_weights(center_x, center_y, _fit_radius):
-        w = np.zeros_like(data_fit, dtype=float)
-        w[finite] = 1.0 / (rms**2 + 1e-30)
-
-        if _fit_radius is not None:
-            rr2 = (xx - float(center_x)) ** 2 + (yy - float(center_y)) ** 2
-            w[rr2 > float(_fit_radius) ** 2] = 0.0
-
-        if radius_core and radius_core > 0:
-            rr2 = (xx - float(core_mask_x)) ** 2 + (yy - float(core_mask_y)) ** 2
-            w[rr2 < float(radius_core) ** 2] = 0.0
-        return w
+    # if radius_core and radius_core > 0 and np.any(~np.isfinite(data)):
+    if np.any(~np.isfinite(data)):
+        radius_core, core_mask_x, core_mask_y = estimate_nan_core(data, margin=0)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -296,7 +309,7 @@ def fit_psf(
 
     finite = np.isfinite(data_fit)
     if np.any(finite):
-        peak_snr = float(np.nanmax(data_fit[finite]) / (rms + 1e-12))
+        peak_snr = float(np.nanmax(data_fit[finite]) / (np.nanmax(rms[finite]) + 1e-12))
     else:
         peak_snr = 0.0
 
@@ -373,18 +386,19 @@ def fit_psf(
         if peak_snr < 10:
             first_pass_radius = float(fit_radius) * 2.0
 
-        weights1 = _make_weights(psf_model.x_0.value, psf_model.y_0.value, first_pass_radius)
-        fit1 = fitter(psf_model, xx, yy, data_fit, weights=weights1, filter_non_finite=True)
+        if first_pass_radius != float(fit_radius):
+            weights1 = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, first_pass_radius, radius_core)
+            fit1 = fitter(psf_model, xx, yy, data_fit, weights=weights1, filter_non_finite=True)
 
-        # Recenter for second pass.
-        psf_model.x_0.value = fit1.x_0.value
-        psf_model.y_0.value = fit1.y_0.value
-        psf_model.flux.value = max(float(fit1.flux.value), 0.0)
+            # Recenter for second pass.
+            psf_model.x_0.value = fit1.x_0.value
+            psf_model.y_0.value = fit1.y_0.value
+            psf_model.flux.value = max(float(fit1.flux.value), 0.0)
 
-        weights2 = _make_weights(psf_model.x_0.value, psf_model.y_0.value, float(fit_radius))
+        weights2 = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, float(fit_radius), radius_core)
         fit_result = fitter(psf_model, xx, yy, data_fit, weights=weights2, filter_non_finite=True)
     else:
-        weights = _make_weights(psf_model.x_0.value, psf_model.y_0.value, fit_radius)
+        weights = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, float(fit_radius), radius_core)
         fit_result = fitter(psf_model, xx, yy, data_fit, weights=weights, filter_non_finite=True)
 
     # Step 8: Output the fitted flux and position
@@ -406,7 +420,6 @@ def fit_psf(
         plt.colorbar()
         plt.title('Data to fit with fitted center')
         plt.show()
-
     return fitted_x_pos,fitted_y_pos,fitted_flux
 
 def estimate_nan_core(data,
@@ -646,7 +659,7 @@ def select_table(
     Returns
     -------
     astropy.table.Table
-        Filtered table with a ``'ds9_id'`` column added.
+        Filtered table with a ``'id'`` column added.
 
     Notes
     -----
@@ -687,12 +700,12 @@ def select_table(
         objects_tbl = objects_tbl[good].copy()
 
     if separation_pix is None or separation_pix <= 0:
-        objects_tbl["ds9_id"] = np.arange(len(objects_tbl), dtype=int)
+        objects_tbl["id"] = np.arange(len(objects_tbl), dtype=int)
         return objects_tbl.copy()
 
     # After filtering, we may end up with an empty table; short-circuit.
     if len(objects_tbl) == 0:
-        objects_tbl["ds9_id"] = np.arange(0, dtype=int)
+        objects_tbl["id"] = np.arange(0, dtype=int)
         return objects_tbl.copy()
 
     if center not in ("centroid", "peak"):
@@ -772,10 +785,10 @@ def select_table(
         # Return in original order for easier cross-referencing.
         keep_sorted = np.sort(np.asarray(keep, dtype=int))
         sel_objects_tbl=objects_tbl[keep_sorted].copy()
-        sel_objects_tbl["ds9_id"] = np.arange(len(sel_objects_tbl), dtype=int)
+        sel_objects_tbl["id"] = np.arange(len(sel_objects_tbl), dtype=int)
         return sel_objects_tbl
     else:
-        objects_tbl["ds9_id"] = np.arange(len(objects_tbl), dtype=int)
+        objects_tbl["id"] = np.arange(len(objects_tbl), dtype=int)
         return objects_tbl.copy()
 
 
@@ -783,15 +796,9 @@ def select_table(
 def write_ds9_regions_from_sep_objects(
     objects_tbl: Table,
     output_path: str | Path,
-    *,
-    shape: Literal["ellipse", "circle", "square"] = "circle",
-    center: Literal["centroid", "peak"] = "centroid",
+    shape: Literal[ "circle", "square"] = "circle",
     color: str = "red",
-    scale: float = 3.0,
-    circle_radius: Literal["geom", "mean", "max"] | float | None = "mean",
-    circle_radius_col: str | None = None,
-    round_ratio: tuple[float, float] = (0.7, 1.3),
-    only_round: bool = True,
+    circle_radius = 5,
 ) -> Path:
     """Write a DS9 region file (image/pixel coordinates) from SEP detections.
 
@@ -802,24 +809,14 @@ def write_ds9_regions_from_sep_objects(
         ``center='peak'`` is used).
     output_path : str or pathlib.Path
         Output ``.reg`` path.
-    shape : {'ellipse', 'circle', 'square'}, optional
+    shape : {'circle', 'square'}, optional
         Region primitive.
-    center : {'centroid', 'peak'}, optional
-        Centering convention for regions.
     color : str, optional
         DS9 region color.
-    scale : float, optional
-        Scale factor applied to SEP a/b when deriving region sizes.
-    circle_radius : {'geom', 'mean', 'max'} or float or None, optional
+    circle_radius : float, optional
         Circle radius rule for ``shape='circle'``/``'square'``. If a float, use
         a fixed radius in pixels. If None, read a per-row radius from
         ``circle_radius_col``.
-    circle_radius_col : str, optional
-        Column name used when ``circle_radius is None``.
-    round_ratio : tuple of float, optional
-        Allowed ``a/b`` ratio range when ``only_round`` is True.
-    only_round : bool, optional
-        If True, keep only approximately round detections.
 
     Returns
     -------
@@ -841,7 +838,7 @@ def write_ds9_regions_from_sep_objects(
         "image",
     ]
 
-    req_cols = {"x", "y", "a", "b", "theta"}
+    req_cols = {"id","x", "y"}
     missing = req_cols.difference(objects_tbl.colnames)
     if missing:
         raise ValueError(
@@ -849,87 +846,33 @@ def write_ds9_regions_from_sep_objects(
             f"{', '.join(sorted(missing))}. Available columns: {', '.join(objects_tbl.colnames)}"
         )
 
-    if shape not in ("ellipse", "circle", "square"):
-        raise ValueError("shape must be 'ellipse', 'circle', or 'square'")
-    if center not in ("centroid", "peak"):
-        raise ValueError("center must be 'centroid' or 'peak'")
-    if circle_radius is None:
-        if shape not in ("circle", "square"):
-            raise ValueError("circle_radius=None is only supported for shape='circle' or shape='square'")
-        if not circle_radius_col:
-            raise ValueError("circle_radius=None requires circle_radius_col to be provided")
-        if circle_radius_col not in objects_tbl.colnames:
-            raise ValueError(
-                f"circle_radius_col='{circle_radius_col}' not found in table columns. "
-                f"Available columns: {', '.join(objects_tbl.colnames)}"
-            )
-    elif isinstance(circle_radius, (int, float)):
-        if not np.isfinite(float(circle_radius)) or float(circle_radius) <= 0:
-            raise ValueError("numeric circle_radius must be a finite positive number (pixels)")
-    else:
-        if circle_radius not in ("geom", "mean", "max"):
-            raise ValueError("circle_radius must be one of: 'geom', 'mean', 'max', None, or a positive number")
+    if shape not in ("circle", "square"):
+        raise ValueError("shape must be 'circle', or 'square'")
+    if not np.isfinite(float(circle_radius)) or float(circle_radius) <= 0:
+        raise ValueError("numeric circle_radius must be a finite positive number (pixels)")
 
-    if center == "peak":
-        peak_missing = {"xpeak", "ypeak"}.difference(objects_tbl.colnames)
-        if peak_missing:
-            raise ValueError(
-                "center='peak' requested but objects_tbl is missing: "
-                f"{', '.join(sorted(peak_missing))}. Available columns: {', '.join(objects_tbl.colnames)}"
-            )
-
-    rmin, rmax = round_ratio
     for i in range(len(objects_tbl)):
-        n=objects_tbl['ds9_id'][i]
-        a = float(objects_tbl["a"][i])
-        b = float(objects_tbl["b"][i])
-        if only_round:
-            if b == 0:
-                continue
-            ratio = a / b
-            if not (rmin <= ratio <= rmax):
-                continue
+        n=objects_tbl['id'][i]
 
         # DS9 is 1-indexed for image pixels.
-        if center == "centroid":
-            x = float(objects_tbl["x"][i]) + 1.0
-            y = float(objects_tbl["y"][i]) + 1.0
-        else:
-            x = float(objects_tbl["xpeak"][i]) + 1.0
-            y = float(objects_tbl["ypeak"][i]) + 1.0
-        theta_deg = float(objects_tbl["theta"][i]) * 180.0 / np.pi
-        if shape == "ellipse":
-            r1 = scale * a
-            r2 = scale * b
-            lines.append(f"ellipse({x:.3f},{y:.3f},{r1:.3f},{r2:.3f},{theta_deg:.3f}) # text={{{n}}}")
-        else:
-            # Convert SEP's a/b to a single radius-like quantity `r`.
-            # For circles: r is the radius.
-            # For squares: side length will be (2*r + 1).
-            if circle_radius is None:
-                r = float(objects_tbl[circle_radius_col][i])
-                if not np.isfinite(r) or r <= 0:
-                    continue
-            elif isinstance(circle_radius, (int, float)):
-                r = float(circle_radius)
-            elif circle_radius == "geom":
-                r = scale * float(np.sqrt(a * b))
-            elif circle_radius == "mean":
-                r = scale * (a + b) / 2.0
-            else:  # "max"
-                r = scale * max(a, b)
+        x = float(objects_tbl["x"][i]) + 1.0
+        y = float(objects_tbl["y"][i]) + 1.0
 
-            if shape == "circle":
-                lines.append(f"circle({x:.3f},{y:.3f},{r:.3f}) # text={{{n}}}")
-            else:
-                # For squares, enforce an odd *integer* side length in pixels.
-                # (This ensures the source is exactly centered on a pixel.)
-                r_int = int(np.round(float(r)))
-                if r_int < 0:
-                    continue
-                side = float(2 * r_int + 1)
-                # DS9: box(x, y, width, height, angle)
-                lines.append(f"box({x:.3f},{y:.3f},{side:.3f},{side:.3f},0) # text={{{n}}}")
+        # For circles: r is the radius.
+        # For squares: side length will be (2*r + 1).
+        r = float(circle_radius)
+
+        if shape == "circle":
+            lines.append(f"circle({x:.3f},{y:.3f},{r:.3f}) # text={{{n}}}")
+        else:
+            # For squares, enforce an odd *integer* side length in pixels.
+            # (This ensures the source is exactly centered on a pixel.)
+            r_int = int(np.round(float(r)))
+            if r_int < 0:
+                continue
+            side = float(2 * r_int + 1)
+            # DS9: box(x, y, width, height, angle)
+            lines.append(f"box({x:.3f},{y:.3f},{side:.3f},{side:.3f},0) # text={{{n}}}")
 
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
     return out
@@ -1135,11 +1078,10 @@ def broadcast(value: Any, n: int, newshape=True) -> list[Any]:
 
 def DAO_source_extraction(
     data,
-    err,
+    nanmask,
     psf,
+    npix=0,
     oversampling=1,
-    fit_radius=20.0,
-    aperture_radius=5.0,
     dao_thresh_sigma=4.0,
     dao_fwhm=2.5,
     group_radius=15.0,
@@ -1169,16 +1111,17 @@ def DAO_source_extraction(
     ----------
     data : 2D-array
         Background-subtracted science image.
-    err : float or 2D-array
-        Error model used for aperture-flux uncertainty estimation.
+    nanmask: 2D-array (bool)
+        Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
     psf : 2D-array
         PSF model image passed directly to ``fit_psf``.
+    npix : int or list of four int, optional
+        Number of pixels used to pad around the frames. If int, the same
+        number of pixels will be padded on each side. If list of four int,
+        a different number of pixels can be padded on the [left, right,
+        bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
     oversampling : int, optional
         Oversampling factor of ``psf`` relative to detector pixels.
-    fit_radius : float, optional
-        Radius (pixels) for local PSF-fitting cutouts.
-    aperture_radius : float, optional
-        Aperture radius (pixels) for compatibility flux columns.
     dao_thresh_sigma : float, optional
         ``DAOStarFinder`` detection threshold in units of the image RMS.
     dao_fwhm : float, optional
@@ -1257,23 +1200,11 @@ def DAO_source_extraction(
             })
         return out
 
-    def _group_and_select(cands, data_arr, _group_radius, _fwhm):
+    def _group_and_select(cands, data_arr, group_radius,npix):
         """Group nearby candidates and select one representative per star.
 
         DAOStarFinder often returns several detections for a single bright or
-        saturated star — one near the core and several on the PSF wings.  This
-        helper collapses such groups into a single candidate by:
-
-        1. Building connected components: two candidates belong to the same
-           group when their separation is less than ``_group_radius``.
-        2. Within each group, selecting the best representative:
-
-           * If any candidate has NaN pixels within ``_fwhm / 2`` pixels
-             (saturated core), pick the one with the most NaN neighbours.
-             ``estimate_nan_core`` is then called on that cutout to populate
-             ``sat_radius``.
-           * Otherwise re-center the group on the strongest local
-             PSF-correlation peak.
+        saturated star — one near the core and several on the PSF wings.
 
         Parameters
         ----------
@@ -1281,11 +1212,14 @@ def DAO_source_extraction(
             Full (ungrouped) candidate list from ``_dao``.
         data_arr : 2D-array
             Science image (used for NaN proximity checks).
-        _group_radius : float
+        group_radius : float
             Maximum separation (pixels) for two candidates to be in the
             same group.
-        _fwhm : float
-            PSF FWHM (pixels); sets the NaN-proximity search radius.
+        npix : int or list of four int, optional
+            Number of pixels used to pad around the frames. If int, the same
+            number of pixels will be padded on each side. If list of four int,
+            a different number of pixels can be padded on the [left, right,
+            bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
 
         Returns
         -------
@@ -1339,7 +1273,7 @@ def DAO_source_extraction(
         # Pre-compute a provisional NaN-core radius for every candidate so
         # that _candidate_radius can scale the grouping window correctly even
         # before the formal sat_radius is estimated inside _group_and_select.
-        _quick_r = max(3, int(_group_radius // 3))
+        _quick_r = max(3, int(group_radius // 3))
         _prov_sat = []
         for _c in cands:
             _cx, _cy = float(_c["x"]), float(_c["y"])
@@ -1355,7 +1289,7 @@ def DAO_source_extraction(
             _prov_sat.append(float(_sr))
 
         cand_radii = np.array(
-            [_candidate_radius(c, _group_radius, ps) for c, ps in zip(cands, _prov_sat)],
+            [_candidate_radius(c, group_radius, ps) for c, ps in zip(cands, _prov_sat)],
             dtype=float,
         )
 
@@ -1384,30 +1318,23 @@ def DAO_source_extraction(
             groups[_find(i)].append(i)
 
         # --- select one representative per group ---
-        search_r = float(_group_radius)
         selected = []
-
         for indices in groups.values():
             group_cands = [cands[i] for i in indices]
-            group_radii = cand_radii[np.asarray(indices, dtype=int)]
-            group_search_r = float(np.max(group_radii))
-
             # If a group contains both DAO and catalog members, keep all catalog
             # members and discard all DAO members. Catalog-only groups are
             # ignored (no DAO group to replace).
             catalog_member_indices = [k for k, c in enumerate(group_cands)
                                       if c.get("method") == "catalog"]
-            dao_member_indices = [k for k, c in enumerate(group_cands)
-                                  if c.get("method") != "catalog"]
-
+            not_catalog_member_indices = [k for k, c in enumerate(group_cands)
+                                      if c.get("method") != "catalog"]
             if catalog_member_indices:
                 for k in catalog_member_indices:
-                    best = dict(group_cands[k])
-
-                    # Still estimate sat_radius from NaN core near each
-                    # catalog position for robust masked-core PSF fitting.
-                    cx, cy = float(best["x"]), float(best["y"])
-                    half = int(max(8, _group_radius))
+                    candidate = dict(group_cands[k])
+                    cx, cy = float(candidate["x"]), float(candidate["y"])
+                    if cx < npix[0] or cy < npix[2] or cx > nx_arr-npix[1] or cy > ny_arr-npix[3]:
+                        continue
+                    half = int(max(15, group_radius))
                     xlo = max(0, int(round(cx)) - half)
                     xhi = min(nx_arr, int(round(cx)) + half + 1)
                     ylo = max(0, int(round(cy)) - half)
@@ -1415,134 +1342,129 @@ def DAO_source_extraction(
                     local = data_arr[ylo:yhi, xlo:xhi]
                     if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*nan_lim_percent):
                         continue  # Avoid spurious large sat_radius estimates from mostly-NaN cutouts.
-                    selected.append(best)
-                continue
+                    selected.append(candidate)
+            else:
+                peaks =[]
+                d2 = []
+                for k in not_catalog_member_indices:
+                    candidate = dict(group_cands[k])
+                    cx, cy = float(candidate["x"]), float(candidate["y"])
+                    if cx < npix[0] or cy < npix[2] or cx > nx_arr-npix[1] or cy > ny_arr-npix[3]:
+                        continue
+                    half = int(max(15, group_radius))
+                    xlo = max(0, int(round(cx)) - half)
+                    xhi = min(nx_arr, int(round(cx)) + half + 1)
+                    ylo = max(0, int(round(cy)) - half)
+                    yhi = min(ny_arr, int(round(cy)) + half + 1)
+                    local = data_arr[ylo:yhi, xlo:xhi]
+                    if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*nan_lim_percent):
+                        continue  # Avoid spurious large sat_radius estimates from mostly-NaN cutouts.
+                    elif np.any(~np.isfinite(local)):
+                        sat_flag=True
+                        # Saturated group: estimate the NaN-core centroid on a group-wide
+                        # cutout and use that as the representative source position.
+                        sr, xcore, ycore = estimate_nan_core(local, margin=1)
+                        peaks.append([float(candidate.get("peak", 0.0))])
+                        d2.append([(cx - (xcore + xlo)) ** 2 + (cy - (ycore + ylo)) ** 2])
+                    else:
+                        sat_flag=False
+                        # Unsaturated group: use a group-wide PSF matched-filter peak to
+                        # avoid keeping a bright wing knot as the representative.
+                        peaks.append([float(candidate.get("peak", 0.0))])
+                        try:
+                            psf_det = downsample_psf_to_detector(psf, oversampling)
+                            psf_det = np.asarray(psf_det, dtype=float)
+                            psf_sum = np.nansum(psf_det)
+                            if np.isfinite(psf_sum) and psf_sum > 0:
+                                psf_det = psf_det / psf_sum
+                                img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
+                                corr = fftconvolve(img, psf_det[::-1, ::-1], mode="same")
+                                iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
+                                d2.append([(cx - (float(ix) + xlo)) ** 2 + (cy - (float(iy) + ylo)) ** 2])
+                        except Exception:
+                            continue
 
-            # Count NaN pixels within search_r of each candidate.
-            nan_counts = []
-            for c in group_cands:
-                cx, cy = float(c["x"]), float(c["y"])
-                local_r = max(search_r, group_search_r)
-                xlo = max(0, int(cx - local_r))
-                xhi = min(nx_arr, int(cx + local_r) + 1)
-                ylo = max(0, int(cy - local_r))
-                yhi = min(ny_arr, int(cy + local_r) + 1)
-                patch = data_arr[ylo:yhi, xlo:xhi]
-                nan_counts.append(int(np.sum(~np.isfinite(patch))))
+                peaks = np.array(peaks)
+                if len(peaks)==0:
+                    # All candidates have been dropped.
+                    continue
 
-            max_nan = max(nan_counts)
-            if max_nan > 0:
-                # Saturated group: estimate the NaN-core centroid on a group-wide
-                # cutout and use that as the representative source position.
-                xg = np.array([float(c["x"]) for c in group_cands], dtype=float)
-                yg = np.array([float(c["y"]) for c in group_cands], dtype=float)
-                half = int(max(8, _group_radius))
-                xlo = max(0, int(np.floor(np.min(xg))) - half)
-                xhi = min(nx_arr, int(np.ceil(np.max(xg))) + half + 1)
-                ylo = max(0, int(np.floor(np.min(yg))) - half)
-                yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
-                local = data_arr[ylo:yhi, xlo:xhi]
-                if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0] * local.shape[1] * nan_lim_percent):
-                    continue  # Avoid spurious large sat_radius estimates from mostly-NaN cutouts.
-                elif np.any(~np.isfinite(local)):
-                    sr , xcore, ycore = estimate_nan_core(local, margin=1)
-                    peaks = np.array([float(c.get("peak", 0.0)) for c in group_cands], dtype=float)
-                    d2 = (xg - (xcore + xlo)) ** 2 + (yg - (ycore + ylo)) ** 2
-                    # Use the nearest DAO detection only to inherit metadata,
-                    # but move the representative coordinates onto the NaN core.
+                # Use the nearest DAO detection only to inherit metadata,
+                # but move the representative coordinates onto the NaN core.
+                if len(d2)>0:
                     best_idx = int(np.lexsort((-peaks, d2))[0])
                 else:
-                    best_idx = int(np.argmax(nan_counts))
-            else:
-                # Unsaturated group: use a group-wide PSF matched-filter peak to
-                # avoid keeping a bright wing knot as the representative.
+                    best_idx = int(np.argmax(peaks))
+                best = dict(group_cands[best_idx])
+
+                # Use the measured wing spread to enlarge the local window used for
+                # the final centroid/core-radius refinement.
                 xg = np.array([float(c["x"]) for c in group_cands], dtype=float)
                 yg = np.array([float(c["y"]) for c in group_cands], dtype=float)
-                half = int(max(8, _group_radius))
-                xlo = max(0, int(np.floor(np.min(xg))) - half)
-                xhi = min(nx_arr, int(np.ceil(np.max(xg))) + half + 1)
-                ylo = max(0, int(np.floor(np.min(yg))) - half)
-                yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
-                local = data_arr[ylo:yhi, xlo:xhi]
+                refx, refy = float(best["x"]), float(best["y"])
+                eff_group_radius = _effective_radius(xg, yg, refx, refy, group_radius)
 
-                peaks = np.array([float(c.get("peak", 0.0)) for c in group_cands], dtype=float)
-                best_idx = int(np.argmax(peaks))
+                # Populate sat_radius for saturated representatives.
+                if sat_flag :
+                    cx, cy = float(best["x"]), float(best["y"])
+                    half = int(max(15, eff_group_radius))
+                    xlo = max(0, int(round(cx)) - half)
+                    xhi = min(nx_arr, int(round(cx)) + half + 1)
+                    ylo = max(0, int(round(cy)) - half)
+                    yhi = min(ny_arr, int(round(cy)) + half + 1)
+                    local = data_arr[ylo:yhi, xlo:xhi]
+                    if np.any(~np.isfinite(local)):
+                        sr, xcore, ycore = estimate_nan_core(
+                            local, center=(cx - xlo, cy - ylo), margin=1
+                        )
+                        best["x"] = float(xcore + xlo)
+                        best["y"] = float(ycore + ylo)
+                        if best["x"] < npix[0] or best["y"] < npix[2] or best["x"] > nx_arr - npix[1] or best["y"] > ny_arr - npix[3]:
+                            continue
+                else:
+                    # For unsaturated groups, place the representative on the local
+                    # PSF-correlation peak if it was measured above.
+                    half = int(max(8, eff_group_radius))
+                    xlo = max(0, int(np.floor(np.min(xg))) - half)
+                    xhi = min(nx_arr, int(np.ceil(np.max(xg))) + half + 1)
+                    ylo = max(0, int(np.floor(np.min(yg))) - half)
+                    yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
+                    local = data_arr[ylo:yhi, xlo:xhi]
+                    try:
+                        psf_det = downsample_psf_to_detector(psf, oversampling)
+                        psf_det = np.asarray(psf_det, dtype=float)
+                        psf_sum = np.nansum(psf_det)
+                        if np.isfinite(psf_sum) and psf_sum > 0:
+                            psf_det = psf_det / psf_sum
+                            img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
+                            corr = fftconvolve(img, psf_det[::-1, ::-1], mode="same")
+                            iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
+                            best["x"] = float(ix + xlo)
+                            best["y"] = float(iy + ylo)
+                            if best["x"]  < npix[0] or best["y"]  < npix[2] or best["x"]  > nx_arr - npix[1] or best["y"]  > ny_arr - npix[3]:
+                                continue
+                    except Exception:
+                        continue
 
-                try:
-                    psf_det = downsample_psf_to_detector(psf, oversampling)
-                    psf_det = np.asarray(psf_det, dtype=float)
-                    psf_sum = np.nansum(psf_det)
-                    if np.isfinite(psf_sum) and psf_sum > 0:
-                        psf_det = psf_det / psf_sum
-                        img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
-                        corr = fftconvolve(img, psf_det[::-1, ::-1], mode="same")
-                        iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
-                        d2 = (xg - (float(ix) + xlo)) ** 2 + (yg - (float(iy) + ylo)) ** 2
-                        # Keep metadata from the nearest DAO detection, but move
-                        # the representative coordinates onto the PSF-correlation peak.
-                        best_idx = int(np.lexsort((-peaks, d2))[0])
-                except Exception:
-                    pass
-
-            best = dict(group_cands[best_idx])  # shallow copy
-
-            # Use the measured wing spread to enlarge the local window used for
-            # the final centroid/core-radius refinement.
-            xg = np.array([float(c["x"]) for c in group_cands], dtype=float)
-            yg = np.array([float(c["y"]) for c in group_cands], dtype=float)
-            refx, refy = float(best["x"]), float(best["y"])
-            eff_group_radius = _effective_radius(xg, yg, refx, refy, _group_radius)
-
-            # Populate sat_radius for saturated representatives.
-            if max_nan > 0 and best["sat_radius"] <= 0:
-                cx, cy = float(best["x"]), float(best["y"])
-                half = int(max(8, eff_group_radius))
-                xlo = max(0, int(round(cx)) - half)
-                xhi = min(nx_arr, int(round(cx)) + half + 1)
-                ylo = max(0, int(round(cy)) - half)
-                yhi = min(ny_arr, int(round(cy)) + half + 1)
-                local = data_arr[ylo:yhi, xlo:xhi]
-                if np.any(~np.isfinite(local)):
-                    sr, xcore, ycore = estimate_nan_core(
-                        local, center=(cx - xlo, cy - ylo), margin=1
-                    )
-                    best["x"] = float(xcore + xlo)
-                    best["y"] = float(ycore + ylo)
-                    best["sat_radius"] = float(sr)
-            elif max_nan == 0:
-                # For unsaturated groups, place the representative on the local
-                # PSF-correlation peak if it was measured above.
-                half = int(max(8, eff_group_radius))
-                xlo = max(0, int(np.floor(np.min(xg))) - half)
-                xhi = min(nx_arr, int(np.ceil(np.max(xg))) + half + 1)
-                ylo = max(0, int(np.floor(np.min(yg))) - half)
-                yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
-                local = data_arr[ylo:yhi, xlo:xhi]
-                try:
-                    psf_det = downsample_psf_to_detector(psf, oversampling)
-                    psf_det = np.asarray(psf_det, dtype=float)
-                    psf_sum = np.nansum(psf_det)
-                    if np.isfinite(psf_sum) and psf_sum > 0:
-                        psf_det = psf_det / psf_sum
-                        img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
-                        corr = fftconvolve(img, psf_det[::-1, ::-1], mode="same")
-                        iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
-                        best["x"] = float(ix + xlo)
-                        best["y"] = float(iy + ylo)
-                except Exception:
-                    pass
-
-            selected.append(best)
+                selected.append(best)
 
         log.info(f"Using {np.sum([i['method']=='catalog' for i in selected])} catalog seeds + {np.sum([i['method']!='catalog' for i in selected])} DAO detections after selections.")
         return selected
 
+    # Check input.
+    if isinstance(npix, int):
+        npix = [npix, npix, npix, npix]  # left, right, bottom, top
+    if len(npix) != 4:
+        raise UserWarning('Parameter npix must either be an int or a list of four int (left, right, bottom, top)')
     data = np.asarray(data, dtype=float)
-    ny, nx = data.shape
+    data[nanmask==1] = np.nan
+
+    bkg, rms = estimate_bkg_and_rms(data, edge_width=5)
+    data_subtracted = data - bkg
 
     # ---- candidate detection via DAOStarFinder ----
     cat = _dao(
-        data,
+        data_subtracted,
         fwhm=dao_fwhm,
         sigma_thresh=dao_thresh_sigma,
     )
@@ -1579,102 +1501,67 @@ def DAO_source_extraction(
     # detections) and select one representative per group.  The representative
     # is the catalog seed (if provided), the saturated NaN core, or the
     # PSF-correlation peak for unsaturated sources.
-    cands = _group_and_select(all_cands, data, group_radius, dao_fwhm)
-
-    # Safety de-duplication: ensure no two sources are closer than group_radius.
-    # This catches edge cases where two group representatives end up very close
-    # (e.g. no DAO detections between two distinct stars).
-    # cands = _dedup_candidates(cat, min_separation=group_radius)
+    cands = _group_and_select(all_cands, data_subtracted, group_radius, npix)
 
     # ---- refinement with existing fit_psf ----
     rows = []
+    id=0
     for c in cands:
         method = c["method"]
         sat_r = float(c["sat_radius"])
-        x0, y0 = c["x"], c["y"]
-
+        x_fit, y_fit = c["x"], c["y"]
+        nx, ny = data_subtracted.shape
         # local cutout around candidate
-        half = int(max(psf.shape[0] // 2, fit_radius, group_radius))
-        xlo = max(0, int(round(x0)) - half)
-        xhi = min(nx, int(round(x0)) + half + 1)
-        ylo = max(0, int(round(y0)) - half)
-        yhi = min(ny, int(round(y0)) + half + 1)
-        cut = data[ylo:yhi, xlo:xhi]
-        cut -= np.nanmedian(cut)
+        half = int(max(psf.shape[0] // 2, group_radius))
+        xlo = max(0, int(round(x_fit)) - half)
+        xhi = min(nx, int(round(x_fit)) + half + 1)
+        ylo = max(0, int(round(y_fit)) - half)
+        yhi = min(ny, int(round(y_fit)) + half + 1)
+        cut = data_subtracted[ylo:yhi, xlo:xhi]
+        nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
         # estimate radius from nan core in cutout if needed
         if sat_r <= 0 and np.any(~np.isfinite(cut)):
-            sat_r_est, _, _ = estimate_nan_core(cut, center=(x0 - xlo, y0 - ylo), margin=1)
+            sat_r_est, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
             sat_r = float(sat_r_est)
 
+        fit_radius = min(15,max(cut.shape)//3)
         if method != 'catalog':
-            try:
-                fx, fy, fflux = fit_psf(
+            # try:
+                fx, fy, _ = fit_psf(
                     masked_psf_data=psf,
                     data=cut,
+                    nanmask=nanmaskcut,
                     oversampling=oversampling,
                     radius_core=sat_r,
-                    fit_radius=min(fit_radius, max(cut.shape) / 2 - 1),
-                    search_radius=min(fit_radius, max(cut.shape) / 2 - 1),
-                    bkg_subtract=True,
+                    fit_radius=fit_radius,
+                    search_radius=fit_radius*3,
+                    bkg_subtract=False,
                     two_pass=True,
                     showplots=False,
                 )
                 x_fit = float(fx + xlo)
                 y_fit = float(fy + ylo)
-                # flux = float(fflux)
-                flag = 0
-            except Exception:
-                # x_fit, y_fit, flux = np.nan, np.nan, np.nan
-                x_fit, y_fit = np.nan, np.nan
-                flag = 1
-        else:
-            x_fit, y_fit = x0, y0
-            flag = 0
-
-        # simple aperture flux around fitted center (optional compatibility column)
-        if np.isfinite(x_fit) and np.isfinite(y_fit):
-            yy, xx = np.indices(data.shape)
-            rr2 = (xx - x_fit) ** 2 + (yy - y_fit) ** 2
-            ap = rr2 <= float(aperture_radius) ** 2
-            good = ap & np.isfinite(data)
-            apflux = float(np.nansum(data[good])) if np.any(good) else np.nan
-            # crude error model from err input
-            if np.isscalar(err):
-                apflux_err = float(np.sqrt(np.sum(good)) * float(err))
-            else:
-                e = np.asarray(err, dtype=float)
-                apflux_err = float(np.sqrt(np.nansum((e[good]) ** 2))) if np.any(good) else np.nan
-        else:
-            apflux, apflux_err = np.nan, np.nan
+            # except Exception:
+            #     x_fit, y_fit = np.nan, np.nan
 
 
         rows.append((
-            x_fit, y_fit,                # x, y
-            x_fit, y_fit,                # xpeak, ypeak (compat)
-            np.nan, np.nan, 0.0,         # a, b, theta (not from segmentation)
-            flag,                        # flag
-            0,                           # ap_flag
-            apflux, apflux_err,
-            apflux / apflux_err if np.isfinite(apflux) and np.isfinite(apflux_err) and apflux_err > 0 else np.nan,
-            np.nan,                      # peak_snr (optional fill later)
-            np.nan,                      # ellipt
+            id,
+            x_fit, y_fit,
             sat_r,
-            c["method"],
-            # flux,
+            method,
         ))
+        id+=1
 
     names = [
-        "x", "y", "xpeak", "ypeak", "a", "b", "theta", "flag", "ap_flag",
-        "apflux", "apflux_err", "ap_snr", "peak_snr", "ellipt",
-        "sat_radius", "det_method"]#, "psf_flux"]
+        "id",
+        "x", "y",
+        "sat_radius", "det_method"]
     tbl = Table(rows=rows, names=names)
 
     # Keep only rows with finite coordinates so bad fits are excluded from CSV/DS9.
     # Prefer peak coordinates (used with region_center="peak"), fallback to x/y.
-    if "xpeak" in tbl.colnames and "ypeak" in tbl.colnames:
-        xcol, ycol = "xpeak", "ypeak"
-    else:
-        xcol, ycol = "x", "y"
+    xcol, ycol = "x", "y"
 
     xvals = np.asarray(tbl[xcol], dtype=float)
     yvals = np.asarray(tbl[ycol], dtype=float)
