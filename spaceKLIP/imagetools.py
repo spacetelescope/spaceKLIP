@@ -19,7 +19,7 @@ import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
 import sep
-from spaceKLIP.widefield_utils import broadcast, SEP_source_extraction, select_table, write_ds9_regions_from_sep_objects,stars_extractor,estimate_nan_core,fit_psf, mask_core
+from spaceKLIP.widefield_utils import broadcast, DAO_source_extraction, select_table, write_ds9_regions_from_sep_objects,stars_extractor,estimate_nan_core,fit_psf, fetch_gaia_for_image_fov
 from astropy.table import vstack, Table
 
 # astropy imports
@@ -3584,21 +3584,12 @@ class ImageTools():
         pass
 
     def prepare_tiles_for_extraction(self,
-                      err_mode= 'bkg_rms',
-                      thresh_sigma = [3, 10, 50, 100],
-                      ap_radius = 5,
-                      min_area = [3, 5, 10, 15],
-                      # snr = [6, 8, 8, 10],
-                      snr = None,
-                      peak_col = ["peak", "peak", "peak", "apflux"],
-                      max_rat = [0.25, 0.25, 0.25, None],
-                      fov_pixels = 101,
-                      flag_sel= 0,
-                      ap_flag_sel = [0,32],
-                      min_rad = 1,
-                      enforce_sep_on_final = True,
-                      kwargs={},
-                      subdir='pretiles'):
+                                     npix =0,
+                                     fov_pix=65,
+                                     dao_thresh_sigma=1,
+                                     dao_fwhm=3,
+                                     kwargs={},
+                                     subdir='pretiles'):
         """
         Detect candidate point sources and write catalogs/DS9 regions for later tile extraction.
         This routine runs `SEP <https://sep.readthedocs.io/>`_ (a Python implementation
@@ -3607,62 +3598,13 @@ class ImageTools():
 
         Parameters
         ----------
-        err_mode : str or list of str, optional
-            Uncertainty model passed to :func:`spaceKLIP.widefield_utils.SEP_source_extraction`.
-            If a list is provided it must match ``len(thresh_sigma)``.
-
-            Supported modes are:
-
-            - ``'jwst_err'``: use the JWST ``ERR`` extension (per-pixel) when available;
-            - ``'bkg_rms'``: use SEP's spatial background RMS map (per-pixel);
-            - ``'global'``: use SEP's global background RMS (scalar);
-            - ``'sqrt'``: Poisson-like noise ``sqrt(max(data_sub, 0))`` with a noise floor.
-
-            The default is ``'bkg_rms'``.
-        thresh_sigma : list of float, optional
-            Detection threshold(s) in units of sigma above background.
-            Each value results in one SEP run. The default is ``[3, 10, 50, 100]``.
-        ap_radius : float or list of float, optional
-            Aperture radius in pixels used for aperture photometry (and SNR
-            estimates) inside :func:`spaceKLIP.widefield_utils.SEP_source_extraction`.
-            Can be a scalar or a list with one value per threshold run.
-        min_area : int or list of int, optional
-            Minimum number of connected pixels above threshold for a detection
-            (SEP ``minarea``). Can be scalar or list.
-        snr : float or list of float, optional
-            Minimum signal-to-noise ratio required in the *selection* step.
-            This is forwarded to :func:`spaceKLIP.widefield_utils.select_table` as
-            ``ap_snr``. Can be scalar or list.
-        peak_col : str or list of str, optional
-            Column used to rank detections during de-duplication/non-maximum
-            suppression in :func:`spaceKLIP.widefield_utils.select_table`.
-            Common options are ``'peak'`` (peak pixel value) and ``'apflux'``
-            (aperture flux). Can be scalar or list.
-        max_rat : float or list of float or None, optional
-            Maximum allowed SEP ellipticity metric used by
-            :func:`spaceKLIP.widefield_utils.select_table` (passed as ``maxrat``).
-            Set to ``None`` to disable this filter. Can be scalar or list.
-        fow_pixels : float or list of float, optional
-            Field of View of future tiles from which to derive the minimum searation parameter (i.e. fow_pixels//2)
-            Minimum separation radius is used to keep only one detection
-            within a neighborhood (greedy non-maximum suppression). Can be scalar
-            or list.
-        flag_sel : int or list of int or None, optional
-            Allowed SEP detection flags (exact integer match). Passed to
-            :func:`spaceKLIP.widefield_utils.select_table` as ``flag_sel``.
-            Set to ``None`` to disable flag filtering.
-        ap_flag_sel : list of int or list of list[int] or None, optional
-            Allowed SEP aperture-photometry flags (exact integer match). Passed to
-            :func:`spaceKLIP.widefield_utils.select_table` as ``ap_flag_sel``.
-            By default, keeps sources with aperture flags 0 or 32.
-        min_rad : float or list of float, optional
-            De-duplication radius (pixels) used during the *final merge* across
-            all threshold runs. This helps remove duplicates that are detected in
-            multiple runs. Set to ``None`` or ``<= 0`` to disable this merge.
-        enforce_sep_on_final : bool or list of bool, optional
-            If True, re-apply the per-run ``separation_pix`` rule to the *final*
-            combined catalog after the merge step. This is useful when the final
-            catalog should also respect your neighborhood suppression setting.
+        npix : int or list of four int, optional
+            Number of pixels to be padded around the frames. If int, the same
+            number of pixels will be padded on each side. If list of four int,
+            a different number of pixels can be padded on the [left, right,
+            bottom, top] of the frames. The default is 1.
+        fov_pixels : int
+            Tile size in detector pixels.
         kwargs : dict, optional
             Extra configuration for the diagnostic DS9 region output.
 
@@ -3679,9 +3621,9 @@ class ImageTools():
             - save_inner_catalogs : bool
                 If True, also write the per-threshold CSV catalogs and DS9 region
                 files. The default is False. (The combined products are always written.)
-            - circle_radius_mode : {'geom', 'mean', 'max'} or float or None
+            - circle_radius : float
                 Passed through to :func:`spaceKLIP.widefield_utils.write_ds9_regions_from_sep_objects`.
-                If None, a run-dependent fallback radius is used.
+                Overwrites fov_pixels ONLY for region shape if parsed
         subdir : str, optional
             Name of the sub-directory (inside ``database.output_dir``) where the
             updated FITS/mask products and catalogs/regions will be written. The
@@ -3700,53 +3642,21 @@ class ImageTools():
         """
 
         #reading kwargs for ds9 region file
-        color = kwargs.get('color', 'green')
         region_shape = kwargs.get('region_shape', 'square')
-        region_center = kwargs.get('region_center', 'peak')
-        save_inner_catalogs = kwargs.get('save_inner_catalogs', False)
-        circle_radius_mode = kwargs.get('circle_radius_mode', None)
+        circle_radius = kwargs.get('circle_radius', fov_pix//2)
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-        if len(thresh_sigma) == 0:
-            raise ValueError("_thresh_sigma must be a list contain at least one entry")
-        n = len(thresh_sigma)
-
-        err_mode = broadcast(err_mode, n)
-        ap_radius = broadcast(ap_radius, n)
-        min_area = broadcast(min_area, n)
-        snr = broadcast(snr, n)
-        peak_col = broadcast(peak_col, n)
-        max_rat = broadcast(max_rat, n)
-        if isinstance(fov_pixels,list):
-            separation_pix = [fow//2 for fow in fov_pixels]
-        else:
-            separation_pix = fov_pixels//2
-
-        separation_pix = broadcast(separation_pix, n)
-        flag_sel = broadcast(flag_sel, n)
-        ap_flag_sel = broadcast(ap_flag_sel, n, newshape=False)
-        min_rad = broadcast(min_rad, n)
-        enforce_sep_on_final = broadcast(enforce_sep_on_final, n)
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Concatenation ' + key)
 
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
-            ww_sci_ta = np.where(self.database.obs[key]['TYPE'] == 'SCI_TA')[0]
-            ww_ref = np.where(self.database.obs[key]['TYPE'] == 'REF')[0]
-            ww_ref_ta = np.where(self.database.obs[key]['TYPE'] == 'REF_TA')[0]
-
-            # Loop through FITS files.
-            ww_all = np.append(ww_sci, ww_ref)
-            ww_all = np.append(ww_all, ww_sci_ta)
-            ww_all = np.append(ww_all, ww_ref_ta)
-            shifts_all = []
-            for j in ww_all:
+            for j in ww_sci:
 
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
@@ -3755,6 +3665,9 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
                 nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 nanmask = ut.read_msk(nanmaskfile)
+                filt = self.database.obs[key]['FILTER'][j]
+                apername = self.database.obs[key]['APERNAME'][j]
+                date = fits.getheader(self.database.obs[key]['FITSFILE'][j], 0)['DATE-BEG']
 
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
@@ -3762,203 +3675,45 @@ class ImageTools():
                 if np.sum(np.isnan(data)) != 0:
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
                 # SCI and REF data.
-                if j in ww_sci or j in ww_ref:
-                    for k in range(data.shape[0]):
-                        if k == 0:
-                            combined_selected_tables = []
-                            for _err_mode, _thresh_sigma, _ap_radius, _min_area, _min_rad, _ap_snr, _peak_col, _max_rat, _msep, _color, _flag_sel, _ap_flag_sel in zip(
-                                    err_mode,
-                                    thresh_sigma,
-                                    ap_radius,
-                                    min_area,
-                                    min_rad,
-                                    snr,
-                                    peak_col,
-                                    max_rat,
-                                    separation_pix,
-                                    color,
-                                    flag_sel,
-                                    ap_flag_sel,
-                            ):
-                                data_temp = data[k].astype(data[k].dtype.newbyteorder("="))
-                                err_temp = erro[k].astype(erro[k].dtype.newbyteorder("="))
-                                # Mask invalid pixels early. SEP does not like NaNs.
-                                good_pix_mask = ~np.isfinite(data_temp) | (data_temp <= 0)
-                                good_pix_mask |= ~np.isfinite(err_temp) | (err_temp <= 0)
-                                # measure a spatially varying background on the image
-                                bkg = sep.Background(data_temp, mask=good_pix_mask)
+                # if j in ww_sci or j in ww_ref:
+                for k in range(data.shape[0]):
+                    if k == 0:
+                        region_name = f'{tail.replace(".fits",".reg")}'
+                        region_path = os.path.join(output_dir, region_name)
+                        catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
+                        result = fetch_gaia_for_image_fov(data, head_sci, verbose=True)
 
-                                # subtract the background
-                                data_sub = data_temp - bkg
+                        offsetpsf_func = JWST_PSF(apername,
+                                                  filt,
+                                                  date=date,
+                                                  fov_pix=fov_pix,
+                                                  oversample=2,
+                                                  sp=None,
+                                                  use_coeff=False)
+                        psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
+                        psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
 
-                                # err: float | np.ndarray
-                                # NOTE: some modes (e.g. 'sqrt') are applied later inside
-                                # SEP_source_extraction; here we still return a reasonable scalar/array that
-                                # can be used as a noise floor.
-                                if _err_mode == "jwst_err":
-                                    err = err_temp if err_temp is not None else float(bkg.globalrms)
-                                elif _err_mode == "bkg_rms":
-                                    err = bkg.rms()
-                                elif _err_mode in ("global", "sqrt"):
-                                    err = float(bkg.globalrms)
-                                else:
-                                    raise ValueError(
-                                        "Unknown err_mode. Expected one of: 'jwst_err', 'bkg_rms', 'global', 'sqrt'. "
-                                        f"Got: {_err_mode!r}"
-                                    )
+                        objects_tbl_selected = DAO_source_extraction(
+                                                                    data=data[0],
+                                                                    nanmask=nanmask,
+                                                                    psf=psf_no_coronmsk,
+                                                                    npix=npix,
+                                                                    dao_thresh_sigma=dao_thresh_sigma,
+                                                                    dao_fwhm=dao_fwhm,
+                                                                    catalog=result,
+                                                                    group_radius=fov_pix//2,
+                                                                )
 
-                                label = f"threshold{_thresh_sigma}"
+                        objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
+                        out = write_ds9_regions_from_sep_objects(
+                                                                objects_tbl_selected,
+                                                                region_path,
+                                                                shape=region_shape,
+                                                                circle_radius=circle_radius,
+                                                                color="black",
+                                                            )
+                        log.info(f"Wrote COMBINED DS9 region file: {out} ({len(objects_tbl_selected)} detections)")
 
-                                region_name = f'{tail.replace(".fits","")}_{label}.reg'
-                                region_path = os.path.join(output_dir, region_name)
-                                catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
-
-                                # TODO: fix RA/DEC in the objects_tbl
-                                objects_tbl_selected = SEP_source_extraction(
-                                    head_pri,
-                                    data_sub,
-                                    err,
-                                    good_pix_mask,
-                                    _thresh_sigma,
-                                    region_center,
-                                    aperture_radius_pix=float(_ap_radius),
-                                    minarea=int(_min_area),
-                                    err_mode=_err_mode,
-                                )
-
-                                # objects_tbl_selected = select_table(
-                                #     objects_tbl,
-                                #     separation_pix=_msep,  # 20
-                                #     center=region_center,  # use the same coord convention as the DS9 output
-                                #     peak_col=_peak_col,
-                                #     ap_snr=_ap_snr,
-                                #     maxrat=_max_rat,
-                                #     flag_sel=_flag_sel,
-                                #     ap_flag_sel=_ap_flag_sel,
-                                #     window_shape=region_shape,
-                                # )
-                                # if len(objects_tbl_selected) == 0:
-                                #     log.warning(f"No candidates detected for {tail} with current selection. Loosing up a bit.")
-                                #     objects_tbl_selected = select_table(
-                                #                     objects_tbl,
-                                #                     separation_pix=_msep,  # 20
-                                #                     center=region_center,  # use the same coord convention as the DS9 output
-                                #                     peak_col=_peak_col,
-                                #                     ap_snr=None,
-                                #                     maxrat=None,
-                                #                     flag_sel=_flag_sel,
-                                #                     ap_flag_sel=_ap_flag_sel,
-                                #                     window_shape=region_shape,
-                                #                 )
-                                objects_tbl_selected = objects_tbl_selected.copy()
-                                objects_tbl_selected["run_label"] = label
-                                # Track which detection threshold produced each source.
-                                # Use a numeric column so it is easy to filter/group later.
-                                objects_tbl_selected["thresh_sigma"] = np.full(len(objects_tbl_selected),
-                                                                               float(_thresh_sigma), dtype=float)
-                                objects_tbl_selected["run_color"] = color
-                                objects_tbl_selected["separation_pix"] = float(_msep)
-                                objects_tbl_selected["aperture_radius_pix"] = float(_ap_radius)
-                                combined_selected_tables.append(objects_tbl_selected)
-
-                                if save_inner_catalogs:
-                                    objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
-                                    log.info(f"Wrote CSV catalog: {catalog_path} ({len(objects_tbl_selected)} SEP detections)")
-
-                                    out = write_ds9_regions_from_sep_objects(
-                                        objects_tbl_selected,
-                                        region_path,
-                                        shape=region_shape,
-                                        center=region_center,
-                                        circle_radius=(
-                                            circle_radius_mode
-                                            if circle_radius_mode is not None
-                                            else (float(_msep) if float(_msep) > 0 else float(_ap_radius))
-                                        ),
-                                        color=color,
-                                        only_round=False,
-                                    )
-                                    log.info(f"Wrote DS9 region file: {out} ({len(objects_tbl_selected)} SEP detections)")
-
-                            # -----------------
-                            # Final merge step
-                            # -----------------
-                            if len(combined_selected_tables) > 0:
-                                # Stack all detections from all runs, then do a final NMS-like de-duplication.
-                                combined_tbl = vstack(combined_selected_tables, metadata_conflicts="silent")
-
-                                # When the same source appears in multiple threshold runs, prefer the
-                                # detection from the *highest* threshold catalog.
-                                # Tie-break (within the same threshold) using SNR when available.
-                                if "thresh_sigma" in combined_tbl.colnames:
-                                    rank = np.asarray(combined_tbl["thresh_sigma"], dtype=float) * 1.0e6
-                                    if "ap_snr" in combined_tbl.colnames:
-                                        snr = np.asarray(combined_tbl["ap_snr"], dtype=float)
-                                        snr = np.nan_to_num(snr, nan=0.0, posinf=0.0, neginf=0.0)
-                                        rank = rank + snr
-                                    combined_tbl["merge_rank"] = rank
-
-                                if _min_rad is not None and _min_rad > 0:
-                                    combined_tbl_selected = select_table(
-                                        combined_tbl,
-                                        separation_pix=_min_rad,
-                                        center=region_center,
-                                        peak_col=("merge_rank" if "merge_rank" in combined_tbl.colnames else "ap_snr"),
-                                        ap_snr=None,
-                                        maxrat=None,
-                                        flag_sel=None,
-                                        ap_flag_sel=None,
-                                        window_shape=region_shape,
-                                    )
-                                else:
-                                    # Still reset ds9_id for consistency.
-                                    combined_tbl_selected = combined_tbl.copy()
-                                    combined_tbl_selected["ds9_id"] = np.arange(len(combined_tbl_selected),
-                                                                                dtype=int)
-
-                                # Optional: enforce the requested min separation on the FINAL catalog.
-                                # This does *not* change the meaning of `min_rad` (still just
-                                # for duplicates). It ensures the combined catalog also respects the
-                                # `separation_pix` rule.
-                                if enforce_sep_on_final:
-                                    combined_tbl_selected = select_table(
-                                        combined_tbl_selected,
-                                        separation_pix=_msep,
-                                        center=region_center,
-                                        peak_col=("merge_rank" if "merge_rank" in combined_tbl_selected.colnames else "ap_snr"),
-                                        ap_snr=None,
-                                        maxrat=None,
-                                        flag_sel=None,
-                                        ap_flag_sel=None,
-                                        window_shape=region_shape,
-                                    )
-                                    combined_tbl_selected["ds9_id"] = np.arange(len(combined_tbl_selected),
-                                                                                dtype=int)
-
-                                combined_label = f"combined"
-                                combined_catalog_path = os.path.join(output_dir,f'{tail.replace(".fits", "")}_{combined_label}.csv')
-                                combined_region_path = os.path.join(output_dir, f'{tail.replace(".fits", "")}_{combined_label}.reg')
-                                combined_tbl_selected.write(combined_catalog_path, format="csv", overwrite=True)
-
-                                log.info(
-                                    f"Wrote COMBINED CSV catalog: {combined_catalog_path} "
-                                    f"({len(combined_tbl_selected)} unique SEP detections)"
-                                )
-
-                                out = write_ds9_regions_from_sep_objects(
-                                    combined_tbl_selected,
-                                    combined_region_path,
-                                    shape=region_shape,
-                                    center=region_center,
-                                    circle_radius=(circle_radius_mode if circle_radius_mode is not None else None),
-                                    circle_radius_col=(None if circle_radius_mode is not None else "separation_pix"),
-                                    color="red",
-                                    only_round=False,
-                                )
-                                log.info(f"Wrote COMBINED DS9 region file: {out} ({len(combined_tbl_selected)} detections)")
-                                pass
-                            else:
-                                log.warning(f"No targets in {tail}. Skipping for now.")
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
                                         center_mask=center_mask, maskoffs=maskoffs)
@@ -3971,11 +3726,10 @@ class ImageTools():
                                          center_shift=center_shift, center_mask=center_mask,
                                          nanmaskfile=nanmaskfile)
 
-            pass
+                pass
 
     def extract_tiles(self,
                       fov_pixels=101,
-                      oversample=2,
                       kwargs={},
                       subdir='tiles',
                       catdir='pretiles',
@@ -3988,8 +3742,6 @@ class ImageTools():
         ----------
         fov_pixels : int
             Tile size in detector pixels.
-        oversample : int
-            Oversampling used for the PSF model.
         subdir : str
             Output sub-directory under ``database.output_dir``.
         catdir : str
@@ -4153,8 +3905,8 @@ class ImageTools():
                             raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
 
                         for source in targets_table:
-                            tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["ds9_id"]}_{DETECTOR.lower()}')
-                            log.info(f'--> Extracting tile for source: {source["ds9_id"]}, into {tile_fitsfile.split("/")[-1]}')
+                            tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["id"]}_{DETECTOR.lower()}')
+                            log.info(f'--> Extracting tile for source: {source["id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
                             x_extract, y_extract = source['x'], source['y']
 
@@ -4186,7 +3938,7 @@ class ImageTools():
                                    kwargs['r'] = radius
                                 if 'size' not in kwargs.keys():
                                    if fov_pixels//2 > 51:
-                                       kwargs['size'] = fov_pixels//2 + 1 if fov_pixels//2 % 2 == 0 else fov_pixels//4
+                                       kwargs['size'] = fov_pixels//4 + 1 if fov_pixels//4 % 2 == 0 else fov_pixels//4
                                    elif fov_pixels >=51:
                                        kwargs['size'] = 51
                                    else:
