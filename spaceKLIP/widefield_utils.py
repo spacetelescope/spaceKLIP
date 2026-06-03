@@ -200,7 +200,7 @@ def downsample_psf_to_detector(psf, oversampling):
     return psf.reshape(ny, oversampling, nx, oversampling).sum(axis=(1, 3))
 
 def fit_psf(
-    masked_psf_data,
+    psf,
     data,
     nanmask,
     oversampling=1,
@@ -218,8 +218,8 @@ def fit_psf(
 
     Parameters
     ----------
-    masked_psf_data : 2D-array
-        PSF model image (may be oversampled; see ``oversampling``).
+    psf : 2D-array
+        PSF model image.
     data : 2D-array
         Image cutout to fit.
     nanmask: list, None, optional
@@ -281,7 +281,7 @@ def fit_psf(
 
     # Use the PSF as the model (with the core optionally masked).
     # IMPORTANT: if the PSF is oversampled w.r.t. the data, tell photutils.
-    psf_model = FittableImageModel(masked_psf_data, oversampling=oversampling)
+    psf_model = FittableImageModel(psf, oversampling=oversampling)
 
     # Use the LevMarLSQFitter to fit the PSF to the data.
     fitter = fitting.LevMarLSQFitter()
@@ -290,7 +290,7 @@ def fit_psf(
     yy, xx = np.mgrid[0:ny, 0:nx]
 
     # # For saturated stars we want to keep the masked core fixed on the NaN core.
-    if radius_core is None:
+    if radius_core is not None:
         core_mask_x = (nx - 1) / 2
         core_mask_y = (ny - 1) / 2
     # if radius_core and radius_core > 0 and np.any(~np.isfinite(data)):
@@ -308,16 +308,10 @@ def fit_psf(
     else:
         peak_snr = 0.0
 
-    psf_det = downsample_psf_to_detector(masked_psf_data, oversampling)
-    psf_det = np.asarray(psf_det, dtype=float)
-    if np.all(psf_det == 0) or not np.isfinite(psf_det).any():
-        raise ValueError("PSF is all zeros or non-finite")
-    # Normalize for correlation stability.
-    psf_det = psf_det / (np.nansum(psf_det) + 1e-30)
     # Cross-correlation peak gives a good starting point for faint sources.
     corr = fftconvolve(
         np.nan_to_num(data_fit, nan=0.0),
-        psf_det[::-1, ::-1],
+        psf[::-1, ::-1],
         mode="same",
     )
 
@@ -1370,13 +1364,13 @@ class DAO():
                         # avoid keeping a bright wing knot as the representative.
                         peaks.append([float(candidate.get("peak", 0.0))])
                         try:
-                            psf_det = downsample_psf_to_detector(psf, self.oversampling)
-                            psf_det = np.asarray(psf_det, dtype=float)
-                            psf_sum = np.nansum(psf_det)
+                            masked_psf_data = downsample_psf_to_detector(psf, self.oversampling)
+                            masked_psf_data = np.asarray(masked_psf_data, dtype=float)
+                            psf_sum = np.nansum(masked_psf_data)
                             if np.isfinite(psf_sum) and psf_sum > 0:
-                                psf_det = psf_det / psf_sum
+                                masked_psf_data = masked_psf_data / psf_sum
                                 img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
-                                corr = fftconvolve(img, psf_det[::-1, ::-1], mode="same")
+                                corr = fftconvolve(img, masked_psf_data[::-1, ::-1], mode="same")
                                 iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
                                 d2.append([(cx - (float(ix) + xlo)) ** 2 + (cy - (float(iy) + ylo)) ** 2])
                         except Exception:
@@ -1429,13 +1423,13 @@ class DAO():
                     yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
                     local = data_arr[ylo:yhi, xlo:xhi]
                     try:
-                        psf_det = downsample_psf_to_detector(psf, self.oversampling)
-                        psf_det = np.asarray(psf_det, dtype=float)
-                        psf_sum = np.nansum(psf_det)
+                        masked_psf_data = downsample_psf_to_detector(psf, self.oversampling)
+                        masked_psf_data = np.asarray(masked_psf_data, dtype=float)
+                        psf_sum = np.nansum(masked_psf_data)
                         if np.isfinite(psf_sum) and psf_sum > 0:
-                            psf_det = psf_det / psf_sum
+                            masked_psf_data = masked_psf_data / psf_sum
                             img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
-                            corr = fftconvolve(img, psf_det[::-1, ::-1], mode="same")
+                            corr = fftconvolve(img, masked_psf_data[::-1, ::-1], mode="same")
                             iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
                             best["x"] = float(ix + xlo)
                             best["y"] = float(iy + ylo)
@@ -1451,13 +1445,13 @@ class DAO():
         tbl['id']=[i for i in range(len(tbl))]
         return tbl
 
-    def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None):
+    def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None,fit_radius=31):
         '''
         Perform coordinates refinement using PSF (wings if core is saturated) fit.
 
         Args:
             candidates : list of dict
-                Full (ungrouped) candidate list from ``_dao``.
+                Candidate table .
             data : 2D-array
                 Background-subtracted science image.
             nanmask: 2D-array (bool)
@@ -1466,6 +1460,9 @@ class DAO():
                 PSF model image passed directly to ``fit_psf``.
             search_radius : float, optional
                 Search radius (pixels) for the matched-filter initialization.
+            fit_radius : float, optional
+                Radius (in data pixels) defining the fitting region. If None, fits the
+                full cutout.
 
         Returns:
             astropy.table.Table containing the refined coordinates of the candidates
@@ -1478,25 +1475,32 @@ class DAO():
             x_fit, y_fit = c["x"], c["y"]
             nx, ny = data.shape
             # local cutout around candidate
-            half = int(max(psf.shape[0] // 2, self.group_radius))
+            half = int(min(psf.shape[0] // 2, fit_radius))
             xlo = max(0, int(round(x_fit)) - half)
             xhi = min(nx, int(round(x_fit)) + half + 1)
             ylo = max(0, int(round(y_fit)) - half)
             yhi = min(ny, int(round(y_fit)) + half + 1)
             cut = data[ylo:yhi, xlo:xhi]
             nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
-
             sat_r, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
+
+            nxpsf, nypsf = psf.shape
+            xlo = max(0, int(round(nxpsf//2)) - half)
+            xhi = min(nx, int(round(nxpsf//2)) + half + 1)
+            ylo = max(0, int(round(nypsf//2)) - half)
+            yhi = min(ny, int(round(nypsf//2)) + half + 1)
+            psfcut = psf[ylo:yhi, xlo:xhi]
+
             if search_radius is None:
-                search_radius = min(21, max(cut.shape) // 3)
+                search_radius = min(15, fit_radius)
             if method != 'catalog':
                 fx, fy, _ = fit_psf(
-                    masked_psf_data=psf,
+                    psf=psfcut,
                     data=cut,
                     nanmask=nanmaskcut,
                     oversampling=self.oversampling,
                     radius_core=sat_r,
-                    fit_radius=max(cut.shape) // 3,
+                    fit_radius=fit_radius,
                     search_radius=search_radius,
                     bkg_subtract=False,
                     two_pass=self.two_pass,
