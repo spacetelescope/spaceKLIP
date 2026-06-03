@@ -3584,6 +3584,7 @@ class ImageTools():
 
     def prepare_tiles_for_extraction(self,
                                      npix =0,
+                                     group_radius=15,
                                      fov_pix=65,
                                      dao_thresh_sigma=1,
                                      dao_fwhm=3,
@@ -3602,6 +3603,13 @@ class ImageTools():
             number of pixels will be padded on each side. If list of four int,
             a different number of pixels can be padded on the [left, right,
             bottom, top] of the frames. The default is 1.
+        group_radius : float, optional
+            Grouping radius (pixels). All ``DAOStarFinder`` detections within this
+            distance of each other are treated as belonging to the same star, and
+            only one representative is kept.  The same radius is also used as the
+            minimum allowed separation between any two sources in the final
+            catalog.  Should be set to roughly 1–2 times the PSF wing extent; a
+            value of ~15 pixels works well for JWST NIRCam wide-field data.
         fov_pixels : int
             Tile size in detector pixels.
         kwargs : dict, optional
@@ -3673,14 +3681,14 @@ class ImageTools():
                 log.info('  --> Extract Tiles from: ' + tail)
                 if np.sum(np.isnan(data)) != 0:
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
-                # SCI and REF data.
-                # if j in ww_sci or j in ww_ref:
+
                 for k in range(data.shape[0]):
                     if k == 0:
                         region_name = f'{tail.replace(".fits",".reg")}'
                         region_path = os.path.join(output_dir, region_name)
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
-                        result = fetch_gaia_for_image_fov(data, head_sci, verbose=True)
+                        gaia_path = os.path.join(region_path.replace(".reg", "_gaia.csv"))
+                        result = fetch_gaia_for_image_fov(gaia_path,data, head_sci,npix=npix, verbose=True)
 
                         offsetpsf_func = JWST_PSF(apername,
                                                   filt,
@@ -3691,18 +3699,19 @@ class ImageTools():
                                                   use_coeff=False)
                         psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
                         psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
+
                         dao = DAO(dao_thresh_sigma=dao_thresh_sigma,
                                 dao_fwhm=dao_fwhm,
                                 catalog=result,
-                                group_radius=fov_pix//2,)
-
+                                group_radius=group_radius,
+                                npix=npix)
                         objects_tbl_selected = dao.dao_source_extractor(
                                                                         data=data[0],
                                                                         nanmask=nanmask,
                                                                         psf=psf_no_coronmsk,
                                                                     )
-
                         objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
+
                         out = write_ds9_regions_from_sep_objects(
                                                                 objects_tbl_selected,
                                                                 region_path,
