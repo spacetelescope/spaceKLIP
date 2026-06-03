@@ -61,13 +61,6 @@ Compatible Simulated Data: `Here <https://stsci.box.com/s/cktghuyrwrallb401rw5y5
    :hidden:
 
    tutorials
-   tutorials/tutorial_NIRCam_reductions.ipynb
-   tutorials/tutorial_MIRI_reductions.ipynb
-   tutorials/tutorial_NIRCam_contrast_analyses.ipynb
-   tutorials/tutorial_MIRI_contrast_analyses.ipynb
-   tutorials/tutorial_bad_pixels.ipynb
-   tutorials/TA_analysis.ipynb
-   tutorials/MAST query tools for coronagraphic datasets.ipynb
 
 .. toctree::
    :maxdepth: 1
