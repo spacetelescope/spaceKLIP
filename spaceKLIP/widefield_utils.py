@@ -1084,7 +1084,10 @@ class DAO():
                 dao_fwhm=2.5,
                 group_radius=15.0,
                 catalog=None,
-                nan_lim_percent=0.51):
+                nan_lim_percent=0.51,
+                two_pass=True,
+                showplots=False,
+                 ):
         """
         Initialize the spaceKLIP DAOStarFinder source extraction tools class.
 
@@ -1118,7 +1121,11 @@ class DAO():
         nan_lim_percent : float, optional
             When checking for NaN pixels near a candidate (to identify sources to close to the edge, or outside),
             the candidate is excluded if more than this fraction of the total pixels in the tile are NaN.
-
+        two_pass : bool, optional
+            If True and ``fit_radius`` is set, do a broad pass followed by a tighter
+            pass when refining coordinates.
+        showplots : bool, optional
+            If True, show a diagnostic plot when refining coordinates for problematic fits.
         Returns
         -------
         None.
@@ -1137,6 +1144,8 @@ class DAO():
         self.group_radius=group_radius
         self.catalog=catalog
         self.nan_lim_percent=nan_lim_percent
+        self.two_pass = two_pass
+        self.showplots = showplots
         pass
 
     def _dao(self,data):
@@ -1453,7 +1462,7 @@ class DAO():
         id = 0
         for c in candidates:
             method = c["method"]
-            sat_r = float(c["sat_radius"])
+            # sat_r = float(c["sat_radius"])
             x_fit, y_fit = c["x"], c["y"]
             nx, ny = data.shape
             # local cutout around candidate
@@ -1465,9 +1474,10 @@ class DAO():
             cut = data[ylo:yhi, xlo:xhi]
             nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
             # estimate radius from nan core in cutout if needed
-            if sat_r <= 0 and np.any(~np.isfinite(cut)):
-                sat_r_est, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
-                sat_r = float(sat_r_est)
+            # if sat_r <= 0 and np.any(~np.isfinite(cut)):
+            #     sat_r_est, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
+            #     sat_r = float(sat_r_est)
+            sat_r, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
 
             fit_radius = max(51, max(cut.shape) // 3)
             if method != 'catalog':
@@ -1481,8 +1491,8 @@ class DAO():
                     fit_radius=fit_radius,
                     search_radius=fit_radius,
                     bkg_subtract=False,
-                    two_pass=True,
-                    showplots=True,
+                    two_pass=self.two_pass,
+                    showplots=self.showplots,
                 )
                 x_fit = float(fx + xlo)
                 y_fit = float(fy + ylo)
@@ -1520,6 +1530,7 @@ class DAO():
         # If nothing valid remains, skip catalog + region creation for this file.
         if len(tbl) == 0:
             log.warning(f"No valid sources for CSV/DS9 output.")
+        return tbl
 
     def dao_source_extractor(self,
         data,
