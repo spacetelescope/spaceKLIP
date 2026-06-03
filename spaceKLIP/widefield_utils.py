@@ -1072,15 +1072,52 @@ def write_ds9_regions_from_sep_objects(
 #     return [value] * n
 
 class DAO():
-    def __init__(self,database):
+    """
+    The spaceKLIP DAOStarFinder source extraction tools class for wide-field images.
+
+    """
+
+    def __init__(self,
+                npix=0,
+                oversampling=1,
+                dao_thresh_sigma=4.0,
+                dao_fwhm=2.5,
+                group_radius=15.0,
+                catalog=None,
+                nan_lim_percent=0.51):
         """
         Initialize the spaceKLIP DAOStarFinder source extraction tools class.
 
         Parameters
         ----------
-        database : spaceKLIP.Database
-            SpaceKLIP database on which the image manipulation steps shall be
-            run.
+        npix : int or list of four int, optional
+            Number of pixels used to pad around the frames. If int, the same
+            number of pixels will be padded on each side. If list of four int,
+            a different number of pixels can be padded on the [left, right,
+            bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
+        oversampling : int, optional
+            Oversampling factor of ``psf`` relative to detector pixels.
+        dao_thresh_sigma : float, optional
+            ``DAOStarFinder`` detection threshold in units of the image RMS.
+        dao_fwhm : float, optional
+            PSF FWHM (pixels) passed to ``DAOStarFinder``.
+        group_radius : float, optional
+            Grouping radius (pixels). All ``DAOStarFinder`` detections within this
+            distance of each other are treated as belonging to the same star, and
+            only one representative is kept.  The same radius is also used as the
+            minimum allowed separation between any two sources in the final
+            catalog.  Should be set to roughly 1–2 times the PSF wing extent; a
+            value of ~15 pixels works well for JWST NIRCam wide-field data.
+        catalog : astropy.table.Table, str, or None, optional
+            External source catalog used to override DAO detections when overlapping.
+            Accepts an ``astropy.table.Table`` with ``x`` and ``y`` pixel-coordinate
+            columns, or a path to a CSV file with the same columns. For any group
+            that contains both DAO and catalog candidates, all catalog candidates
+            in that group are kept and all DAO candidates are discarded. Catalog-
+            only groups are ignored.
+        nan_lim_percent : float, optional
+            When checking for NaN pixels near a candidate (to identify sources to close to the edge, or outside),
+            the candidate is excluded if more than this fraction of the total pixels in the tile are NaN.
 
         Returns
         -------
@@ -1088,22 +1125,27 @@ class DAO():
 
         """
 
-        # Make an internal alias of the spaceKLIP database class.
-        self.database = database
-
+        if isinstance(npix, int):
+            self.npix = [npix, npix, npix, npix]  # left, right, bottom, top
+        else:
+            self.npix = npix
+        if len(self.npix) != 4:
+            raise UserWarning('Parameter npix must either be an int or a list of four int (left, right, bottom, top)')
+        self.oversampling=oversampling
+        self.dao_thresh_sigma=dao_thresh_sigma
+        self.dao_fwhm=dao_fwhm
+        self.group_radius=group_radius
+        self.catalog=catalog
+        self.nan_lim_percent=nan_lim_percent
         pass
 
-    def _dao(self,data, fwhm=2.5, sigma_thresh=4.0):
+    def _dao(self,data):
         """Recover additional faint point sources with ``DAOStarFinder``.
 
         Parameters
         ----------
         data : 2D-array
             Science image.
-        fwhm : float, optional
-            FWHM (pixels) passed to ``DAOStarFinder``.
-        sigma_thresh : float, optional
-            Detection threshold in units of estimated image RMS.
 
         Returns
         -------
@@ -1122,7 +1164,7 @@ class DAO():
         if not np.isfinite(rms) or rms <= 0:
             rms = 1.0
 
-        dao = DAOStarFinder(fwhm=float(fwhm), threshold=float(sigma_thresh * rms))
+        dao = DAOStarFinder(fwhm=float(self.dao_fwhm), threshold=float(self.dao_thresh_sigma * rms))
         tbl = dao(np.nan_to_num(data - med, nan=0.0))
         if tbl is None or len(tbl) == 0:
             return []
@@ -1171,7 +1213,7 @@ class DAO():
         wing_spread = float(np.percentile(d, 95))
         return float(np.clip(max(float(base_radius), wing_spread + 3.0), float(base_radius), 40.0))
 
-    def _group_and_select(self,cands, data_arr, psf, oversampling, group_radius,npix,nan_lim_percent):
+    def _group_and_select(self,cands, data_arr, psf):
         """Group nearby candidates and select one representative per star.
 
         DAOStarFinder often returns several detections for a single bright or
@@ -1210,7 +1252,7 @@ class DAO():
         # Pre-compute a provisional NaN-core radius for every candidate so
         # that _candidate_radius can scale the grouping window correctly even
         # before the formal sat_radius is estimated inside _group_and_select.
-        _quick_r = max(3, int(group_radius // 3))
+        _quick_r = max(3, int(self.group_radius // 3))
         _prov_sat = []
         for _c in cands:
             _cx, _cy = float(_c["x"]), float(_c["y"])
@@ -1226,7 +1268,7 @@ class DAO():
             _prov_sat.append(float(_sr))
 
         cand_radii = np.array(
-            [self._candidate_radius(c, group_radius, ps) for c, ps in zip(cands, _prov_sat)],
+            [self._candidate_radius(c, self.group_radius, ps) for c, ps in zip(cands, _prov_sat)],
             dtype=float,
         )
 
@@ -1269,15 +1311,15 @@ class DAO():
                 for k in catalog_member_indices:
                     candidate = dict(group_cands[k])
                     cx, cy = float(candidate["x"]), float(candidate["y"])
-                    if cx < npix[0] or cy < npix[2] or cx > nx_arr-npix[1] or cy > ny_arr-npix[3]:
+                    if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr-self.npix[1] or cy > ny_arr-self.npix[3]:
                         continue
-                    half = int(max(15, group_radius))
+                    half = int(max(15, self.group_radius))
                     xlo = max(0, int(round(cx)) - half)
                     xhi = min(nx_arr, int(round(cx)) + half + 1)
                     ylo = max(0, int(round(cy)) - half)
                     yhi = min(ny_arr, int(round(cy)) + half + 1)
                     local = data_arr[ylo:yhi, xlo:xhi]
-                    if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*nan_lim_percent):
+                    if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*self.nan_lim_percent):
                         continue  # Avoid spurious large sat_radius estimates from mostly-NaN cutouts.
                     selected.append(candidate)
             else:
@@ -1286,15 +1328,15 @@ class DAO():
                 for k in not_catalog_member_indices:
                     candidate = dict(group_cands[k])
                     cx, cy = float(candidate["x"]), float(candidate["y"])
-                    if cx < npix[0] or cy < npix[2] or cx > nx_arr-npix[1] or cy > ny_arr-npix[3]:
+                    if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr-self.npix[1] or cy > ny_arr-self.npix[3]:
                         continue
-                    half = int(max(15, group_radius))
+                    half = int(max(15, self.group_radius))
                     xlo = max(0, int(round(cx)) - half)
                     xhi = min(nx_arr, int(round(cx)) + half + 1)
                     ylo = max(0, int(round(cy)) - half)
                     yhi = min(ny_arr, int(round(cy)) + half + 1)
                     local = data_arr[ylo:yhi, xlo:xhi]
-                    if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*nan_lim_percent):
+                    if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*self.nan_lim_percent):
                         continue  # Avoid spurious large sat_radius estimates from mostly-NaN cutouts.
                     elif np.any(~np.isfinite(local)):
                         sat_flag=True
@@ -1309,7 +1351,7 @@ class DAO():
                         # avoid keeping a bright wing knot as the representative.
                         peaks.append([float(candidate.get("peak", 0.0))])
                         try:
-                            psf_det = downsample_psf_to_detector(psf, oversampling)
+                            psf_det = downsample_psf_to_detector(psf, self.oversampling)
                             psf_det = np.asarray(psf_det, dtype=float)
                             psf_sum = np.nansum(psf_det)
                             if np.isfinite(psf_sum) and psf_sum > 0:
@@ -1339,7 +1381,7 @@ class DAO():
                 xg = np.array([float(c["x"]) for c in group_cands], dtype=float)
                 yg = np.array([float(c["y"]) for c in group_cands], dtype=float)
                 refx, refy = float(best["x"]), float(best["y"])
-                eff_group_radius = self._effective_radius(xg, yg, refx, refy, group_radius)
+                eff_group_radius = self._effective_radius(xg, yg, refx, refy, self.group_radius)
 
                 # Populate sat_radius for saturated representatives.
                 if sat_flag :
@@ -1356,7 +1398,7 @@ class DAO():
                         )
                         best["x"] = float(xcore + xlo)
                         best["y"] = float(ycore + ylo)
-                        if best["x"] < npix[0] or best["y"] < npix[2] or best["x"] > nx_arr - npix[1] or best["y"] > ny_arr - npix[3]:
+                        if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or best["y"] > ny_arr - self.npix[3]:
                             continue
                 else:
                     # For unsaturated groups, place the representative on the local
@@ -1368,7 +1410,7 @@ class DAO():
                     yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
                     local = data_arr[ylo:yhi, xlo:xhi]
                     try:
-                        psf_det = downsample_psf_to_detector(psf, oversampling)
+                        psf_det = downsample_psf_to_detector(psf, self.oversampling)
                         psf_det = np.asarray(psf_det, dtype=float)
                         psf_sum = np.nansum(psf_det)
                         if np.isfinite(psf_sum) and psf_sum > 0:
@@ -1378,7 +1420,7 @@ class DAO():
                             iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
                             best["x"] = float(ix + xlo)
                             best["y"] = float(iy + ylo)
-                            if best["x"]  < npix[0] or best["y"]  < npix[2] or best["x"]  > nx_arr - npix[1] or best["y"]  > ny_arr - npix[3]:
+                            if best["x"]  < self.npix[0] or best["y"]  < self.npix[2] or best["x"]  > nx_arr - self.npix[1] or best["y"]  > ny_arr - self.npix[3]:
                                 continue
                     except Exception:
                         continue
@@ -1391,14 +1433,7 @@ class DAO():
     def dao_source_extractor(self,
         data,
         nanmask,
-        psf,
-        npix=0,
-        oversampling=1,
-        dao_thresh_sigma=4.0,
-        dao_fwhm=2.5,
-        group_radius=15.0,
-        catalog=None,
-        nan_lim_percent=0.51,
+        psf
     ):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
 
@@ -1427,34 +1462,6 @@ class DAO():
             Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
         psf : 2D-array
             PSF model image passed directly to ``fit_psf``.
-        npix : int or list of four int, optional
-            Number of pixels used to pad around the frames. If int, the same
-            number of pixels will be padded on each side. If list of four int,
-            a different number of pixels can be padded on the [left, right,
-            bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
-        oversampling : int, optional
-            Oversampling factor of ``psf`` relative to detector pixels.
-        dao_thresh_sigma : float, optional
-            ``DAOStarFinder`` detection threshold in units of the image RMS.
-        dao_fwhm : float, optional
-            PSF FWHM (pixels) passed to ``DAOStarFinder``.
-        group_radius : float, optional
-            Grouping radius (pixels). All ``DAOStarFinder`` detections within this
-            distance of each other are treated as belonging to the same star, and
-            only one representative is kept.  The same radius is also used as the
-            minimum allowed separation between any two sources in the final
-            catalog.  Should be set to roughly 1–2 times the PSF wing extent; a
-            value of ~15 pixels works well for JWST NIRCam wide-field data.
-        catalog : astropy.table.Table, str, or None, optional
-            External source catalog used to override DAO detections when overlapping.
-            Accepts an ``astropy.table.Table`` with ``x`` and ``y`` pixel-coordinate
-            columns, or a path to a CSV file with the same columns. For any group
-            that contains both DAO and catalog candidates, all catalog candidates
-            in that group are kept and all DAO candidates are discarded. Catalog-
-            only groups are ignored.
-        nan_lim_percent : float, optional
-            When checking for NaN pixels near a candidate (to identify sources to close to the edge, or outside),
-            the candidate is excluded if more than this fraction of the total pixels in the tile are NaN.
 
         Returns
         -------
@@ -1468,11 +1475,7 @@ class DAO():
         removed from the returned table before output.
         """
 
-        # Check input.
-        if isinstance(npix, int):
-            npix = [npix, npix, npix, npix]  # left, right, bottom, top
-        if len(npix) != 4:
-            raise UserWarning('Parameter npix must either be an int or a list of four int (left, right, bottom, top)')
+
         data = np.asarray(data, dtype=float)
         data[nanmask==1] = np.nan
 
@@ -1482,19 +1485,17 @@ class DAO():
         # ---- candidate detection via DAOStarFinder ----
         cat = self._dao(
             data_subtracted,
-            fwhm=dao_fwhm,
-            sigma_thresh=dao_thresh_sigma,
         )
 
         # ---- optional: seed candidates from an external catalog ----
         cat_from_catalog: list[dict] = []
-        if catalog is not None:
+        if self.catalog is not None:
             # Accept an astropy Table or a path to a CSV file.
-            if isinstance(catalog, (str, Path)):
+            if isinstance(self.catalog, (str, Path)):
                 from astropy.table import Table as _Table
-                _ctbl = _Table.read(str(catalog))
+                _ctbl = _Table.read(str(self.catalog))
             else:
-                _ctbl = catalog
+                _ctbl = self.catalog
             for _row in _ctbl:
                 try:
                     _cx = float(_row["x"])
@@ -1518,7 +1519,7 @@ class DAO():
         # detections) and select one representative per group.  The representative
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
-        cands = self._group_and_select(all_cands, data_subtracted, psf, oversampling, group_radius, npix, nan_lim_percent)
+        cands = self._group_and_select(all_cands, data_subtracted, psf)
 
         # ---- refinement with existing fit_psf ----
         rows = []
@@ -1529,7 +1530,7 @@ class DAO():
             x_fit, y_fit = c["x"], c["y"]
             nx, ny = data_subtracted.shape
             # local cutout around candidate
-            half = int(max(psf.shape[0] // 2, group_radius))
+            half = int(max(psf.shape[0] // 2, self.group_radius))
             xlo = max(0, int(round(x_fit)) - half)
             xhi = min(nx, int(round(x_fit)) + half + 1)
             ylo = max(0, int(round(y_fit)) - half)
@@ -1548,7 +1549,7 @@ class DAO():
                         masked_psf_data=psf,
                         data=cut,
                         nanmask=nanmaskcut,
-                        oversampling=oversampling,
+                        oversampling=self.oversampling,
                         radius_core=sat_r,
                         fit_radius=fit_radius,
                         search_radius=fit_radius,
