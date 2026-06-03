@@ -1213,7 +1213,7 @@ class DAO():
         wing_spread = float(np.percentile(d, 95))
         return float(np.clip(max(float(base_radius), wing_spread + 3.0), float(base_radius), 40.0))
 
-    def _group_and_select(self,cands, data_arr, psf):
+    def _group_and_select(self,candidates, data_arr, psf):
         """Group nearby candidates and select one representative per star.
 
         DAOStarFinder often returns several detections for a single bright or
@@ -1221,7 +1221,7 @@ class DAO():
 
         Parameters
         ----------
-        cands : list of dict
+        candidates : list of dict
             Full (ungrouped) candidate list from ``_dao``.
         data_arr : 2D-array
             Science image (used for NaN proximity checks).
@@ -1241,12 +1241,12 @@ class DAO():
             set if a saturated core was detected.
 
         """
-        if len(cands) == 0:
+        if len(candidates) == 0:
             return []
 
-        n = len(cands)
-        xs = np.array([c["x"] for c in cands], dtype=float)
-        ys = np.array([c["y"] for c in cands], dtype=float)
+        n = len(candidates)
+        xs = np.array([c["x"] for c in candidates], dtype=float)
+        ys = np.array([c["y"] for c in candidates], dtype=float)
         ny_arr, nx_arr = data_arr.shape
 
         # Pre-compute a provisional NaN-core radius for every candidate so
@@ -1254,7 +1254,7 @@ class DAO():
         # before the formal sat_radius is estimated inside _group_and_select.
         _quick_r = max(3, int(self.group_radius // 3))
         _prov_sat = []
-        for _c in cands:
+        for _c in candidates:
             _cx, _cy = float(_c["x"]), float(_c["y"])
             _xlo = max(0, int(_cx) - _quick_r)
             _xhi = min(nx_arr, int(_cx) + _quick_r + 1)
@@ -1268,7 +1268,7 @@ class DAO():
             _prov_sat.append(float(_sr))
 
         cand_radii = np.array(
-            [self._candidate_radius(c, self.group_radius, ps) for c, ps in zip(cands, _prov_sat)],
+            [self._candidate_radius(c, self.group_radius, ps) for c, ps in zip(candidates, _prov_sat)],
             dtype=float,
         )
 
@@ -1299,7 +1299,7 @@ class DAO():
         # --- select one representative per group ---
         selected = []
         for indices in groups.values():
-            group_cands = [cands[i] for i in indices]
+            group_cands = [candidates[i] for i in indices]
             # If a group contains both DAO and catalog members, keep all catalog
             # members and discard all DAO members. Catalog-only groups are
             # ignored (no DAO group to replace).
@@ -1435,8 +1435,8 @@ class DAO():
         Perform coordinates refinement using PSF (wings if core is saturated) fit.
 
         Args:
-            candidates: list of dictionaries
-                list of dictionaries containing the following keys: x, y coordinates of the candidate, sat_radius
+            candidates : list of dict
+                Full (ungrouped) candidate list from ``_dao``.
             data : 2D-array
                 Background-subtracted science image.
             nanmask: 2D-array (bool)
@@ -1604,14 +1604,14 @@ class DAO():
             log.info(f"Starting from {len(cat_from_catalog)} catalog seeds + {len(cat)} DAO detections.")
 
         # Catalog candidates are prepended so they have priority inside each group.
-        all_cands = cat_from_catalog + cat
+        all_candidates = cat_from_catalog + cat
 
         # Group detections from the same star (bright stars produce multiple wing
         # detections) and select one representative per group.  The representative
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
-        candidates = self._group_and_select(all_cands, data_subtracted, psf)
+        selected_candidates = self._group_and_select(all_candidates, data_subtracted, psf)
 
-        tbl = self._refine_coordinates(candidates,data_subtracted,nanmask,psf)
+        refined_table = self._refine_coordinates(selected_candidates,data_subtracted,nanmask,psf)
 
-        return tbl
+        return refined_table
