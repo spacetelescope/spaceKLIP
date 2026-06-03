@@ -3691,17 +3691,15 @@ class ImageTools():
                                                   use_coeff=False)
                         psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
                         psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
-                        dao = DAO(database=database)
+                        dao = DAO(dao_thresh_sigma=dao_thresh_sigma,
+                                dao_fwhm=dao_fwhm,
+                                catalog=result,
+                                group_radius=fov_pix//2,)
 
                         objects_tbl_selected = dao.dao_source_extractor(
                                                                         data=data[0],
                                                                         nanmask=nanmask,
                                                                         psf=psf_no_coronmsk,
-                                                                        npix=npix,
-                                                                        dao_thresh_sigma=dao_thresh_sigma,
-                                                                        dao_fwhm=dao_fwhm,
-                                                                        catalog=result,
-                                                                        group_radius=fov_pix//2,
                                                                     )
 
                         objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
