@@ -1616,6 +1616,6 @@ class DAO():
         # PSF-correlation peak for unsaturated sources.
         selected_candidates = self._group_and_select(all_candidates, data_subtracted, psf)
         # TODO: fix _refine_coordinates
-        selected_candidates = self._refine_coordinates(selected_candidates[35:36],data_subtracted,nanmask,psf)
+        selected_candidates = self._refine_coordinates(selected_candidates,data_subtracted,nanmask,psf)
 
         return selected_candidates
