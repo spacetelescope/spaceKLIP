@@ -3588,6 +3588,8 @@ class ImageTools():
                                      fov_pix=65,
                                      dao_thresh_sigma=1,
                                      dao_fwhm=3,
+                                     incat_path=None,
+                                     use_gaia=True,
                                      kwargs={},
                                      subdir='pretiles'):
         """
@@ -3612,6 +3614,13 @@ class ImageTools():
             value of ~15 pixels works well for JWST NIRCam wide-field data.
         fov_pixels : int
             Tile size in detector pixels.
+        use_gaia : bool, optional
+            If True, query Gaia EDR3 for sources in the image FOV and include them in the catalog and DS9 region file.
+            The default is True.
+        incat_path : str, optional
+            Path to an input catalog (CSV file) of point sources to be included in the output catalog and DS9 region file.
+             If provided, the catalog must contain columns 'x' and 'y' with the pixel coordinates of the sources.
+             If both `incat_path` and `use_gaia` are provided, the Gaia sources will be added to the input catalog. The default is None
         kwargs : dict, optional
             Extra configuration for the diagnostic DS9 region output.
 
@@ -3687,8 +3696,13 @@ class ImageTools():
                         region_name = f'{tail.replace(".fits",".reg")}'
                         region_path = os.path.join(output_dir, region_name)
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
-                        gaia_path = os.path.join(region_path.replace(".reg", "_gaia.csv"))
-                        result = fetch_gaia_for_image_fov(gaia_path,data, head_sci,npix=npix, verbose=True)
+                        if incat_path is None and use_gaia:
+                            incat_path = os.path.join(region_path.replace(".reg", "_gaia.csv"))
+                            result = fetch_gaia_for_image_fov(incat_path,data, head_sci,npix=npix, verbose=True)
+                        elif incat_path is not None and not use_gaia:
+                            result = Table.read(incat_path)
+                        else:
+                            result = Table()
 
                         offsetpsf_func = JWST_PSF(apername,
                                                   filt,
