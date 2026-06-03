@@ -3697,11 +3697,14 @@ class ImageTools():
                         region_path = os.path.join(output_dir, region_name)
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
                         if incat_path is None and use_gaia:
+                            log.info("Downloading catalog from GAIA")
                             incat_path = os.path.join(region_path.replace(".reg", "_gaia.csv"))
                             result = fetch_gaia_for_image_fov(incat_path,data, head_sci,npix=npix, verbose=True)
                         elif incat_path is not None and not use_gaia:
+                            log.info(f"Loading input catalog: {incat_path}")
                             result = Table.read(incat_path)
                         else:
+                            log.info(f"No catalog provide. incat_path = {incat_path} and use_gaia = {use_gaia}")
                             result = Table()
 
                         offsetpsf_func = JWST_PSF(apername,
