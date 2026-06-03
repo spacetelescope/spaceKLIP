@@ -1430,6 +1430,97 @@ class DAO():
         log.info(f"Using {np.sum([i['method']=='catalog' for i in selected])} catalog seeds + {np.sum([i['method']!='catalog' for i in selected])} DAO detections after selections.")
         return selected
 
+    def _refine_coordinates(self,candidates, data, nanmask, psf):
+        '''
+        Perform coordinates refinement using PSF (wings if core is saturated) fit.
+
+        Args:
+            candidates: list of dictionaries
+                list of dictionaries containing the following keys: x, y coordinates of the candidate, sat_radius
+            data : 2D-array
+                Background-subtracted science image.
+            nanmask: 2D-array (bool)
+                Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
+            psf : 2D-array
+                PSF model image passed directly to ``fit_psf``.
+
+
+        Returns:
+            astropy.table.Table containing the refined coordinates of the candidates
+        '''
+
+        rows = []
+        id = 0
+        for c in candidates:
+            method = c["method"]
+            sat_r = float(c["sat_radius"])
+            x_fit, y_fit = c["x"], c["y"]
+            nx, ny = data.shape
+            # local cutout around candidate
+            half = int(max(psf.shape[0] // 2, self.group_radius))
+            xlo = max(0, int(round(x_fit)) - half)
+            xhi = min(nx, int(round(x_fit)) + half + 1)
+            ylo = max(0, int(round(y_fit)) - half)
+            yhi = min(ny, int(round(y_fit)) + half + 1)
+            cut = data[ylo:yhi, xlo:xhi]
+            nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
+            # estimate radius from nan core in cutout if needed
+            if sat_r <= 0 and np.any(~np.isfinite(cut)):
+                sat_r_est, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
+                sat_r = float(sat_r_est)
+
+            fit_radius = max(51, max(cut.shape) // 3)
+            if method != 'catalog':
+                # try:
+                fx, fy, _ = fit_psf(
+                    masked_psf_data=psf,
+                    data=cut,
+                    nanmask=nanmaskcut,
+                    oversampling=self.oversampling,
+                    radius_core=sat_r,
+                    fit_radius=fit_radius,
+                    search_radius=fit_radius,
+                    bkg_subtract=False,
+                    two_pass=True,
+                    showplots=True,
+                )
+                x_fit = float(fx + xlo)
+                y_fit = float(fy + ylo)
+            # except Exception:
+            #     x_fit, y_fit = np.nan, np.nan
+
+            rows.append((
+                id,
+                x_fit, y_fit,
+                sat_r,
+                method,
+            ))
+            id += 1
+
+        names = [
+            "id",
+            "x", "y",
+            "sat_radius", "det_method"]
+        tbl = Table(rows=rows, names=names)
+
+        # Keep only rows with finite coordinates so bad fits are excluded from CSV/DS9.
+        # Prefer peak coordinates (used with region_center="peak"), fallback to x/y.
+        xcol, ycol = "x", "y"
+
+        xvals = np.asarray(tbl[xcol], dtype=float)
+        yvals = np.asarray(tbl[ycol], dtype=float)
+        good = np.isfinite(xvals) & np.isfinite(yvals)
+
+        n_total = len(tbl)
+        n_bad = int(np.sum(~good))
+        if n_bad > 0:
+            log.warning(f"Skipping {n_bad}/{n_total} sources with NaN/invalid coordinates.")
+        tbl = tbl[good].copy()
+
+        # If nothing valid remains, skip catalog + region creation for this file.
+        if len(tbl) == 0:
+            log.warning(f"No valid sources for CSV/DS9 output.")
+
     def dao_source_extractor(self,
         data,
         nanmask,
@@ -1457,7 +1548,7 @@ class DAO():
         Parameters
         ----------
         data : 2D-array
-            Background-subtracted science image.
+            science image.
         nanmask: 2D-array (bool)
             Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
         psf : 2D-array
@@ -1519,80 +1610,8 @@ class DAO():
         # detections) and select one representative per group.  The representative
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
-        cands = self._group_and_select(all_cands, data_subtracted, psf)
+        candidates = self._group_and_select(all_cands, data_subtracted, psf)
 
-        # ---- refinement with existing fit_psf ----
-        rows = []
-        id=0
-        for c in cands:
-            method = c["method"]
-            sat_r = float(c["sat_radius"])
-            x_fit, y_fit = c["x"], c["y"]
-            nx, ny = data_subtracted.shape
-            # local cutout around candidate
-            half = int(max(psf.shape[0] // 2, self.group_radius))
-            xlo = max(0, int(round(x_fit)) - half)
-            xhi = min(nx, int(round(x_fit)) + half + 1)
-            ylo = max(0, int(round(y_fit)) - half)
-            yhi = min(ny, int(round(y_fit)) + half + 1)
-            cut = data_subtracted[ylo:yhi, xlo:xhi]
-            nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
-            # estimate radius from nan core in cutout if needed
-            if sat_r <= 0 and np.any(~np.isfinite(cut)):
-                sat_r_est, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
-                sat_r = float(sat_r_est)
-
-            fit_radius = max(51,max(cut.shape)//3)
-            if method != 'catalog':
-                # try:
-                    fx, fy, _ = fit_psf(
-                        masked_psf_data=psf,
-                        data=cut,
-                        nanmask=nanmaskcut,
-                        oversampling=self.oversampling,
-                        radius_core=sat_r,
-                        fit_radius=fit_radius,
-                        search_radius=fit_radius,
-                        bkg_subtract=False,
-                        two_pass=True,
-                        showplots=True,
-                    )
-                    x_fit = float(fx + xlo)
-                    y_fit = float(fy + ylo)
-                # except Exception:
-                #     x_fit, y_fit = np.nan, np.nan
-
-
-            rows.append((
-                id,
-                x_fit, y_fit,
-                sat_r,
-                method,
-            ))
-            id+=1
-
-        names = [
-            "id",
-            "x", "y",
-            "sat_radius", "det_method"]
-        tbl = Table(rows=rows, names=names)
-
-        # Keep only rows with finite coordinates so bad fits are excluded from CSV/DS9.
-        # Prefer peak coordinates (used with region_center="peak"), fallback to x/y.
-        xcol, ycol = "x", "y"
-
-        xvals = np.asarray(tbl[xcol], dtype=float)
-        yvals = np.asarray(tbl[ycol], dtype=float)
-        good = np.isfinite(xvals) & np.isfinite(yvals)
-
-        n_total = len(tbl)
-        n_bad = int(np.sum(~good))
-        if n_bad > 0:
-            log.warning(f"Skipping {n_bad}/{n_total} sources with NaN/invalid coordinates.")
-        tbl = tbl[good].copy()
-
-        # If nothing valid remains, skip catalog + region creation for this file.
-        if len(tbl) == 0:
-            log.warning(f"No valid sources for CSV/DS9 output.")
+        tbl = self._refine_coordinates(candidates,data_subtracted,nanmask,psf)
 
         return tbl
