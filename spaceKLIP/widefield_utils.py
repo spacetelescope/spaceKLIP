@@ -273,7 +273,11 @@ def fit_psf(
         return w
 
     # Robust background subtraction is critical at low S/N.
-    bkg, rms = estimate_bkg_and_rms(data, edge_width=edge_bkg_width)
+    try:
+        bkg, rms = estimate_bkg_and_rms(data, edge_width=edge_bkg_width)
+    except:
+        return np.nan, np.nan, np.nan
+
     if bkg_subtract:
         data_fit = data - bkg
     else:
@@ -1445,7 +1449,7 @@ class DAO():
         tbl['id']=[i for i in range(len(tbl))]
         return tbl
 
-    def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None,fit_radius=31):
+    def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None,fit_radius=71):
         '''
         Perform coordinates refinement using PSF (wings if core is saturated) fit.
 
@@ -1485,14 +1489,14 @@ class DAO():
             sat_r, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
 
             nxpsf, nypsf = psf.shape
-            xlo = max(0, int(round(nxpsf//2)) - half)
-            xhi = min(nx, int(round(nxpsf//2)) + half + 1)
-            ylo = max(0, int(round(nypsf//2)) - half)
-            yhi = min(ny, int(round(nypsf//2)) + half + 1)
-            psfcut = psf[ylo:yhi, xlo:xhi]
+            xlo_psf = max(0, int(round(nxpsf//2)) - half)
+            xhi_psf = min(nx, int(round(nxpsf//2)) + half + 1)
+            ylo_psf = max(0, int(round(nypsf//2)) - half)
+            yhi_psf = min(ny, int(round(nypsf//2)) + half + 1)
+            psfcut = psf[ylo_psf:yhi_psf, xlo_psf:xhi_psf]
 
             if search_radius is None:
-                search_radius = min(15, fit_radius)
+                search_radius = min(25, fit_radius)
             if method != 'catalog':
                 fx, fy, _ = fit_psf(
                     psf=psfcut,
@@ -1509,12 +1513,13 @@ class DAO():
                 x_fit = float(fx + xlo)
                 y_fit = float(fy + ylo)
 
-            rows.append((
-                id,
-                x_fit, y_fit,
-                sat_r,
-                method,
-            ))
+            if not np.isnan(x_fit) and not np.isnan(y_fit):
+                rows.append((
+                    id,
+                    x_fit, y_fit,
+                    sat_r,
+                    method,
+                ))
 
         names = [
             "id",
@@ -1611,6 +1616,6 @@ class DAO():
         # PSF-correlation peak for unsaturated sources.
         selected_candidates = self._group_and_select(all_candidates, data_subtracted, psf)
         # TODO: fix _refine_coordinates
-        selected_candidates = self._refine_coordinates(selected_candidates,data_subtracted,nanmask,psf)
+        selected_candidates = self._refine_coordinates(selected_candidates[35:36],data_subtracted,nanmask,psf)
 
         return selected_candidates
