@@ -8,7 +8,7 @@ from photutils.psf import FittableImageModel
 from astropy.modeling import fitting
 import spaceKLIP.utils as ut
 import numpy as np
-from astropy.table import Table
+from astropy.table import Table, vstack
 from astropy.wcs import WCS
 from scipy.signal import fftconvolve
 from photutils.detection import DAOStarFinder
@@ -21,16 +21,21 @@ log.setLevel(logging.INFO)
 
 
 def fetch_gaia_for_image_fov(
+    path2gaia,
     image: np.ndarray,
     header,
     gaia_table: str = "gaiadr3.gaia_source",
     row_limit: int = -1,
     verbose: bool = False,
-) -> Table:
+    border=3,
+    npix=0,
+):
     """Estimate image FOV from WCS and query Gaia over that footprint.
 
     Parameters
     ----------
+    path2gaia : str, optional
+        Path to save the Gaia query result CSV file.
     image : 2D-array
         Image data used only for its shape.
     header : astropy.io.fits.Header
@@ -41,6 +46,13 @@ def fetch_gaia_for_image_fov(
         Max number of returned rows. Use ``-1`` for no row limit.
     verbose : bool, optional
         Passed to ``Gaia.launch_job_async``.
+    border: int, optional
+        exclude border of x pixel from image to confirm coordinates are within the fov
+    npix : int or list of four int, optional
+        Number of pixels used to pad around the frames. If int, the same
+        number of pixels will be padded on each side. If list of four int,
+        a different number of pixels can be padded on the [left, right,
+        bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
 
     Returns
     -------
@@ -48,6 +60,11 @@ def fetch_gaia_for_image_fov(
         New Astropy table with selected Gaia columns plus WCS-derived ``x`` and ``y``.
 
     """
+    if isinstance(npix, int):
+        npix = [npix, npix, npix, npix]  # left, right, bottom, top
+    else:
+        npix = npix
+
     data = np.asarray(image)
     if data.ndim == 3:
         data = data[0, :, :]
@@ -58,8 +75,8 @@ def fetch_gaia_for_image_fov(
 
     cel_wcs = WCS(header, naxis=2).celestial
     ny, nx = data.shape
-    x_center = (nx) / 2.0
-    y_center = (ny) / 2.0
+    x_center = (nx) // 2.0
+    y_center = (ny) // 2.0
 
     center_ra_deg, center_dec_deg = cel_wcs.all_pix2world(x_center, y_center, 0)
     pix_scales = np.sqrt(header['PIXAR_A2'])
@@ -76,40 +93,34 @@ def fetch_gaia_for_image_fov(
         ")"
     )
 
-    old_table = Gaia.MAIN_GAIA_TABLE
-    old_limit = Gaia.ROW_LIMIT
-    try:
-        Gaia.MAIN_GAIA_TABLE = gaia_table
-        Gaia.ROW_LIMIT = int(row_limit)
-        job = Gaia.launch_job_async(query=query, dump_to_file=False, verbose=verbose)
-        raw_result = job.get_results()
-    finally:
-        Gaia.MAIN_GAIA_TABLE = old_table
-        Gaia.ROW_LIMIT = old_limit
-
-    result = raw_result.copy()
+    Gaia.MAIN_GAIA_TABLE = gaia_table
+    Gaia.ROW_LIMIT = int(row_limit)
+    Gaia.launch_job_async(query=query, dump_to_file=True, verbose=verbose, output_format='csv',output_file=path2gaia)
+    gaia_table = Table.read(path2gaia)
 
     # Add detector pixel coordinates from catalog sky coordinates.
-    ra_col = "ra" if "ra" in result.colnames else ("RA" if "RA" in result.colnames else None)
-    dec_col = "dec" if "dec" in result.colnames else ("DEC" if "DEC" in result.colnames else None)
+    ra_col = "ra" if "ra" in gaia_table.colnames else ("RA" if "RA" in gaia_table.colnames else None)
+    dec_col = "dec" if "dec" in gaia_table.colnames else ("DEC" if "DEC" in gaia_table.colnames else None)
     if ra_col is None or dec_col is None:
-        log.warning("Gaia result does not include ra/dec columns; returning sky-only table.")
-        return result
+        log.warning("Gaia table does not include ra/dec columns; returning sky-only table.")
+        return gaia_table
 
-    ra_arr = np.asarray(np.ma.filled(np.ma.asarray(result[ra_col]), np.nan), dtype=float)
-    dec_arr = np.asarray(np.ma.filled(np.ma.asarray(result[dec_col]), np.nan), dtype=float)
+    ra_arr = np.asarray(np.ma.filled(np.ma.asarray(gaia_table[ra_col]), np.nan), dtype=float)
+    dec_arr = np.asarray(np.ma.filled(np.ma.asarray(gaia_table[dec_col]), np.nan), dtype=float)
     x, y = cel_wcs.all_world2pix(ra_arr, dec_arr, 0)
+    gaia_table["x"] = np.asarray(x, dtype=float)
+    gaia_table["y"] = np.asarray(y, dtype=float)
 
-    if "x" in result.colnames:
-        result["x"] = np.asarray(x, dtype=float)
-    else:
-        result["x"] = np.asarray(x, dtype=float)
-    if "y" in result.colnames:
-        result["y"] = np.asarray(y, dtype=float)
-    else:
-        result["y"] = np.asarray(y, dtype=float)
+    mask = (
+            (gaia_table["x"] >= npix[0] + border)
+            & (gaia_table["x"] <= nx - (npix[1] + border))
+            & (gaia_table["y"] >= npix[2] + border)
+            & (gaia_table["y"] <= ny - (npix[3] + border))
+    )
+    gaia_table_selected=gaia_table[mask]
+    gaia_table_selected.write(path2gaia, format="csv", overwrite=True)
 
-    return result
+    return gaia_table_selected
 
 # def mask_core(data,radius_core,showplots=False,cmap='Greys_r'):
 #     # Mask the PSF to exclude the core
@@ -147,21 +158,6 @@ def estimate_bkg_and_rms(data2d, edge_width=5):
 
     """
     data2d = np.asarray(data2d, dtype=float)
-    # ny, nx = data2d.shape
-    # ew = int(max(1, min(edge_width, ny // 2, nx // 2)))
-    # edge = np.zeros_like(data2d, dtype=bool)
-    # edge[:ew, :] = True
-    # edge[-ew:, :] = True
-    # edge[:, :ew] = True
-    # edge[:, -ew:] = True
-    # vals = data2d[edge]
-    # vals = vals[np.isfinite(vals)]
-    # if vals.size < 10:
-    #     vals = data2d[np.isfinite(data2d)]
-    # if vals.size == 0:
-    #     return 0.0, 1.0
-
-    # mean, med, std = sigma_clipped_stats(vals, sigma=3.0, maxiters=5)
     sigma_clip = SigmaClip(sigma=3.0, maxiters=10)
     bkg_estimator = MedianBackground()
     bkg = Background2D(
@@ -208,7 +204,7 @@ def fit_psf(
     data,
     nanmask,
     oversampling=1,
-    radius_core=0,
+    radius_core=None,
     fit_radius=None,
     search_radius=None,
     bkg_subtract=True,
@@ -294,11 +290,13 @@ def fit_psf(
     yy, xx = np.mgrid[0:ny, 0:nx]
 
     # # For saturated stars we want to keep the masked core fixed on the NaN core.
-    # core_mask_x = (nx - 1) / 2
-    # core_mask_y = (ny - 1) / 2
+    if radius_core is None:
+        core_mask_x = (nx - 1) / 2
+        core_mask_y = (ny - 1) / 2
     # if radius_core and radius_core > 0 and np.any(~np.isfinite(data)):
     # if np.any(~np.isfinite(data)):
-    radius_core, core_mask_x, core_mask_y = estimate_nan_core(data, margin=0)
+    else:
+        radius_core, core_mask_x, core_mask_y = estimate_nan_core(data, margin=0)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -355,9 +353,6 @@ def fit_psf(
 
     psf_model.x_0.value = x0_init
     psf_model.y_0.value = y0_init
-    #
-    # psf_model.x_0.value = x_center
-    # psf_model.y_0.value = y_center
 
     # Flux guess: keep it positive; use peak*SOMETHING as crude initial scale.
     if np.any(finite):
@@ -456,46 +451,49 @@ def estimate_nan_core(data,
         cx, cy = center
 
     bad = ~np.isfinite(nandata)
+    if len(bad)>0:
+        sx = int(np.clip(round(cx), 0, nx - 1))
+        sy = int(np.clip(round(cy), 0, ny - 1))
 
-    sx = int(np.clip(round(cx), 0, nx - 1))
-    sy = int(np.clip(round(cy), 0, ny - 1))
-
-    # If the exact center is finite, look for a bad pixel close to the center.
-    if not bad[sy, sx]:
-        found = False
-        for dy in range(-2, 3):
-            for dx in range(-2, 3):
-                y = sy + dy
-                x = sx + dx
-                if 0 <= y < ny and 0 <= x < nx and bad[y, x]:
-                    sy, sx = y, x
-                    found = True
+        # If the exact center is finite, look for a bad pixel close to the center.
+        if not bad[sy, sx]:
+            found = False
+            for dy in range(-2, 3):
+                for dx in range(-2, 3):
+                    y = sy + dy
+                    x = sx + dx
+                    if 0 <= y < ny and 0 <= x < nx and bad[y, x]:
+                        sy, sx = y, x
+                        found = True
+                        break
+                if found:
                     break
-            if found:
-                break
-        if not found:
+            if not found:
+                return 0, float(cx), float(cy)
+
+        # Flood-fill the connected bad region (4-connected).
+        region = np.zeros_like(bad, dtype=bool)
+        stack = [(sy, sx)]
+        region[sy, sx] = True
+        while stack:
+            y, x = stack.pop()
+            for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if 0 <= yy < ny and 0 <= xx < nx and bad[yy, xx] and not region[yy, xx]:
+                    region[yy, xx] = True
+                    stack.append((yy, xx))
+
+        if not np.any(region):
             return 0, float(cx), float(cy)
 
-    # Flood-fill the connected bad region (4-connected).
-    region = np.zeros_like(bad, dtype=bool)
-    stack = [(sy, sx)]
-    region[sy, sx] = True
-    while stack:
-        y, x = stack.pop()
-        for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-            if 0 <= yy < ny and 0 <= xx < nx and bad[yy, xx] and not region[yy, xx]:
-                region[yy, xx] = True
-                stack.append((yy, xx))
+        yy, xx = np.indices(nandata.shape)
+        x_cent = float(np.mean(xx[region]))
+        y_cent = float(np.mean(yy[region]))
+        rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
+        radius = int(np.ceil(np.nanmax(rr[region])) + int(margin))
+        return radius, x_cent, y_cent
 
-    if not np.any(region):
+    else:
         return 0, float(cx), float(cy)
-
-    yy, xx = np.indices(nandata.shape)
-    x_cent = float(np.mean(xx[region]))
-    y_cent = float(np.mean(yy[region]))
-    rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
-    radius = int(np.ceil(np.nanmax(rr[region])) + int(margin))
-    return radius, x_cent, y_cent
 
 def stars_extractor(data,
                     coords,
@@ -1148,13 +1146,17 @@ class DAO():
         self.showplots = showplots
         pass
 
-    def _dao(self,data):
+    def _dao(self,data,mrms,border=3):
         """Recover additional faint point sources with ``DAOStarFinder``.
 
         Parameters
         ----------
         data : 2D-array
             Science image.
+        mrms : float
+            median from RMS estimate.
+        border: int, optional
+            exclude border of x pixel from image to confirm coordinates are within the fov
 
         Returns
         -------
@@ -1164,31 +1166,35 @@ class DAO():
 
         """
         data = np.asarray(data, dtype=float)
+        nx , ny = data.shape
         finite = np.isfinite(data)
         vals = data[finite]
         if vals.size == 0:
-            return []
-        med = float(np.nanmedian(vals))
-        rms = float(np.nanstd(vals))
-        if not np.isfinite(rms) or rms <= 0:
-            rms = 1.0
+            return None
+        if not np.isfinite(mrms) or mrms <= 0:
+            mrms = 1.0
 
-        dao = DAOStarFinder(fwhm=float(self.dao_fwhm), threshold=float(self.dao_thresh_sigma * rms))
-        tbl = dao(np.nan_to_num(data - med, nan=0.0))
+        dao = DAOStarFinder(fwhm=float(self.dao_fwhm), threshold=float(self.dao_thresh_sigma * mrms))
+        tbl = dao(np.nan_to_num(data, nan=0.0))
         if tbl is None or len(tbl) == 0:
-            return []
-        out = []
-        for row in tbl:
-            out.append({
-                "x": float(row["xcentroid"]),
-                "y": float(row["ycentroid"]),
-                "peak": float(row["peak"]),
-                "sat_radius": 0.0,
-                "method": "dao",
-            })
-        return out
+            return None
+        # out = []
+        tbl['sat_radius'] = 0
+        tbl['method'] = 'dao'
+        tbl.rename_column('xcentroid', 'x')
+        tbl.rename_column('ycentroid', 'y')
 
-    def _candidate_radius(self,c, base_radius, prov_sat_r=0.0):
+        mask = (
+                (tbl["x"] >= self.npix[0] + border)
+                & (tbl["x"] <= nx - (self.npix[1] + border))
+                & (tbl["y"] >= self.npix[2] + border)
+                & (tbl["y"] <= ny - (self.npix[3] + border))
+        )
+        tbl_selected = tbl[mask]['x','y','peak','sat_radius','method']
+
+        return tbl_selected
+
+    def _candidate_radius(self,c, base_radius, prov_sat_r=0.0, rmax=30):
         """Return an adaptive grouping radius for one candidate.
 
         Bright sources are given a larger grouping window using their DAO
@@ -1207,7 +1213,7 @@ class DAO():
         sat_r = max(float(c.get("sat_radius", 0.0)), float(prov_sat_r))
         if np.isfinite(sat_r) and sat_r > 0:
             r = max(r, float(base_radius) + 5 * sat_r)
-        return float(np.clip(r, float(base_radius), 60.0))
+        return float(np.clip(r, float(base_radius), rmax))
 
     def _effective_radius(self,xvals, yvals, xref, yref, base_radius):
         """Scale the grouping window from the measured wing spread.
@@ -1253,7 +1259,6 @@ class DAO():
         if len(candidates) == 0:
             return []
 
-        n = len(candidates)
         xs = np.array([c["x"] for c in candidates], dtype=float)
         ys = np.array([c["y"] for c in candidates], dtype=float)
         ny_arr, nx_arr = data_arr.shape
@@ -1261,23 +1266,28 @@ class DAO():
         # Pre-compute a provisional NaN-core radius for every candidate so
         # that _candidate_radius can scale the grouping window correctly even
         # before the formal sat_radius is estimated inside _group_and_select.
-        _quick_r = max(3, int(self.group_radius // 3))
+        _quick_r = max(1, int(self.group_radius))
         _prov_sat = []
+        _rmax = []
+        _candidates = []
         for _c in candidates:
             _cx, _cy = float(_c["x"]), float(_c["y"])
-            _xlo = max(0, int(_cx) - _quick_r)
-            _xhi = min(nx_arr, int(_cx) + _quick_r + 1)
-            _ylo = max(0, int(_cy) - _quick_r)
-            _yhi = min(ny_arr, int(_cy) + _quick_r + 1)
+            _xlo = int(_cx) - _quick_r
+            _xhi = int(_cx) + _quick_r + 1
+            _ylo = int(_cy) - _quick_r
+            _yhi = int(_cy) + _quick_r + 1
             _patch = data_arr[_ylo:_yhi, _xlo:_xhi]
-            if np.any(~np.isfinite(_patch)):
-                _sr, _, _ = estimate_nan_core(_patch, margin=1)
-            else:
-                _sr = 0.0
+            _sr, _, _ = estimate_nan_core(_patch, margin=1)
+            _c['sat_radius'] = _sr
             _prov_sat.append(float(_sr))
+            _rmax.append(float(max(_patch.shape)))
+            _candidates.append(_c)
+
+        candidates = _candidates
+        n=len(candidates)
 
         cand_radii = np.array(
-            [self._candidate_radius(c, self.group_radius, ps) for c, ps in zip(candidates, _prov_sat)],
+            [self._candidate_radius(c, _quick_r, ps, np.nanmedian(_rmax)) for c, ps in zip(candidates, _prov_sat)],
             dtype=float,
         )
 
@@ -1437,9 +1447,11 @@ class DAO():
                 selected.append(best)
 
         log.info(f"Using {np.sum([i['method']=='catalog' for i in selected])} catalog seeds + {np.sum([i['method']!='catalog' for i in selected])} DAO detections after selections.")
-        return selected
+        tbl = Table(rows=selected)
+        tbl['id']=[i for i in range(len(tbl))]
+        return tbl
 
-    def _refine_coordinates(self,candidates, data, nanmask, psf):
+    def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None):
         '''
         Perform coordinates refinement using PSF (wings if core is saturated) fit.
 
@@ -1452,17 +1464,17 @@ class DAO():
                 Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
             psf : 2D-array
                 PSF model image passed directly to ``fit_psf``.
-
+            search_radius : float, optional
+                Search radius (pixels) for the matched-filter initialization.
 
         Returns:
             astropy.table.Table containing the refined coordinates of the candidates
         '''
 
         rows = []
-        id = 0
         for c in candidates:
+            id = c["id"]
             method = c["method"]
-            # sat_r = float(c["sat_radius"])
             x_fit, y_fit = c["x"], c["y"]
             nx, ny = data.shape
             # local cutout around candidate
@@ -1473,31 +1485,25 @@ class DAO():
             yhi = min(ny, int(round(y_fit)) + half + 1)
             cut = data[ylo:yhi, xlo:xhi]
             nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
-            # estimate radius from nan core in cutout if needed
-            # if sat_r <= 0 and np.any(~np.isfinite(cut)):
-            #     sat_r_est, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
-            #     sat_r = float(sat_r_est)
-            sat_r, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
 
-            fit_radius = max(51, max(cut.shape) // 3)
+            sat_r, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
+            if search_radius is None:
+                search_radius = min(21, max(cut.shape) // 3)
             if method != 'catalog':
-                # try:
                 fx, fy, _ = fit_psf(
                     masked_psf_data=psf,
                     data=cut,
                     nanmask=nanmaskcut,
                     oversampling=self.oversampling,
                     radius_core=sat_r,
-                    fit_radius=fit_radius,
-                    search_radius=fit_radius,
+                    fit_radius=max(cut.shape) // 3,
+                    search_radius=search_radius,
                     bkg_subtract=False,
                     two_pass=self.two_pass,
                     showplots=self.showplots,
                 )
                 x_fit = float(fx + xlo)
                 y_fit = float(fy + ylo)
-            # except Exception:
-            #     x_fit, y_fit = np.nan, np.nan
 
             rows.append((
                 id,
@@ -1505,7 +1511,6 @@ class DAO():
                 sat_r,
                 method,
             ))
-            id += 1
 
         names = [
             "id",
@@ -1585,44 +1590,23 @@ class DAO():
         data_subtracted = data - bkg
 
         # ---- candidate detection via DAOStarFinder ----
-        cat = self._dao(
-            data_subtracted,
-        )
-
-        # ---- optional: seed candidates from an external catalog ----
-        cat_from_catalog: list[dict] = []
-        if self.catalog is not None:
-            # Accept an astropy Table or a path to a CSV file.
-            if isinstance(self.catalog, (str, Path)):
-                from astropy.table import Table as _Table
-                _ctbl = _Table.read(str(self.catalog))
-            else:
-                _ctbl = self.catalog
-            for _row in _ctbl:
-                try:
-                    _cx = float(_row["x"])
-                    _cy = float(_row["y"])
-                except (KeyError, TypeError):
-                    log.warning("catalog row missing 'x'/'y' columns; skipping row.")
-                    continue
-                cat_from_catalog.append({
-                    "x": _cx,
-                    "y": _cy,
-                    "peak": float(_row["peak"]) if "peak" in _ctbl.colnames else np.nan,
-                    "sat_radius": 0.0,
-                    "method": "catalog",
-                })
-            log.info(f"Starting from {len(cat_from_catalog)} catalog seeds + {len(cat)} DAO detections.")
+        dao_catalog = self._dao(data_subtracted,mrms=np.nanmedian(rms))
 
         # Catalog candidates are prepended so they have priority inside each group.
-        all_candidates = cat_from_catalog + cat
-
+        if self.catalog is not None and dao_catalog is not None:
+            all_candidates = vstack([self.catalog , dao_catalog])
+        elif  self.catalog is None and dao_catalog is not None:
+            all_candidates = dao_catalog
+        elif  self.catalog is not None and dao_catalog is None:
+            all_candidates = self.catalog
+        else:
+            raise ValueError(f"No candidate detected in DAOStarFinder and not cstalog parsed for this data.")
         # Group detections from the same star (bright stars produce multiple wing
         # detections) and select one representative per group.  The representative
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         selected_candidates = self._group_and_select(all_candidates, data_subtracted, psf)
+        # TODO: fix _refine_coordinates
+        selected_candidates = self._refine_coordinates(selected_candidates,data_subtracted,nanmask,psf)
 
-        refined_table = self._refine_coordinates(selected_candidates,data_subtracted,nanmask,psf)
-
-        return refined_table
+        return selected_candidates
