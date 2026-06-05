@@ -20,6 +20,11 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 
+def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan):
+    distance = np.sqrt((xdat - (x + xcen)) ** 2 + (ydat - (y + ycen)) ** 2)
+    image[np.where(distance <= r)] = c
+    return image
+
 def fetch_gaia_for_image_fov(
     path2gaia,
     image: np.ndarray,
@@ -1494,6 +1499,9 @@ class DAO():
             ylo_psf = max(0, int(round(nypsf//2)) - half)
             yhi_psf = min(ny, int(round(nypsf//2)) + half + 1)
             psfcut = psf[ylo_psf:yhi_psf, xlo_psf:xhi_psf]
+            ydat, xdat = np.indices(psfcut.shape)
+            if sat_r > 0:
+                psfcut = mask_within_radius(psfcut.copy(), xdat, ydat, psfcut.shape[1]//2, psfcut.shape[0]//2, sat_r, c=np.nan)
 
             if search_radius is None:
                 search_radius = min(25, fit_radius)
@@ -1616,6 +1624,6 @@ class DAO():
         # PSF-correlation peak for unsaturated sources.
         selected_candidates = self._group_and_select(all_candidates, data_subtracted, psf)
         # TODO: fix _refine_coordinates
-        selected_candidates = self._refine_coordinates(selected_candidates,data_subtracted,nanmask,psf)
+        selected_candidates = self._refine_coordinates(selected_candidates[35:36],data_subtracted,nanmask,psf)
 
         return selected_candidates
