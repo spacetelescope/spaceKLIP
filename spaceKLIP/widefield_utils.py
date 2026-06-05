@@ -326,13 +326,15 @@ def fit_psf(
 
     # Restrict peak search to an area where we expect the source to be.
     # This greatly reduces catastrophic failures at very low S/N.
-    sr = search_radius
-    if sr is None:
-        sr = fit_radius
-    if sr is not None:
-        rr2 = (xx - x_center) ** 2 + (yy - y_center) ** 2
-        corr = corr.copy()
-        corr[(rr2 > float(sr) ** 2)|(nanmask==1)] = -np.inf
+    if fit_radius is None:
+        fit_radius = max(data.shape)
+
+    if search_radius is None:
+        search_radius = fit_radius
+
+    rr2 = (xx - x_center) ** 2 + (yy - y_center) ** 2
+    corr = corr.copy()
+    corr[(rr2 > float(search_radius) ** 2)|(nanmask==1)] = -np.inf
 
     iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
 
