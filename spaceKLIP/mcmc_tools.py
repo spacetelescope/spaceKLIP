@@ -31,7 +31,39 @@ class MCMCTools:
 
         Parameters
         ----------
-
+        data: 2D or 3D numpy array
+            The input data to be manipulated. If 3D, the median along the first axis will be taken.
+        type: str, optional
+            The type of data, e.g., 'SCI' for science data. This can be used to set default parameters based on the data type. Default is None.
+        kwargs: dict, optional
+            A dictionary of keyword arguments to set various parameters for the manipulation. Possible keys include:
+            - 'rotate': bool, whether to include rotation in the model fitting. Default is False.
+            - 'r': int, radius for masking the center of the data and PSF. Default is 0 (no masking).
+            - 'nsteps': int, number of steps for the MCMC fit. Default is 5000.
+            - 'nwalkers': int, number of walkers for the MCMC fit. Default is 30.
+            - 'verbose': bool, whether to print verbose output during the MCMC fit. Default is False.
+            - 'center_masked': bool, whether the center of the PSF is masked. Default is False.
+            - 'size': int, dimension of the tiles created for the MCMC fit. Default is 31.
+            - 'oversample': int, oversampling factor for the PSF. Default is 1 (no oversampling).
+            - 'x_guess': float, initial guess for the x-coordinate of the star. Default is the x-coordinate of the maximum value in the data.
+            - 'y_guess': float, initial guess for the y-coordinate of the star. Default is the y-coordinate of the maximum value in the data.
+            - 'flux_guess': float, initial guess for the flux of the star. Default is the maximum value in the data.
+            - 'contrast_guess': float, initial guess for the contrast of the companion star (if binarity is True). Default is 0.1.
+            - 'sep_guess': float, initial guess for the separation of the companion star (if binarity is True). Default is 1.
+            - 'theta_guess': float, initial guess for the angle of the companion star (if binarity is True). Default is 0 degrees.
+            - 'psi_guess': float, initial guess for the rotation angle of the PSF (if rotate is True). Default is 0 degrees.
+            - 'x_limits': float, limits for the x-coordinate shift in the MCMC fit. Default is [-5, 5].
+            - 'y_limits': float, limits for the y-coordinate shift in the MCMC fit. Default is [-5, 5].
+            - 'flux_limits': float, limits for the flux in the MCMC fit. Default is [flux_guess * 0.1, flux_guess * 10].
+            - 'contrast_limits': list, limits for the contrast in the MCMC fit (if binarity is True). Default is [contrast_guess * 0.1, contrast_guess * 10].
+            - 'sep_limits': list, limits for the separation in the MCMC fit (if binarity is True). Default is [1, 10].
+            - 'theta_limits': list, limits for the angle in the MCMC fit (if binarity is True). Default is [0, 360].
+            - 'psi_limits': list, limits for the rotation angle in the MCMC fit (if rotate is True). Default is [0, 360].
+            - 'binarity': bool, whether to fit a binary model (two PSFs) to the data. Default is True if type is 'SCI', otherwise False.
+            - 'debug': bool, whether to show debug plots during the MCMC fit. Default is False.
+            - 'burnin': int, number of burn-in steps to discard in the MCMC fit. Default is None (automatically set to 60% of nsteps).
+            - 'thin': int, thinning factor for the MCMC samples. Default is None (automatically set to 0.5 times the minimum autocorrelation time).
+            - 'save_figures': bool, whether to save figures generated during the MCMC fit. Default is True.
 
         Returns
         -------
