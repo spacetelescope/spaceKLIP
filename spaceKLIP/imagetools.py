@@ -3942,12 +3942,7 @@ class ImageTools():
                                 pdxtile = stars_extractor(pxdq[k], [x_extract, y_extract], showplots=False)
                                 tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
 
-                            x_guess, y_guess = data[k].shape[0]//2,data[k].shape[1]//2
-
-                            # Estimate NaN core radius (detector pixels).
-                            # For stability, fit with the *full* PSF model and mask only the DATA core during the fit.
-                            radius, _, _ = estimate_nan_core(tile, center=None, margin=1, nanmask=nantile)
-                            radius=np.ceil(radius*1.2)
+                            radius = source['sat_radius']
                             log.info(f"--> Estimated NaN core radius (detector px): {radius}")
 
                             if radius ==0 and not mcmc_for_all:
@@ -3979,7 +3974,7 @@ class ImageTools():
                                 if 'nsteps' not in kwargs.keys():
                                     kwargs['nsteps'] = 1000
                                 if radius >0:
-                                    kwargs['center_masked'] = False
+                                    kwargs['center_masked'] = True
 
                                 MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j],
                                                                  kwargs=kwargs)
@@ -4057,7 +4052,7 @@ class ImageTools():
                             tile_fitsfile_list.append(tile_fitsfile)
                             maskfile = ut.write_msk(maskfile, mask, tile_fitsfile)
                             nanmaskfile = ut.write_msk(nanmaskfile, nanmasktile,tile_fitsfile, '_nanmask.fits')
-
+                            pass
                 # I need to create a new database from scratch since I'm creating snapshots of stars from the original
                 # dataset and the old structure of the original database does not work anymore
                 self.database = database.Database(output_dir=self.database.output_dir)
