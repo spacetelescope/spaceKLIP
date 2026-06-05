@@ -115,6 +115,7 @@ def fetch_gaia_for_image_fov(
     x, y = cel_wcs.all_world2pix(ra_arr, dec_arr, 0)
     gaia_table["x"] = np.asarray(x, dtype=float)
     gaia_table["y"] = np.asarray(y, dtype=float)
+    gaia_table['method'] = np.asarray(['gaia']*len(gaia_table), dtype=str)
 
     mask = (
             (gaia_table["x"] >= npix[0] + border)
