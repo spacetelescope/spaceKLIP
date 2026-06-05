@@ -3900,7 +3900,7 @@ class ImageTools():
                 head, tail = os.path.split(fitsfile)
                 log.info('--> Extracting tiles from: ' + tail)
                 tile_fitsfile_list=[]
-                targets_table = Table.read(os.path.join(self.database.output_dir,catdir,tail.replace('.fits','_combined.csv')), format="csv")  # explicit
+                targets_table = Table.read(os.path.join(self.database.output_dir,catdir,tail.replace('.fits','.csv')), format="csv")  # explicit
 
                 # Generate the PSF using stpsf
                 apername = self.database.obs[key]['APERNAME'][j]
@@ -3953,6 +3953,7 @@ class ImageTools():
                             if radius ==0 and not mcmc_for_all:
                                 fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(imaging_psf,
                                                                                   tile,
+                                                                                  nantile,
                                                                                   oversampling=1,
                                                                                   radius_core=radius,
                                                                                   showplots=False)
