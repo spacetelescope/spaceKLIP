@@ -3781,7 +3781,7 @@ class ImageTools():
         """
 
 
-        def subtract_medbkg(data, pxdq, fitsfile, nanmask=None,method='robust'):
+        def subtract_medbkg(data, pxdq, fitsfile, nanmask=None,method='robust',borderwidth=15, sigma=3.):
             """Subtract a median background estimate from a tile.
 
             Parameters
@@ -3795,8 +3795,11 @@ class ImageTools():
             nanmask : ndarray or None
                 Optional nanmask (1=bad) used to exclude pixels from the estimate.
             method : str
-                Background estimation method.
-
+                Background estimation method (robust, border, or sigma_clipped).
+            borderwidth : int
+                If method is 'border', width of the border region used for the estimate in pixels.
+            sigma : float
+                If method is 'sigma_clipped', sigma threshold for clipping in the estimate.
             Returns
             -------
             data : ndarray
