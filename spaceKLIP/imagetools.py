@@ -18,7 +18,7 @@ import lmfit
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
-from spaceKLIP.widefield_utils import DAO, write_ds9_regions_from_sep_objects,stars_extractor,estimate_nan_core,fit_psf, fetch_gaia_for_image_fov
+from spaceKLIP.widefield_utils import DAO, write_ds9_regions_from_sep_objects,stars_extractor,fit_psf, fetch_gaia_for_image_fov
 from astropy.table import Table
 
 # astropy imports
@@ -3931,18 +3931,18 @@ class ImageTools():
                         if np.sum(~np.isfinite(data_filled)) != 0:
                             raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
 
-                        for source in targets_table:
+                        for source in targets_table[targets_table['id']==31]:
                             tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["id"]}_{DETECTOR.lower()}')
                             log.info(f'--> Extracting tile for source: {source["id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
                             x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data_filled[k], [x_extract, y_extract],fow=51,showplots=False)
-                            nantile = stars_extractor(nanmask, [x_extract, y_extract],fow=51,showplots=False)
+                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fow=51,showplots=False)
+                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fow=51,showplots=False)
 
                             if medbkg_method is not None:
-                                pdxtile = stars_extractor(pxdq[k], [x_extract, y_extract],fow=51, showplots=False)
+                                pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fow=51, showplots=False)
                                 tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
 
                             radius = source['sat_radius']
@@ -4011,15 +4011,15 @@ class ImageTools():
                             log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
                             # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                            tile = stars_extractor(data_filled[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
-                            errotile = stars_extractor(erro[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
-                            pxdqtile = stars_extractor(pxdq[k], [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
+                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=True)
+                            errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
+                            pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
                             datatile = np.array(tile)
                             errotile = np.array(errotile)
                             pxdqtile = np.array(pxdqtile)
 
                             if nanmask is not None:
-                                nanmasktile = stars_extractor(nanmask, [x_extract, y_extract], pad_amount = shiftpad, shifts=shifts, fow=fov_pixels, kwargs={'mode':'constant'},showplots=False)
+                                nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts=shifts, fow=fov_pixels, kwargs={'mode':'constant'},showplots=False)
                                 nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
                                 nanmasktile[nanmasktile.astype(np.bool)] = 1
                                 nanmasktile = np.array(nanmasktile)
