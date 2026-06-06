@@ -3935,16 +3935,16 @@ class ImageTools():
                             x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data_filled[k], [x_extract, y_extract],showplots=False)
-                            nantile = stars_extractor(nanmask, [x_extract, y_extract],showplots=False)
+                            tile = stars_extractor(data_filled[k], [x_extract, y_extract],fow=51,showplots=False)
+                            nantile = stars_extractor(nanmask, [x_extract, y_extract],fow=51,showplots=False)
 
                             if medbkg_method is not None:
-                                pdxtile = stars_extractor(pxdq[k], [x_extract, y_extract], showplots=False)
+                                pdxtile = stars_extractor(pxdq[k], [x_extract, y_extract],fow=51, showplots=False)
                                 tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
 
                             radius = source['sat_radius']
                             log.info(f"--> Estimated NaN core radius (detector px): {radius}")
-
+                            # TODO: fix extracted tile is correct shape. The current output looks wrong
                             if radius ==0 and not mcmc_for_all:
                                 fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(imaging_psf,
                                                                                   tile,
@@ -3956,13 +3956,12 @@ class ImageTools():
                             else:
                                 if 'r' not in kwargs.keys():
                                    kwargs['r'] = radius
-                                if 'size' not in kwargs.keys():
-                                   if fov_pixels//2 > 51:
-                                       kwargs['size'] = fov_pixels//4 + 1 if fov_pixels//4 % 2 == 0 else fov_pixels//4
-                                   elif fov_pixels >=51:
-                                       kwargs['size'] = 51
+                                   if radius > 0:
+                                       kwargs['center_masked'] = True
                                    else:
-                                       raise ValueError(f'fov_pixels: {fov_pixels} is too small, please recreate tiles with at leas a fov_pixels of 51')
+                                       kwargs['center_masked'] = False
+                                if 'size' not in kwargs.keys():
+                                       kwargs['size'] = 31
                                 if 'x_guess' not in kwargs.keys():
                                    kwargs['x_guess'] = tile.shape[1]//2
                                 if 'y_guess' not in kwargs.keys():
@@ -3973,8 +3972,10 @@ class ImageTools():
                                     kwargs['verbose'] = True
                                 if 'nsteps' not in kwargs.keys():
                                     kwargs['nsteps'] = 1000
-                                if radius >0:
-                                    kwargs['center_masked'] = True
+                                if 'x_limits' not in kwargs.keys():
+                                    kwargs['x_limits'] = 2
+                                if 'y_limits' not in kwargs.keys():
+                                    kwargs['y_limits'] = 2
 
                                 MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j],
                                                                  kwargs=kwargs)
@@ -4027,7 +4028,7 @@ class ImageTools():
                             starcenx = fitted_x_pos
                             starceny = fitted_y_pos
 
-                            # TODO: update CRPIX accordingly
+                            # TODO: update CRPIX accordingly and check the header make sens for the smaller tile
                             # Update CRPIX values.
                             crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0]
                             crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[1]
