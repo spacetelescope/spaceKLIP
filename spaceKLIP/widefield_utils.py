@@ -1,7 +1,6 @@
 import logging
 from pathlib import Path
 from typing import Literal
-from astroquery.gaia import Gaia
 import matplotlib.pylab as plt
 from astropy.visualization import simple_norm
 from photutils.psf import FittableImageModel
@@ -65,6 +64,8 @@ def fetch_gaia_for_image_fov(
         New Astropy table with selected Gaia columns plus WCS-derived ``x`` and ``y``.
 
     """
+    from astroquery.gaia import Gaia
+
     if isinstance(npix, int):
         npix = [npix, npix, npix, npix]  # left, right, bottom, top
     else:
@@ -518,7 +519,7 @@ def stars_extractor(data,
     else:
         #Create a bigger tile to shift, so we don't have to shift the entire image to minimize weird artifacts
         preshifttile = data[int(round(coords[1]))-(fow//2+pad_amount):int(round(coords[1]))+(fow//2+pad_amount+1),
-                                   int(round(coords[0]))-(fow//2+pad_amount):int(round(coords[0]))+(fow//2+pad_amount+1)]
+                            int(round(coords[0]))-(fow//2+pad_amount):int(round(coords[0]))+(fow//2+pad_amount+1)]
         shifteddata = ut.imshift(preshifttile, [shifts[0], shifts[1]], pad_amount=0, method=method, kwargs=kwargs)
         #Crop the shifted tile to the desired dimension
         tile = shifteddata[int(round(shifteddata.shape[1]//2))-fow//2:int(round(shifteddata.shape[1]//2))+fow//2+1, int(round(shifteddata.shape[0]//2))-fow//2:int(round(shifteddata.shape[0]//2))+fow//2+1]
@@ -526,7 +527,7 @@ def stars_extractor(data,
         norm = simple_norm(tile, stretch)
         plt.imshow(tile, origin='lower', norm=norm,cmap=cmap)
         plt.colorbar()
-        plt.title(f'Extracted Star on integer coordinates')
+        plt.title(f'Extracted Star')
         plt.show()
 
     return tile
