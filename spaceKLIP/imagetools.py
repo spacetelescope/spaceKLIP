@@ -3761,6 +3761,8 @@ class ImageTools():
                       medbkg_method='robust'):
 
         """Extract and write small cutouts (tiles) centered on cataloged sources.
+        Note tah this step include the equivalent of nans_back from direct imaging. The final output tile have nans
+        corresponding to the location of the nantile mask.
 
         Parameters
         ----------
@@ -3931,7 +3933,7 @@ class ImageTools():
                         if np.sum(~np.isfinite(data_filled)) != 0:
                             raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
 
-                        for source in targets_table:
+                        for source in targets_table[targets_table['id']==40]:
                             tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["id"]}_{DETECTOR.lower()}')
                             log.info(f'--> Extracting tile for source: {source["id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
@@ -4010,18 +4012,19 @@ class ImageTools():
                             log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
                             # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=True)
+                            datatile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
                             errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
                             pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
-                            datatile = np.array(tile)
+                            datatile = np.array(datatile)
                             errotile = np.array(errotile)
                             pxdqtile = np.array(pxdqtile)
-
+                            fitted_x_pos, fitted_y_pos =tile.shape[1] // 2 - shifts[0], tile.shape[1] // 2 - shifts[1]
                             if nanmask is not None:
                                 nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts=shifts, fow=fov_pixels, kwargs={'mode':'constant'},showplots=False)
                                 nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
                                 nanmasktile[nanmasktile.astype(np.bool)] = 1
                                 nanmasktile = np.array(nanmasktile)
+                                datatile[nanmasktile.astype(np.bool)] = np.nan
 
                                 nanmaskcenx = fitted_x_pos
                                 nanmaskceny = fitted_y_pos
@@ -4030,10 +4033,11 @@ class ImageTools():
                             starcenx = fitted_x_pos
                             starceny = fitted_y_pos
 
-                            # TODO: update CRPIX accordingly and check the header make sens for the smaller tile
                             # Update CRPIX values.
-                            crpix1 = self.database.obs[key]['CRPIX1'][j] + shifts[0]
-                            crpix2 = self.database.obs[key]['CRPIX2'][j] + shifts[1]
+                            x_start = int(round(x_extract - shifts[0])) - fov_pixels // 2
+                            y_start = int(round(y_extract - shifts[1])) - fov_pixels // 2
+                            crpix1 = head_sci['CRPIX1'] - x_start
+                            crpix2 = head_sci['CRPIX1'] - y_start
 
                             # Write FITS file and PSF mask.
                             head_sci['STARCENX'] = starcenx
@@ -4046,7 +4050,6 @@ class ImageTools():
                             head_sci['CRPIX2'] = crpix2
 
                             # Save fits file.
-                            # TODO: fix WCS in fits tile
                             tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,
                                                     is2d,
                                                     align_shift=align_shift, center_shift=center_shift,
