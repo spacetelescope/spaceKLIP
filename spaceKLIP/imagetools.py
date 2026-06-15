@@ -2588,7 +2588,7 @@ class ImageTools():
         # pxdq[pxdq_custom] = 1
         # log.info('  --> Method custom: flagged %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
         if key in custom_kwargs.keys():
-            if np.array(custom_kwargs[key]).shape == pxdq_orig.shape:
+            if np.array(custom_kwargs[key]).shape == pxdq_orig.shape[1:]:
                 pxdq_custom = custom_kwargs[key] != 0
             else:
                 pxqd_temp = np.zeros(pxdq.shape)
