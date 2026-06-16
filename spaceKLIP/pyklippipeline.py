@@ -149,7 +149,10 @@ def run_obs(database,
                                center_keywords=['STARCENX','STARCENY'])
             dataset.IWA = kwargs['IWA']
             kwargs_temp['dataset'] = dataset
-            kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
+            if dataset.psflib is not None:
+                kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
+            else:
+                kwargs_temp['aligned_center'] = dataset._centers[0]
             kwargs_temp['psf_library'] = dataset.psflib
             kwargs_temp['mode'] = mode
             
