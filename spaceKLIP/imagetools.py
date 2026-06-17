@@ -4026,12 +4026,16 @@ class ImageTools():
                                 nanmasktile = np.array(nanmasktile)
                                 datatile[nanmasktile.astype(np.bool)] = np.nan
 
-                                nanmaskcenx = fitted_x_pos
-                                nanmaskceny = fitted_y_pos
+                                nanmaskcenx = round(fitted_x_pos,2)
+                                nanmaskceny = round(fitted_y_pos,2)
 
                             # Update star center.
-                            starcenx = fitted_x_pos
-                            starceny = fitted_y_pos
+                            starcenx = round(fitted_x_pos,2)
+                            starceny = round(fitted_y_pos,2)
+
+                            #Create star frame coordinates to keep track of position on the original frame. 1-index
+                            starframex = round(x_extract - shifts[0] +1,2)
+                            starframey = round(y_extract - shifts[1] +1,2)
 
                             # Update CRPIX values.
                             x_start = int(round(x_extract - shifts[0])) - fov_pixels // 2
@@ -4042,6 +4046,8 @@ class ImageTools():
                             # Write FITS file and PSF mask.
                             head_sci['STARCENX'] = starcenx
                             head_sci['STARCENY'] = starceny
+                            head_sci['STARFRMX'] = starframex
+                            head_sci['STARFRMY'] = starframey
                             head_sci['MASKCENX'] = maskcenx
                             head_sci['MASKCENY'] = maskceny
                             head_sci['NANMASKCENX'] = nanmaskcenx
