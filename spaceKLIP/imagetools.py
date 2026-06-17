@@ -4018,7 +4018,7 @@ class ImageTools():
                             datatile = np.array(datatile)
                             errotile = np.array(errotile)
                             pxdqtile = np.array(pxdqtile)
-                            fitted_x_pos, fitted_y_pos =tile.shape[1] // 2 - shifts[0], tile.shape[1] // 2 - shifts[1]
+                            fitted_x_pos, fitted_y_pos =datatile.shape[1] // 2 - shifts[0],  datatile.shape[1] // 2 - shifts[1]
                             if nanmask is not None:
                                 nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts=shifts, fow=fov_pixels, kwargs={'mode':'constant'},showplots=False)
                                 nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
@@ -4026,20 +4026,21 @@ class ImageTools():
                                 nanmasktile = np.array(nanmasktile)
                                 datatile[nanmasktile.astype(np.bool)] = np.nan
 
-                                nanmaskcenx = round(fitted_x_pos,2)
-                                nanmaskceny = round(fitted_y_pos,2)
+                                # Update nanmask center. 1-index
+                                nanmaskcenx = round(fitted_x_pos+1,2)
+                                nanmaskceny = round(fitted_y_pos+1,2)
 
-                            # Update star center.
-                            starcenx = round(fitted_x_pos,2)
-                            starceny = round(fitted_y_pos,2)
+                            # Update star center. 1-index
+                            starcenx = round(fitted_x_pos +1,2)
+                            starceny = round(fitted_y_pos +1,2)
 
                             #Create star frame coordinates to keep track of position on the original frame. 1-index
                             starframex = round(x_extract - shifts[0] +1,2)
                             starframey = round(y_extract - shifts[1] +1,2)
 
                             # Update CRPIX values.
-                            x_start = int(round(x_extract - shifts[0])) - fov_pixels // 2
-                            y_start = int(round(y_extract - shifts[1])) - fov_pixels // 2
+                            x_start = int(starframex) - fov_pixels // 2 -1
+                            y_start = int(starframey) - fov_pixels // 2 -1
                             crpix1 = head_sci['CRPIX1'] - x_start
                             crpix2 = head_sci['CRPIX1'] - y_start
 
