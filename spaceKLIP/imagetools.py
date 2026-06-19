@@ -3947,20 +3947,20 @@ class ImageTools():
                                 pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fow=51, showplots=False)
                                 tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
 
-                            radius = source['sat_radius']
-                            log.info(f"--> Estimated NaN core radius (detector px): {radius}")
-                            if radius ==0 and not mcmc_for_all:
+                            coresat = source['coresat']
+                            log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
+                            if coresat ==0 and not mcmc_for_all:
                                 fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(imaging_psf,
                                                                                   tile,
                                                                                   nantile,
                                                                                   oversampling=1,
-                                                                                  radius_core=radius,
+                                                                                  coresat=coresat,
                                                                                   showplots=False)
 
                             else:
                                 if 'r' not in kwargs.keys():
-                                   kwargs['r'] = radius
-                                   if radius > 0:
+                                   kwargs['r'] = coresat
+                                   if coresat > 0:
                                        kwargs['center_masked'] = True
                                    else:
                                        kwargs['center_masked'] = False
@@ -4055,6 +4055,7 @@ class ImageTools():
                             head_sci['NANMASKCENY'] = nanmaskceny
                             head_sci['CRPIX1'] = crpix1
                             head_sci['CRPIX2'] = crpix2
+                            head_sci['CORESAT'] = coresat
 
                             # Save fits file.
                             tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,
