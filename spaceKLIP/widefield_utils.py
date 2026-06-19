@@ -1169,7 +1169,7 @@ class DAO():
         -------
         list of dict
             Candidate dictionaries with ``x``, ``y``, ``peak``,
-            ``sat_radius``, and ``method``.
+            ``coresat``, and ``method``.
 
         """
         data = np.asarray(data, dtype=float)
@@ -1186,7 +1186,7 @@ class DAO():
         if tbl is None or len(tbl) == 0:
             return None
         # out = []
-        tbl['sat_radius'] = 0
+        tbl['coresat'] = 0
         tbl['method'] = 'dao'
         tbl.rename_column('xcentroid', 'x')
         tbl.rename_column('ycentroid', 'y')
@@ -1197,7 +1197,7 @@ class DAO():
                 & (tbl["y"] >= self.npix[2] + border)
                 & (tbl["y"] <= ny - (self.npix[3] + border))
         )
-        tbl_selected = tbl[mask]['x','y','peak','sat_radius','method']
+        tbl_selected = tbl[mask]['x','y','peak','coresat','method']
 
         return tbl_selected
 
@@ -1206,7 +1206,7 @@ class DAO():
 
         Bright sources are given a larger grouping window using their DAO
         peak, and saturated sources get an additional boost from the
-        estimated saturated-core size.  Because ``sat_radius`` in the raw
+        estimated saturated-core size.  Because ``coresat`` in the raw
         candidate dict is always 0 at this stage (it is filled in only
         after grouping), callers should pass a provisional NaN-core size
         via ``prov_sat_r`` so the saturation branch can fire correctly.
@@ -1217,7 +1217,7 @@ class DAO():
             r = max(r, float(base_radius) + 3.0 * np.log10(max(peak, 1.0)))
         # Use the larger of the stored value (always 0 here) and the
         # provisional estimate derived from NaN-pixel proximity.
-        sat_r = max(float(c.get("sat_radius", 0.0)), float(prov_sat_r))
+        sat_r = max(float(c.get("coresat", 0.0)), float(prov_sat_r))
         if np.isfinite(sat_r) and sat_r > 0:
             r = max(r, float(base_radius) + 5 * sat_r)
         return float(np.clip(r, float(base_radius), rmax))
@@ -1259,7 +1259,7 @@ class DAO():
         Returns
         -------
         list of dict
-            One representative candidate dict per group, with ``sat_radius``
+            One representative candidate dict per group, with ``coresat``
             set if a saturated core was detected.
 
         """
@@ -1272,7 +1272,7 @@ class DAO():
 
         # Pre-compute a provisional NaN-core radius for every candidate so
         # that _candidate_radius can scale the grouping window correctly even
-        # before the formal sat_radius is estimated inside _group_and_select.
+        # before the formal coresat is estimated inside _group_and_select.
         _quick_r = max(1, int(self.group_radius))
         _prov_sat = []
         _rmax = []
@@ -1285,7 +1285,7 @@ class DAO():
             _yhi = int(_cy) + _quick_r + 1
             _patch = data_arr[_ylo:_yhi, _xlo:_xhi]
             _sr, _, _ = estimate_nan_core(_patch, margin=1)
-            _c['sat_radius'] = _sr
+            _c['coresat'] = _sr
             _prov_sat.append(float(_sr))
             _rmax.append(float(max(_patch.shape)))
             _candidates.append(_c)
@@ -1346,7 +1346,7 @@ class DAO():
                     yhi = min(ny_arr, int(round(cy)) + half + 1)
                     local = data_arr[ylo:yhi, xlo:xhi]
                     if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*self.nan_lim_percent):
-                        continue  # Avoid spurious large sat_radius estimates from mostly-NaN cutouts.
+                        continue  # Avoid spurious large coresat estimates from mostly-NaN cutouts.
                     selected.append(candidate)
             else:
                 peaks =[]
@@ -1363,7 +1363,7 @@ class DAO():
                     yhi = min(ny_arr, int(round(cy)) + half + 1)
                     local = data_arr[ylo:yhi, xlo:xhi]
                     if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*self.nan_lim_percent):
-                        continue  # Avoid spurious large sat_radius estimates from mostly-NaN cutouts.
+                        continue  # Avoid spurious large coresat estimates from mostly-NaN cutouts.
                     elif np.any(~np.isfinite(local)):
                         sat_flag=True
                         # Saturated group: estimate the NaN-core centroid on a group-wide
@@ -1409,7 +1409,7 @@ class DAO():
                 refx, refy = float(best["x"]), float(best["y"])
                 eff_group_radius = self._effective_radius(xg, yg, refx, refy, self.group_radius)
 
-                # Populate sat_radius for saturated representatives.
+                # Populate coresat for saturated representatives.
                 if sat_flag :
                     cx, cy = float(best["x"]), float(best["y"])
                     half = int(max(15, eff_group_radius))
@@ -1536,7 +1536,7 @@ class DAO():
         names = [
             "id",
             "x", "y",
-            "sat_radius", "det_method"]
+            "coresat", "det_method"]
         tbl = Table(rows=rows, names=names)
 
         # Keep only rows with finite coordinates so bad fits are excluded from CSV/DS9.
@@ -1595,7 +1595,7 @@ class DAO():
         -------
         astropy.table.Table
             Catalog with fitted detector coordinates, aperture quantities,
-            detection metadata (``det_method``, ``sat_radius``, ``psf_flux``).
+            detection metadata (``det_method``, ``coresat``, ``psf_flux``).
 
         Notes
         -----
