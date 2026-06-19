@@ -129,11 +129,11 @@ def fetch_gaia_for_image_fov(
 
     return gaia_table_selected
 
-# def mask_core(data,radius_core,showplots=False,cmap='Greys_r'):
+# def mask_core(data,coresat,showplots=False,cmap='Greys_r'):
 #     # Mask the PSF to exclude the core
 #     # Define a circular mask for the saturated core in the PSF data
 #     y_grid, x_grid = np.indices(data.shape)
-#     data_core_mask = (x_grid - data.shape[1]//2)**2 + (y_grid - data.shape[0]//2)**2 < radius_core**2
+#     data_core_mask = (x_grid - data.shape[1]//2)**2 + (y_grid - data.shape[0]//2)**2 < coresat**2
 #     # masked_data = np.ma.masked_array(data, mask=data_core_mask)
 #     masked_data = data.copy()
 #     masked_data[data_core_mask] = 0
@@ -211,7 +211,7 @@ def fit_psf(
     data,
     nanmask,
     oversampling=1,
-    radius_core=None,
+    coresat=None,
     fit_radius=None,
     search_radius=None,
     bkg_subtract=True,
@@ -236,7 +236,7 @@ def fit_psf(
         Reserved/legacy argument (kept for API compatibility).
     oversampling : int, optional
         Oversampling factor of the PSF model relative to the data.
-    radius_core : float, optional
+    coresat : float, optional
         Radius (in *data* pixels) of the saturated/NaN core to exclude from the
         fit.
     fit_radius : float, optional
@@ -266,7 +266,7 @@ def fit_psf(
 
     """
     # TODO: understand why we are exceeding search radius when refitting the source, and the difference between fit_radius and search_radius
-    def _make_weights(data_fit, rms, center_x, center_y, core_mask_x, core_mask_y, fit_radius, radius_core):
+    def _make_weights(data_fit, rms, center_x, center_y, core_mask_x, core_mask_y, fit_radius, coresat):
         w = np.zeros_like(data_fit, dtype=float)
         w[finite] = 1.0 / (np.nanmax(rms[finite])**2 + 1e-30)
 
@@ -274,9 +274,9 @@ def fit_psf(
             rr2 = (xx - float(center_x)) ** 2 + (yy - float(center_y)) ** 2
             w[rr2 > float(fit_radius) ** 2] = 0.0
 
-        if radius_core > 0:
+        if coresat > 0:
             rr2 = (xx - float(core_mask_x)) ** 2 + (yy - float(core_mask_y)) ** 2
-            w[rr2 < float(radius_core) ** 2] = 0.0
+            w[rr2 < float(coresat) ** 2] = 0.0
         return w
 
     # Robust background subtraction is critical at low S/N.
@@ -301,13 +301,13 @@ def fit_psf(
     yy, xx = np.mgrid[0:ny, 0:nx]
 
     # # For saturated stars we want to keep the masked core fixed on the NaN core.
-    if radius_core is not None:
+    if coresat is not None:
         core_mask_x = (nx - 1) / 2
         core_mask_y = (ny - 1) / 2
-    # if radius_core and radius_core > 0 and np.any(~np.isfinite(data)):
+    # if coresat and coresat > 0 and np.any(~np.isfinite(data)):
     # if np.any(~np.isfinite(data)):
     else:
-        radius_core, core_mask_x, core_mask_y = estimate_nan_core(data, margin=0)
+        coresat, core_mask_x, core_mask_y = estimate_nan_core(data, margin=0)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -370,8 +370,8 @@ def fit_psf(
     # Parameter bounds: helps stability.
     # For saturated stars with masked cores, the position can become weakly constrained;
     # restrict it to remain near the initial guess.
-    if radius_core and radius_core > 0:
-        delta = float(max(3, int(radius_core)))
+    if coresat and coresat > 0:
+        delta = float(max(3, int(coresat)))
         psf_model.x_0.bounds = (max(0.0, x0_init - delta), min(float(nx - 1), x0_init + delta))
         psf_model.y_0.bounds = (max(0.0, y0_init - delta), min(float(ny - 1), y0_init + delta))
     else:
@@ -389,7 +389,7 @@ def fit_psf(
             first_pass_radius = float(fit_radius) * 2.0
 
         if first_pass_radius != float(fit_radius):
-            weights1 = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, first_pass_radius, radius_core)
+            weights1 = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, first_pass_radius, coresat)
             fit1 = fitter(psf_model, xx, yy, data_fit, weights=weights1, filter_non_finite=True)
 
             # Recenter for second pass.
@@ -397,10 +397,10 @@ def fit_psf(
             psf_model.y_0.value = fit1.y_0.value
             psf_model.flux.value = max(float(fit1.flux.value), 0.0)
 
-        weights2 = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, float(fit_radius), radius_core)
+        weights2 = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, float(fit_radius), coresat)
         fit_result = fitter(psf_model, xx, yy, data_fit, weights=weights2, filter_non_finite=True)
     else:
-        weights = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, float(fit_radius), radius_core)
+        weights = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, float(fit_radius), coresat)
         fit_result = fitter(psf_model, xx, yy, data_fit, weights=weights, filter_non_finite=True)
 
     # Step 8: Output the fitted flux and position
@@ -1515,7 +1515,7 @@ class DAO():
                     data=cut,
                     nanmask=nanmaskcut,
                     oversampling=self.oversampling,
-                    radius_core=sat_r,
+                    coresat=sat_r,
                     fit_radius=fit_radius,
                     search_radius=search_radius,
                     bkg_subtract=False,
