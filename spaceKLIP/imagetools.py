@@ -3673,7 +3673,7 @@ class ImageTools():
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             for j in ww_sci:
-
+                incat_path_temp = incat_path
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
@@ -3696,15 +3696,15 @@ class ImageTools():
                         region_name = f'{tail.replace(".fits",".reg")}'
                         region_path = os.path.join(output_dir, region_name)
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
-                        if incat_path is None and use_gaia:
+                        if incat_path_temp is None and use_gaia:
                             log.info("Downloading catalog from GAIA")
-                            incat_path = os.path.join(region_path.replace(".reg", "_gaia.csv"))
-                            result = fetch_gaia_for_image_fov(incat_path,data, head_sci,npix=npix, verbose=True)
-                        elif incat_path is not None and not use_gaia:
-                            log.info(f"Loading input catalog: {incat_path}")
-                            result = Table.read(incat_path)
+                            incat_path_temp = os.path.join(region_path.replace(".reg", "_gaia.csv"))
+                            result = fetch_gaia_for_image_fov(incat_path_temp,data, head_sci,npix=npix, verbose=True)
+                        elif incat_path_temp is not None and not use_gaia:
+                            log.info(f"Loading input catalog: {incat_path_temp}")
+                            result = Table.read(incat_path_temp)
                         else:
-                            log.info(f"No catalog provide. incat_path = {incat_path} and use_gaia = {use_gaia}")
+                            log.info(f"No catalog provide. incat_path = {incat_path_temp} and use_gaia = {use_gaia}")
                             result = Table()
 
                         offsetpsf_func = JWST_PSF(apername,
