@@ -146,15 +146,15 @@ def fetch_gaia_for_image_fov(
 #         plt.show()
 #     return masked_data
 
-def estimate_bkg_and_rms(data2d, edge_width=5):
+def estimate_bkg_and_rms(data2d,n=15):
     """Estimate background median and RMS from cutout border pixels.
 
     Parameters
     ----------
     data2d : 2D-array
         Image cutout.
-    edge_width : int, optional
-        Width (pixels) of the border used for the estimate.
+    n : int, optional
+        Number of boxes to use to define box_size. The default is 11.
 
     Returns
     -------
@@ -169,7 +169,7 @@ def estimate_bkg_and_rms(data2d, edge_width=5):
     bkg_estimator = MedianBackground()
     bkg = Background2D(
         data2d,
-        box_size=(50, 50),
+        box_size=int(np.ceil(np.max(data2d.shape)/np.sqrt(n))),
         filter_size=(3, 3),
         sigma_clip=sigma_clip,
         bkg_estimator=bkg_estimator
@@ -280,10 +280,13 @@ def fit_psf(
         return w
 
     # Robust background subtraction is critical at low S/N.
-    try:
-        bkg, rms = estimate_bkg_and_rms(data, edge_width=edge_bkg_width)
-    except:
-        return np.nan, np.nan, np.nan
+    # try:
+    bkg, rms = estimate_bkg_and_rms(data)
+    # except:
+    #     log.warning("Robust background estimation failed; proceeding basic background estimation.")
+    #     bkg = np.nanmedian(data)
+    #     rms = np.nanstd(data)
+    #     pass
 
     if bkg_subtract:
         data_fit = data - bkg
@@ -416,6 +419,8 @@ def fit_psf(
         plt.colorbar()
         plt.title('Data to fit with fitted center')
         plt.show()
+        pass
+    if np.any(np.isnan([fitted_x_pos,fitted_y_pos])):
         pass
     return fitted_x_pos,fitted_y_pos,fitted_flux
 
