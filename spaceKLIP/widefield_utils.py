@@ -13,6 +13,7 @@ from scipy.signal import fftconvolve
 from photutils.detection import DAOStarFinder
 from astropy.stats import SigmaClip
 from photutils.background import Background2D, MedianBackground
+from scipy.ndimage import binary_dilation
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -1628,11 +1629,14 @@ class DAO():
         data = np.asarray(data, dtype=float)
         data[nanmask==1] = np.nan
 
-        bkg, rms = estimate_bkg_and_rms(data,mask=nanmask.astype(bool))
+        struct_element = np.ones((3, 3), dtype=bool)
+        dilated_mask = binary_dilation(nanmask.astype(bool), structure=struct_element)
+
+        bkg, rms = estimate_bkg_and_rms(data,mask=dilated_mask)
         data_subtracted = data - bkg
 
         # ---- candidate detection via DAOStarFinder ----
-        dao_catalog = self._dao(data_subtracted,mask=nanmask.astype(bool),mrms=np.nanmedian(rms))
+        dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
 
         # 2. Compute brightness cutoffs using numpy percentiles on the astropy column
         peaks = dao_catalog['peak']
@@ -1651,7 +1655,7 @@ class DAO():
 
         # Tier C: Faint Stars (Relaxed shape cuts for noise-distorted objects)
         is_faint = (peaks <= faint_cutoff) & (peaks > 0)
-        faint_sharp = (dao_catalog['sharpness'] >= 0.15) & (dao_catalog['sharpness'] <= 1.0)
+        faint_sharp = (dao_catalog['sharpness'] >= 0.15) & (dao_catalog['sharpness'] <= 0.95)
         faint_round = (dao_catalog['roundness1'] >= -0.6) & (dao_catalog['roundness1'] <= 0.6)
         clean_faint_star = is_faint & faint_sharp & faint_round
 
