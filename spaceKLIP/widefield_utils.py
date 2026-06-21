@@ -146,13 +146,15 @@ def fetch_gaia_for_image_fov(
 #         plt.show()
 #     return masked_data
 
-def estimate_bkg_and_rms(data2d,n=15):
+def estimate_bkg_and_rms(data,mask,n=15):
     """Estimate background median and RMS from cutout border pixels.
 
     Parameters
     ----------
-    data2d : 2D-array
+    data : 2D-array
         Image cutout.
+    mask: 2D-array
+        Boolean mask for data. True indicate bad pixels to ignore.
     n : int, optional
         Number of boxes to use to define box_size. The default is 11.
 
@@ -164,12 +166,13 @@ def estimate_bkg_and_rms(data2d,n=15):
         Robust RMS estimate.
 
     """
-    data2d = np.asarray(data2d, dtype=float)
+    data = np.asarray(data, dtype=float)
     sigma_clip = SigmaClip(sigma=3.0, maxiters=10)
     bkg_estimator = MedianBackground()
     bkg = Background2D(
-        data2d,
-        box_size=int(np.ceil(np.max(data2d.shape)/np.sqrt(n))),
+        data,
+        mask=mask,
+        box_size=int(np.ceil(np.max(data.shape)/np.sqrt(n))),
         filter_size=(3, 3),
         sigma_clip=sigma_clip,
         bkg_estimator=bkg_estimator
@@ -1090,8 +1093,10 @@ class DAO():
     def __init__(self,
                 npix=0,
                 oversampling=1,
-                dao_thresh_sigma=4.0,
-                dao_fwhm=2.5,
+                threshold=4.0,
+                sharpness_range=(0.2, 1.0),
+                roundness_range=(-1.0, 1.0),
+                fwhm=2.5,
                 group_radius=15.0,
                 catalog=None,
                 nan_lim_percent=0.51,
@@ -1110,10 +1115,14 @@ class DAO():
             bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
         oversampling : int, optional
             Oversampling factor of ``psf`` relative to detector pixels.
-        dao_thresh_sigma : float, optional
+        threshold : float, optional
             ``DAOStarFinder`` detection threshold in units of the image RMS.
-        dao_fwhm : float, optional
+        fwhm : float, optional
             PSF FWHM (pixels) passed to ``DAOStarFinder``.
+        sharpness_range : tuple of float, optional
+            Acceptable range of ``DAOStarFinder`` sharpness values.
+        roundness_range : tuple of float, optional
+            Acceptable range of ``DAOStarFinder`` roundness values.
         group_radius : float, optional
             Grouping radius (pixels). All ``DAOStarFinder`` detections within this
             distance of each other are treated as belonging to the same star, and
@@ -1149,8 +1158,10 @@ class DAO():
         if len(self.npix) != 4:
             raise UserWarning('Parameter npix must either be an int or a list of four int (left, right, bottom, top)')
         self.oversampling=oversampling
-        self.dao_thresh_sigma=dao_thresh_sigma
-        self.dao_fwhm=dao_fwhm
+        self.threshold=threshold
+        self.fwhm=fwhm
+        self.sharpness_range=sharpness_range
+        self.roundness_range=roundness_range
         self.group_radius=group_radius
         self.catalog=catalog
         self.nan_lim_percent=nan_lim_percent
@@ -1158,13 +1169,15 @@ class DAO():
         self.showplots = showplots
         pass
 
-    def _dao(self,data,mrms,border=3):
+    def _dao(self,data,mask,mrms,border=3):
         """Recover additional faint point sources with ``DAOStarFinder``.
 
         Parameters
         ----------
         data : 2D-array
             Science image.
+        mask : 2D-array
+            Boolean mask of the science image. True indicate bad pixels to ignore.
         mrms : float
             median from RMS estimate.
         border: int, optional
@@ -1186,8 +1199,11 @@ class DAO():
         if not np.isfinite(mrms) or mrms <= 0:
             mrms = 1.0
 
-        dao = DAOStarFinder(fwhm=float(self.dao_fwhm), threshold=float(self.dao_thresh_sigma * mrms))
-        tbl = dao(np.nan_to_num(data, nan=0.0))
+        dao = DAOStarFinder(fwhm=float(self.fwhm), threshold=float(self.threshold * mrms),
+                            sharplo=self.sharpness_range[0], sharphi=self.sharpness_range[1],
+                            roundlo=self.roundness_range[0], roundhi=self.roundness_range[1])
+
+        tbl = dao(np.nan_to_num(data, nan=0.0), mask=mask)
         if tbl is None or len(tbl) == 0:
             return None
         # out = []
@@ -1202,7 +1218,7 @@ class DAO():
                 & (tbl["y"] >= self.npix[2] + border)
                 & (tbl["y"] <= ny - (self.npix[3] + border))
         )
-        tbl_selected = tbl[mask]['x','y','peak','coresat','method']
+        tbl_selected = tbl[mask]['x','y','peak','coresat','method','sharpness','roundness1']
 
         return tbl_selected
 
@@ -1612,11 +1628,38 @@ class DAO():
         data = np.asarray(data, dtype=float)
         data[nanmask==1] = np.nan
 
-        bkg, rms = estimate_bkg_and_rms(data, edge_width=5)
+        bkg, rms = estimate_bkg_and_rms(data,mask=nanmask.astype(bool))
         data_subtracted = data - bkg
 
         # ---- candidate detection via DAOStarFinder ----
-        dao_catalog = self._dao(data_subtracted,mrms=np.nanmedian(rms))
+        dao_catalog = self._dao(data_subtracted,mask=nanmask.astype(bool),mrms=np.nanmedian(rms))
+
+        # 2. Compute brightness cutoffs using numpy percentiles on the astropy column
+        peaks = dao_catalog['peak']
+        bright_cutoff = np.percentile(peaks, 86)
+        faint_cutoff = np.percentile(peaks, 14)
+
+        # 3. Define Tier Masks using Astropy Table Boolean Arrays
+        # Tier A: Bright / Saturated Stars
+        is_bright = peaks >= bright_cutoff
+
+        # Tier B: Average Stars (Strict shape cuts for nebula artifacts)
+        is_average = (peaks < bright_cutoff) & (peaks > faint_cutoff)
+        avg_sharp = (dao_catalog['sharpness'] >= 0.3) & (dao_catalog['sharpness'] <= 0.85)
+        avg_round = (dao_catalog['roundness1'] >= -0.3) & (dao_catalog['roundness1'] <= 0.3)
+        clean_average_star = is_average & avg_sharp & avg_round
+
+        # Tier C: Faint Stars (Relaxed shape cuts for noise-distorted objects)
+        is_faint = (peaks <= faint_cutoff) & (peaks > 0)
+        faint_sharp = (dao_catalog['sharpness'] >= 0.15) & (dao_catalog['sharpness'] <= 1.0)
+        faint_round = (dao_catalog['roundness1'] >= -0.6) & (dao_catalog['roundness1'] <= 0.6)
+        clean_faint_star = is_faint & faint_sharp & faint_round
+
+        # 4. Master Combination Mask
+        keep_mask = is_bright | clean_average_star | clean_faint_star
+
+        # 5. Slice the original Astropy Table using the masks
+        dao_catalog = dao_catalog[keep_mask]
 
         # Catalog candidates are prepended so they have priority inside each group.
         if self.catalog is not None and dao_catalog is not None:
