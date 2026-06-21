@@ -3586,8 +3586,8 @@ class ImageTools():
                                      npix =0,
                                      group_radius=15,
                                      fov_pix=65,
-                                     dao_thresh_sigma=1,
-                                     dao_fwhm=3,
+                                     threshold=1,
+                                     fwhm=3,
                                      incat_path=None,
                                      use_gaia=True,
                                      kwargs={},
@@ -3600,6 +3600,10 @@ class ImageTools():
 
         Parameters
         ----------
+        fwhm: float, optional
+            DAO FWHM of the PSF in pixels. Default is 3 pixels.
+        threshold: float, optional
+            DAO threshold parameter. Default is 1.
         npix : int or list of four int, optional
             Number of pixels to be padded around the frames. If int, the same
             number of pixels will be padded on each side. If list of four int,
@@ -3612,7 +3616,7 @@ class ImageTools():
             minimum allowed separation between any two sources in the final
             catalog.  Should be set to roughly 1–2 times the PSF wing extent; a
             value of ~15 pixels works well for JWST NIRCam wide-field data.
-        fov_pixels : int
+        fov_pix : int
             Tile size in detector pixels.
         use_gaia : bool, optional
             If True, query Gaia EDR3 for sources in the image FOV and include them in the catalog and DS9 region file.
@@ -3700,7 +3704,7 @@ class ImageTools():
                             log.info("Downloading catalog from GAIA")
                             incat_path_temp = os.path.join(region_path.replace(".reg", "_gaia.csv"))
                             result = fetch_gaia_for_image_fov(incat_path_temp,data, head_sci,npix=npix, verbose=True)
-                        elif incat_path_temp is not None and not use_gaia:
+                        elif incat_path_temp is not None:
                             log.info(f"Loading input catalog: {incat_path_temp}")
                             result = Table.read(incat_path_temp)
                         else:
@@ -3717,11 +3721,13 @@ class ImageTools():
                         psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
                         psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
 
-                        dao = DAO(dao_thresh_sigma=dao_thresh_sigma,
-                                dao_fwhm=dao_fwhm,
-                                catalog=result,
-                                group_radius=group_radius,
-                                npix=npix)
+                        dao = DAO(threshold=threshold,
+                                    fwhm=fwhm,
+                                    sharpness_range=(0,2.0), # Wide open to capture everything
+                                    roundness_range=(-2,2),
+                                    catalog=result,
+                                    group_radius=group_radius,
+                                    npix=npix)
                         objects_tbl_selected = dao.dao_source_extractor(
                                                                         data=data[0],
                                                                         nanmask=nanmask,
@@ -3734,7 +3740,7 @@ class ImageTools():
                                                                 region_path,
                                                                 shape=region_shape,
                                                                 circle_radius=circle_radius,
-                                                                color="black",
+                                                                color="green",
                                                             )
                         log.info(f"Wrote COMBINED DS9 region file: {out} ({len(objects_tbl_selected)} detections)")
 
