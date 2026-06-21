@@ -117,7 +117,7 @@ def fetch_gaia_for_image_fov(
     x, y = cel_wcs.all_world2pix(ra_arr, dec_arr, 0)
     gaia_table["x"] = np.asarray(x, dtype=float)
     gaia_table["y"] = np.asarray(y, dtype=float)
-    gaia_table['method'] = np.asarray(['gaia']*len(gaia_table), dtype=str)
+    gaia_table['method'] = np.asarray(['catalog']*len(gaia_table), dtype=str)
 
     mask = (
             (gaia_table["x"] >= npix[0] + border)
@@ -1635,7 +1635,7 @@ class DAO():
         bkg, rms = estimate_bkg_and_rms(data,mask=dilated_mask)
         data_subtracted = data - bkg
 
-        # ---- candidate detection via DAOStarFinder ----
+        # 1. Candidate detection via DAOStarFinder
         dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
 
         # 2. Compute brightness cutoffs using numpy percentiles on the astropy column
