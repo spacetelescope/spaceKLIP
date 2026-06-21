@@ -3875,6 +3875,7 @@ class ImageTools():
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
+        key_tile_fitsfile_list=[]
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Concatenation ' + key)
@@ -4067,12 +4068,14 @@ class ImageTools():
                             maskfile = ut.write_msk(maskfile, mask, tile_fitsfile)
                             nanmaskfile = ut.write_msk(nanmaskfile, nanmasktile,tile_fitsfile, '_nanmask.fits')
                             pass
-                # I need to create a new database from scratch since I'm creating snapshots of stars from the original
-                # dataset and the old structure of the original database does not work anymore
-                self.database = database.Database(output_dir=self.database.output_dir)
-                self.database.read_jwst_s012_data(datapaths=tile_fitsfile_list)
+            key_tile_fitsfile_list.extend(tile_fitsfile_list)
 
-                pass
+        # I need to create a new database from scratch since I'm creating snapshots of stars from the original
+        # dataset and the old structure of the original database does not work anymore
+        self.database = database.Database(output_dir=self.database.output_dir)
+        self.database.read_jwst_s012_data(datapaths=key_tile_fitsfile_list)
+
+        pass
 
 
     def calculate_centers_binary(self,
