@@ -3590,6 +3590,7 @@ class ImageTools():
                                      fwhm=2,
                                      cat_ext=None,
                                      use_gaia=False,
+                                     use_allwise=False,
                                      use_simbad=True,
                                      kwargs={},
                                      subdir='pretiles'):
@@ -3622,6 +3623,9 @@ class ImageTools():
         use_gaia : bool, optional
             If True, query Gaia EDR3 for sources in the image FOV and include them in the catalog and DS9 region file.
             The default is False.
+        use_allwise : bool, optional
+            If True, queries and filters for objects with ALLWISE W2 measurements.
+            Defaults to False.
         use_simbad : bool, optional
             If True, query Simbad for sources in the image FOV and include them in the catalog and DS9 region file.
             The default is True.
@@ -3709,7 +3713,7 @@ class ImageTools():
                         if incat_path_temp is None and use_gaia:
                             log.info("Downloading catalog from GAIA")
                             incat_path_temp = region_path.replace(".reg", "_gaia.csv")
-                            result = fetch_catalog_for_image_fov(incat_path_temp,data, head_sci,use_gaia=True,npix=npix)
+                            result = fetch_catalog_for_image_fov(incat_path_temp,data, head_sci,use_gaia=True,use_allwise=use_allwise,npix=npix)
                         elif incat_path_temp is None and use_simbad:
                             log.info("Downloading catalog from SIMBAD")
                             incat_path_temp = region_path.replace(".reg", "_simbad.csv")

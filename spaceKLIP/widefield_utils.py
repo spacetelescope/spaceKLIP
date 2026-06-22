@@ -33,6 +33,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 image: np.ndarray,
                                 header,
                                 use_gaia=False,
+                                use_allwise=False,
                                 use_simbad=False,
                                 border=3,
                                 npix=0,
@@ -49,6 +50,9 @@ def fetch_catalog_for_image_fov(path2table,
                                 FITS header containing the celestial WCS for the image.
                             use_gaia : bool, optional
                                Enable Gaia query. Default is False.
+                            use_allwise : bool, optional
+                                If True, queries and filters for objects with ALLWISE W2 measurements.
+                                Defaults to False.
                             use_simbad : bool, optional
                                Enable Simbad query. Default is False.
                             row_limit : int, optional
@@ -70,47 +74,112 @@ def fetch_catalog_for_image_fov(path2table,
 
                             """
 
+                            # def query_gaia(path2table,
+                            #                 center_ra_deg,
+                            #                 center_dec_deg,
+                            #                 radius_deg,
+                            #                 gaia_table: str = "gaiadr3.gaia_source",
+                            #                ):
+                            #             """
+                            #             Helper to fetch Gaia DR3 source data.
+                            #
+                            #             Parameters
+                            #             ----------
+                            #             path2table : str
+                            #                 Path to save the table query result CSV file.
+                            #             center_ra_deg : float
+                            #                 Right ascension of the center of the search region in degrees.
+                            #             center_dec_deg : float
+                            #                 Declination of the center of the search region in degrees.
+                            #             radius_deg : float
+                            #                 Radius of the search region in degrees.
+                            #             gaia_table : str, optional
+                            #                 Gaia TAP table to query. Defaults to Gaia DR3 source table.
+                            #
+                            #             Returns
+                            #             -------
+                            #
+                            #             """
+                            #             from astroquery.gaia import Gaia
+                            #
+                            #             query = (
+                            #                 "SELECT source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag FROM "
+                            #                 f"{gaia_table} "
+                            #                 "WHERE 1=CONTAINS("
+                            #                 "POINT('ICRS', ra, dec), "
+                            #                 f"CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f})"
+                            #                 ")"
+                            #             )
+                            #
+                            #             Gaia.MAIN_GAIA_TABLE = gaia_table
+                            #             Gaia.ROW_LIMIT = int(-1)
+                            #             Gaia.launch_job_async(query=query, dump_to_file=True, verbose=False, output_format='csv',output_file=path2table)
                             def query_gaia(path2table,
-                                            center_ra_deg,
-                                            center_dec_deg,
-                                            radius_deg,
-                                            gaia_table: str = "gaiadr3.gaia_source",
+                                           center_ra_deg,
+                                           center_dec_deg,
+                                           radius_deg,
+                                           gaia_table: str = "gaiadr3.gaia_source",
+                                           use_allwise: bool = False,
                                            ):
-                                        """
-                                        Helper to fetch Gaia DR3 source data.
+                                """
+                                Helper to fetch Gaia DR3 source data, with an optional ALLWISE W2 filter proxy.
 
-                                        Parameters
-                                        ----------
-                                        path2table : str
-                                            Path to save the table query result CSV file.
-                                        center_ra_deg : float
-                                            Right ascension of the center of the search region in degrees.
-                                        center_dec_deg : float
-                                            Declination of the center of the search region in degrees.
-                                        radius_deg : float
-                                            Radius of the search region in degrees.
-                                        gaia_table : str, optional
-                                            Gaia TAP table to query. Defaults to Gaia DR3 source table.
+                                Parameters
+                                ----------
+                                path2table : str
+                                    Path to save the table query result CSV file.
+                                center_ra_deg : float
+                                    Right ascension of the center of the search region in degrees.
+                                center_dec_deg : float
+                                    Declination of the center of the search region in degrees.
+                                radius_deg : float
+                                    Radius of the search region in degrees.
+                                gaia_table : str, optional
+                                    Gaia TAP table to query. Defaults to Gaia DR3 source table.
+                                use_allwise : bool, optional
+                                    If True, queries and filters for objects with ALLWISE W2 measurements.
+                                    Defaults to False.
 
-                                        Returns
-                                        -------
+                                Returns
+                                -------
+                                None
+                                """
+                                from astroquery.gaia import Gaia
+                                #TODO: fix allwise search
 
-                                        """
-                                        from astroquery.gaia import Gaia
+                                # 1. Adapt query columns and table relations based on AllWISE flag
+                                if use_allwise:
+                                    # Requesting fields across the corrected external catalog tables
+                                    select_fields = "g.source_id, g.ra, g.dec, g.parallax, g.parallax_error, g.phot_g_mean_mag, w.w2_m_mag AS flux_w2_mag"
+                                    table_joins = (
+                                        f"{gaia_table} AS g "
+                                        f"INNER JOIN gaiadr3.allwise_best_neighbour AS x ON g.source_id = x.source_id "
+                                        f"INNER JOIN gaiadr3.allwise_original_valid AS w ON x.allwise_oid = w.allwise_oid"
+                                    )
+                                    # Using explicit aliases avoids table ambiguities in positional processing
+                                    where_clause = (
+                                        f"1=CONTAINS(POINT('ICRS', g.ra, g.dec), CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f})) "
+                                        f"AND w.w2_m_mag IS NOT NULL"
+                                    )
+                                else:
+                                    # Standard fast single-table fallback
+                                    select_fields = "source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag"
+                                    table_joins = f"{gaia_table}"
+                                    where_clause = f"1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f}))"
 
-                                        query = (
-                                            "SELECT source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag FROM "
-                                            f"{gaia_table} "
-                                            "WHERE 1=CONTAINS(" 
-                                            "POINT('ICRS', ra, dec), "
-                                            f"CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f})"
-                                            ")"
-                                        )
+                                # 2. Build the unified ADQL query string
+                                query = f"SELECT {select_fields} FROM {table_joins} WHERE {where_clause}"
 
-                                        Gaia.MAIN_GAIA_TABLE = gaia_table
-                                        Gaia.ROW_LIMIT = int(-1)
-                                        Gaia.launch_job_async(query=query, dump_to_file=True, verbose=False, output_format='csv',output_file=path2table)
-
+                                # 3. Configure Gaia service settings and execute the pipeline
+                                Gaia.MAIN_GAIA_TABLE = gaia_table
+                                Gaia.ROW_LIMIT = int(-1)
+                                Gaia.launch_job_async(
+                                    query=query,
+                                    dump_to_file=True,
+                                    verbose=False,
+                                    output_format='csv',
+                                    output_file=path2table
+                                )
 
                             def query_simbad(path2table,
                                             center_ra_deg,
@@ -139,13 +208,20 @@ def fetch_catalog_for_image_fov(path2table,
                                             # Define center coordinates and radius
                                             coord = SkyCoord(ra=center_ra_deg, dec=center_dec_deg, unit=(u.deg, u.deg), frame='icrs')
 
-                                            # 1. Reset fields to default, then add all 5 filters (case-sensitive)
+                                            # 1. Reset fields to default, then add your existing filters plus M, W2, and I2
                                             Simbad.reset_votable_fields()
-                                            Simbad.add_votable_fields('flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)')
+                                            Simbad.add_votable_fields(
+                                                'flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)'
+                                            )
 
                                             # Execute the cone search
                                             simbad_table = Simbad.query_region(coord, radius=radius_deg * u.deg)
-                                            simbad_table = simbad_table[simbad_table['FLUX_K']>0]
+
+                                            # Filter for sources that have at least one valid (positive/non-NaN) Filter
+                                            # Note: SIMBAD uses NaN for missing flux values in Astroquery
+
+                                            has_K = ~np.isnan(simbad_table['FLUX_K'])
+                                            simbad_table = simbad_table[has_K]
 
                                             # Only use this if your columns are returned as strings (hms/dms)
                                             if np.any([isinstance(simbad_table['RA'][0], str),isinstance(simbad_table['DEC'][0], str)]):
@@ -182,8 +258,8 @@ def fetch_catalog_for_image_fov(path2table,
                             fov_y_deg = float(ny * pix_scales) / 3600
                             radius_deg = 0.5 * float(np.hypot(fov_x_deg, fov_y_deg))
 
-                            if use_gaia:
-                                query_gaia(path2table, center_ra_deg, center_dec_deg, radius_deg)
+                            if use_gaia or use_allwise:
+                                query_gaia(path2table, center_ra_deg, center_dec_deg, radius_deg, use_allwise=use_allwise)
                             elif use_simbad:
                                 query_simbad(path2table, center_ra_deg, center_dec_deg, radius_deg)
                                 time.sleep(0.5)  # To avoid hitting Simbad rate limits
