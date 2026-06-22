@@ -73,47 +73,6 @@ def fetch_catalog_for_image_fov(path2table,
                                 New Astropy table with selected columns plus WCS-derived ``x`` and ``y``.
 
                             """
-
-                            # def query_gaia(path2table,
-                            #                 center_ra_deg,
-                            #                 center_dec_deg,
-                            #                 radius_deg,
-                            #                 gaia_table: str = "gaiadr3.gaia_source",
-                            #                ):
-                            #             """
-                            #             Helper to fetch Gaia DR3 source data.
-                            #
-                            #             Parameters
-                            #             ----------
-                            #             path2table : str
-                            #                 Path to save the table query result CSV file.
-                            #             center_ra_deg : float
-                            #                 Right ascension of the center of the search region in degrees.
-                            #             center_dec_deg : float
-                            #                 Declination of the center of the search region in degrees.
-                            #             radius_deg : float
-                            #                 Radius of the search region in degrees.
-                            #             gaia_table : str, optional
-                            #                 Gaia TAP table to query. Defaults to Gaia DR3 source table.
-                            #
-                            #             Returns
-                            #             -------
-                            #
-                            #             """
-                            #             from astroquery.gaia import Gaia
-                            #
-                            #             query = (
-                            #                 "SELECT source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag FROM "
-                            #                 f"{gaia_table} "
-                            #                 "WHERE 1=CONTAINS("
-                            #                 "POINT('ICRS', ra, dec), "
-                            #                 f"CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f})"
-                            #                 ")"
-                            #             )
-                            #
-                            #             Gaia.MAIN_GAIA_TABLE = gaia_table
-                            #             Gaia.ROW_LIMIT = int(-1)
-                            #             Gaia.launch_job_async(query=query, dump_to_file=True, verbose=False, output_format='csv',output_file=path2table)
                             def query_gaia(path2table,
                                            center_ra_deg,
                                            center_dec_deg,
