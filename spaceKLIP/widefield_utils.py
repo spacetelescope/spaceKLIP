@@ -16,6 +16,7 @@ from photutils.background import Background2D, MedianBackground
 from scipy.ndimage import binary_dilation
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+import time
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -185,6 +186,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 query_gaia(path2table, center_ra_deg, center_dec_deg, radius_deg)
                             elif use_simbad:
                                 query_simbad(path2table, center_ra_deg, center_dec_deg, radius_deg)
+                                time.sleep(0.5)  # To avoid hitting Simbad rate limits
                             else:
                                 log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
                                 return Table()
