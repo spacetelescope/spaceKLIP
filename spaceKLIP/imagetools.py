@@ -3733,8 +3733,8 @@ class ImageTools():
 
                         dao = DAO(threshold=threshold,
                                     fwhm=fwhm,
-                                    sharpness_range=(0,2.0), # Wide open to capture everything
-                                    roundness_range=(-2,2),
+                                    sharpness_range=(0.15,0.95),
+                                    roundness_range=(-0.7,0.7),
                                     catalog=result,
                                     group_radius=group_radius,
                                     npix=npix,
