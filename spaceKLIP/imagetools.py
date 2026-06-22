@@ -3583,11 +3583,11 @@ class ImageTools():
         pass
 
     def prepare_tiles_for_extraction(self,
-                                     npix =0,
+                                     npix=0,
                                      group_radius=15,
                                      fov_pix=65,
-                                     threshold=1,
-                                     fwhm=3,
+                                     threshold=3,
+                                     fwhm=2,
                                      cat_ext=None,
                                      use_gaia=False,
                                      use_simbad=True,
@@ -3737,21 +3737,20 @@ class ImageTools():
                                     roundness_range=(-2,2),
                                     catalog=result,
                                     group_radius=group_radius,
-                                    npix=npix)
-                        objects_tbl_selected = dao.dao_source_extractor(
-                                                                        data=data[0],
+                                    npix=npix,
+                                    psf=psf_no_coronmsk)
+
+                        objects_tbl_selected = dao.dao_source_extractor(data=data[0],
                                                                         nanmask=nanmask,
-                                                                        psf=psf_no_coronmsk,
-                                                                    )
+                                                                        )
                         objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
 
-                        out = write_ds9_regions_from_sep_objects(
-                                                                objects_tbl_selected,
+                        out = write_ds9_regions_from_sep_objects(objects_tbl_selected,
                                                                 region_path,
                                                                 shape=region_shape,
                                                                 circle_radius=circle_radius,
                                                                 color="green",
-                                                            )
+                                                                )
                         log.info(f"Wrote COMBINED DS9 region file: {out} ({len(objects_tbl_selected)} detections)")
 
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
