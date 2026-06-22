@@ -10,7 +10,7 @@ import numpy as np
 from astropy.table import Table, vstack
 from astropy.wcs import WCS
 from scipy.signal import fftconvolve
-from photutils.detection import DAOStarFinder
+from photutils.detection import DAOStarFinder,StarFinder
 from astropy.stats import SigmaClip
 from photutils.background import Background2D, MedianBackground
 from scipy.ndimage import binary_dilation
@@ -956,205 +956,6 @@ def write_ds9_regions_from_sep_objects(
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
     return out
 
-# def SEP_source_extraction(
-#     header,
-#     data_sub,
-#     err,
-#     mask,
-#     thresh_sigma,
-#     region_center,
-#     aperture_radius_pix: float = 3.0,
-#     minarea: int = 5,
-#     *,
-#     err_mode: str = "global",
-# ):
-#     """Run SEP source extraction + aperture photometry + WCS coordinate conversion.
-#
-#     Parameters
-#     ----------
-#     header : astropy.io.fits.Header
-#         Header providing a 2D celestial WCS.
-#     data_sub : 2D-array
-#         Background-subtracted image.
-#     err : float or 2D-array
-#         Error estimate from ``load_data``.
-#     mask : 2D-array (bool)
-#         Bad-pixel mask.
-#     thresh_sigma : float
-#         Detection threshold in units of ``err``.
-#     region_center : {'centroid', 'peak'}
-#         Which coordinates are converted to RA/Dec.
-#     aperture_radius_pix : float, optional
-#         Aperture radius (pixels) for ``sep.sum_circle``.
-#     minarea : int, optional
-#         Minimum number of connected pixels above threshold.
-#     err_mode : {'jwst_err', 'bkg_rms', 'global', 'sqrt'}, optional
-#         Error model used inside SEP.
-#
-#     Returns
-#     -------
-#     astropy.table.Table
-#         SEP detections including aperture photometry, SNR columns, and RA/DEC.
-#
-#     """
-#     # When using a low threshold on large images (especially with a spatially
-#     # varying `err` map), SEP can exceed its default internal pixel buffer.
-#     # Bump the limit to (at least) the image size.
-#     sep.set_extract_pixstack(max(300000, int(data_sub.size)))
-#
-#     # Choose the uncertainty model used by SEP.
-#     # - jwst_err: use ERR extension (per-pixel)
-#     # - bkg_rms: use SEP background RMS map
-#     # - global: use SEP background global RMS (scalar)
-#     # - sqrt: Poisson-like noise sqrt(max(data_sub,0)) with a noise floor
-#     if err_mode == "sqrt":
-#         # Background-subtracted images can be <=0; avoid NaNs and avoid 0 errors
-#         # (which would yield infinite SNR).
-#         err_sep = np.sqrt(np.clip(np.asarray(data_sub, dtype=float), 0.0, None))
-#         if np.isscalar(err):
-#             # Handles python floats as well as numpy scalar types.
-#             floor = float(np.asarray(err, dtype=float))
-#         else:
-#             arr = np.asarray(err, dtype=float)
-#             good = np.isfinite(arr) & (arr > 0)
-#             floor = float(np.nanmedian(arr[good])) if np.any(good) else np.nan
-#         if not np.isfinite(floor) or floor <= 0:
-#             floor = 1.0
-#         err_sep = np.where((err_sep > 0) & np.isfinite(err_sep), err_sep, floor)
-#     else:
-#         err_sep = err
-#
-#     objects = sep.extract(
-#         data_sub,
-#         thresh_sigma,
-#         err=err_sep,
-#         mask=mask,
-#         minarea=int(minarea),
-#     )
-#     flux, fluxerr, flag = sep.sum_circle(
-#         data_sub,
-#         objects['x'],
-#         objects['y'],
-#         float(aperture_radius_pix),
-#         err=err_sep,
-#         mask=mask,
-#     )
-#     objects_tbl = Table(objects, copy=True)
-#
-#     # Keep the aperture-sum flag separate to avoid confusion with the
-#     # SExtractor/SEP detection `flag` column.
-#     objects_tbl["ap_flag"] = flag
-#
-#     # Human-readable SEP aperture-flag summary.
-#     # Prefer an explicit 'invalid' label when SEP returns NaNs.
-#     ap_flux = np.asarray(flux, dtype=float)
-#     ap_err = np.asarray(fluxerr, dtype=float)
-#     ap_flag_arr = np.asarray(flag, dtype=int)
-#     ap_desc: list[str] = []
-#     for f, s, se in zip(ap_flag_arr, ap_flux, ap_err):
-#         if not (np.isfinite(s) and np.isfinite(se)):
-#             ap_desc.append("invalid")
-#         else:
-#             ap_desc.append(aperture_flag_short(int(f)))
-#     objects_tbl["ap_flag_desc"] = _as_fixed_str_array(ap_desc, width=64)
-#
-#     # Human-readable SExtractor-style flag summary.
-#     if "flag" in objects_tbl.colnames:
-#         objects_tbl["flag_desc"] = _as_fixed_str_array(
-#             [sextractor_flag_short(int(f)) for f in objects_tbl["flag"]],
-#             width=64,
-#         )
-#
-#     objects_tbl['apflux'] = flux
-#     objects_tbl['apflux_err'] = fluxerr
-#     objects_tbl["ap_snr"] = objects_tbl["apflux"] / objects_tbl["apflux_err"]
-#
-#     # Peak SNR: peak / (error at the peak pixel).
-#     # (Uses xpeak/ypeak; for scalar err this is just peak/err.)
-#     if "peak" in objects_tbl.colnames and "xpeak" in objects_tbl.colnames and "ypeak" in objects_tbl.colnames:
-#         peak_val = np.asarray(objects_tbl["peak"], dtype=float)
-#         if np.isscalar(err_sep):
-#             peak_err = np.full(len(objects_tbl), float(np.asarray(err_sep, dtype=float)))
-#         else:
-#             err_img = np.asarray(err_sep, dtype=float)
-#             h, w = err_img.shape
-#             xi = np.clip(np.rint(np.asarray(objects_tbl["xpeak"], dtype=float)).astype(int), 0, w - 1)
-#             yi = np.clip(np.rint(np.asarray(objects_tbl["ypeak"], dtype=float)).astype(int), 0, h - 1)
-#             peak_err = err_img[yi, xi]
-#         objects_tbl["peak_err"] = peak_err
-#         denom = np.asarray(objects_tbl["peak_err"], dtype=float)
-#         with np.errstate(divide="ignore", invalid="ignore"):
-#             objects_tbl["peak_snr"] = np.where(np.isfinite(denom) & (denom > 0), peak_val / denom, np.nan)
-#     objects_tbl["ellipt"] = 1-objects_tbl['b'] / objects_tbl['a']
-#     # First, do a simple peak threshold.
-#
-#     # Compute sky coordinates from the WCS.
-#     # SEP x/y and xpeak/ypeak are 0-indexed pixel coordinates, so use origin=0.
-#     wcs = WCS(header, naxis=2)
-#     if region_center == 'peak':
-#         ra, dec = wcs.all_pix2world(objects_tbl['xpeak'], objects_tbl['ypeak'], 0)
-#     else:
-#         ra, dec = wcs.all_pix2world(objects_tbl['x'], objects_tbl['y'], 0)
-#
-#     objects_tbl['RA'] = ra
-#     objects_tbl['DEC'] = dec
-#
-#     return objects_tbl
-
-# def as_list(x: Any) -> list[Any]:
-#     """Return ``x`` as a python list.
-#
-#     Parameters
-#     ----------
-#     x : object
-#         Scalar or list-like.
-#
-#     Returns
-#     -------
-#     list
-#         ``x`` converted to a list (scalars become a single-element list).
-#
-#     """
-#     if isinstance(x, (list, tuple, np.ndarray)):
-#         return list(x)
-#     return [x]
-
-# def broadcast(value: Any, n: int, newshape=True) -> list[Any]:
-#     """Broadcast a scalar (or selection list) to per-run values.
-#
-#     Parameters
-#     ----------
-#     value : object
-#         Scalar or list-like input.
-#     n : int
-#         Number of runs.
-#     newshape : bool, optional
-#         Backwards-compatibility toggle. If False, list-like values are deep-copied
-#         to length ``n``. If True, list-like values are returned unchanged.
-#
-#     Returns
-#     -------
-#     list
-#         Per-run values.
-#
-#     """
-#     import copy
-#
-#     if n < 0:
-#         raise ValueError(f"n must be >= 0 (got {n})")
-#
-#     if value is None:
-#         return [None] * n
-#
-#     if isinstance(value, (list, tuple, np.ndarray)):
-#         if not newshape:
-#             base = list(value)
-#             return [copy.deepcopy(base) for _ in range(n)]
-#         else:
-#             return value
-#
-#     return [value] * n
-
 class DAO():
     """
     The spaceKLIP DAOStarFinder source extraction tools class for wide-field images.
@@ -1173,6 +974,7 @@ class DAO():
                 nan_lim_percent=0.51,
                 two_pass=True,
                 showplots=False,
+                psf=None,
                  ):
         """
         Initialize the spaceKLIP DAOStarFinder source extraction tools class.
@@ -1216,6 +1018,8 @@ class DAO():
             pass when refining coordinates.
         showplots : bool, optional
             If True, show a diagnostic plot when refining coordinates for problematic fits.
+        psf : 2D-array
+            PSF model image passed directly to ``fit_psf``.
         Returns
         -------
         None.
@@ -1238,6 +1042,7 @@ class DAO():
         self.nan_lim_percent=nan_lim_percent
         self.two_pass = two_pass
         self.showplots = showplots
+        self.psf=psf
         pass
 
     def _dao(self,data,mask,mrms,border=3):
@@ -1282,6 +1087,7 @@ class DAO():
         tbl['method'] = 'dao'
         tbl.rename_column('xcentroid', 'x')
         tbl.rename_column('ycentroid', 'y')
+        tbl.rename_column('roundness1', 'roundness')
 
         mask = (
                 (tbl["x"] >= self.npix[0] + border)
@@ -1289,7 +1095,81 @@ class DAO():
                 & (tbl["y"] >= self.npix[2] + border)
                 & (tbl["y"] <= ny - (self.npix[3] + border))
         )
-        tbl_selected = tbl[mask]['x','y','peak','coresat','method','sharpness','roundness1']
+        tbl_selected = tbl[mask]['x','y','peak','coresat','method','sharpness','roundness']
+
+        return tbl_selected
+
+    def _starfinder(self, data, mask, mrms, border=3):
+        """Recover additional faint point sources using a custom PSF with ``StarFinder``
+        and manually calculate sharpness to mimic DAOStarFinder.
+        """
+        data = np.asarray(data, dtype=float)
+        nx, ny = data.shape
+        finite = np.isfinite(data)
+        vals = data[finite]
+
+        if vals.size == 0:
+            return None
+        if not np.isfinite(mrms) or mrms <= 0:
+            mrms = 1.0
+
+        # Initialize StarFinder using supported parameters
+        finder = StarFinder(threshold=float(self.threshold * mrms),
+                            kernel=self.psf)
+
+        # Run detection
+        tbl = finder(np.nan_to_num(data, nan=0.0), mask=mask)
+
+        if tbl is None or len(tbl) == 0:
+            return None
+
+        # Conform to your pipeline's existing structure
+        tbl['coresat'] = 0
+        tbl['method'] = 'starfinder'
+        tbl.rename_column('xcentroid', 'x')
+        tbl.rename_column('ycentroid', 'y')
+        tbl.rename_column('max_value', 'peak')
+
+        # --- MANUAL SHARPNESS CALCULATION ---
+        sharpness_list = []
+        box_radius = 2  # Extracts a 5x5 sub-grid around the centroid core
+
+        for row in tbl:
+            xi, yi = int(round(row['x'])), int(round(row['y']))
+
+            # Safely slice around the coordinates without spilling off image boundaries
+            y_slice = slice(max(0, yi - box_radius), min(ny, yi + box_radius + 1))
+            x_slice = slice(max(0, xi - box_radius), min(nx, xi + box_radius + 1))
+            cutout = data[y_slice, x_slice]
+
+            if cutout.size > 0 and np.any(cutout > 0):
+                # Sharpness = central peak / total core energy sum
+                total_flux = np.sum(cutout)
+                peak_val = data[yi, xi]
+
+                sh_val = peak_val / total_flux if total_flux > 0 else 0.0
+            else:
+                sh_val = 0.0
+
+            sharpness_list.append(sh_val)
+
+        tbl['sharpness'] = sharpness_list
+        # -------------------------------------
+
+        # Apply your boundary AND downstream sharpness range filters safely
+        mask_indices = (
+                (tbl["x"] >= self.npix[0] + border)
+                & (tbl["x"] <= nx - (self.npix[1] + border))
+                & (tbl["y"] >= self.npix[2] + border)
+                & (tbl["y"] <= ny - (self.npix[3] + border))
+                & (tbl["sharpness"] >= self.sharpness_range[0])
+                & (tbl["sharpness"] <= self.sharpness_range[1])
+                & (tbl["roundness"] >= self.roundness_range[0])
+                & (tbl["roundness"] <= self.roundness_range[1])
+        )
+
+        # Filter table and cleanly select your required columns
+        tbl_selected = tbl[mask_indices]['x', 'y', 'peak', 'coresat', 'method', 'sharpness', 'roundness']
 
         return tbl_selected
 
@@ -1691,7 +1571,7 @@ class DAO():
     def dao_source_extractor(self,
         data,
         nanmask,
-        psf
+        dao=True
     ):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
 
@@ -1718,8 +1598,8 @@ class DAO():
             science image.
         nanmask: 2D-array (bool)
             Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
-        psf : 2D-array
-            PSF model image passed directly to ``fit_psf``.
+        dao : bool, optional
+            Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
 
         Returns
         -------
@@ -1743,8 +1623,11 @@ class DAO():
         bkg, rms = estimate_bkg_and_rms(data,mask=dilated_mask)
         data_subtracted = data - bkg
 
-        # 1. Candidate detection via DAOStarFinder
-        dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
+        # 1. Candidate detection via DAOStarFinder, or StarFinder
+        if dao:
+            dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
+        else:
+            dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))
 
         # 2. Compute brightness cutoffs using numpy percentiles on the astropy column
         peaks = dao_catalog['peak']
@@ -1758,13 +1641,13 @@ class DAO():
         # Tier B: Average Stars (Strict shape cuts for nebula artifacts)
         is_average = (peaks < bright_cutoff) & (peaks > faint_cutoff)
         avg_sharp = (dao_catalog['sharpness'] >= 0.3) & (dao_catalog['sharpness'] <= 0.85)
-        avg_round = (dao_catalog['roundness1'] >= -0.3) & (dao_catalog['roundness1'] <= 0.3)
+        avg_round = (dao_catalog['roundness'] >= -0.3) & (dao_catalog['roundness'] <= 0.3)
         clean_average_star = is_average & avg_sharp & avg_round
 
         # Tier C: Faint Stars (Relaxed shape cuts for noise-distorted objects)
         is_faint = (peaks <= faint_cutoff) & (peaks > 0)
         faint_sharp = (dao_catalog['sharpness'] >= 0.15) & (dao_catalog['sharpness'] <= 0.95)
-        faint_round = (dao_catalog['roundness1'] >= -0.6) & (dao_catalog['roundness1'] <= 0.6)
+        faint_round = (dao_catalog['roundness'] >= -0.6) & (dao_catalog['roundness'] <= 0.6)
         clean_faint_star = is_faint & faint_sharp & faint_round
 
         # 4. Master Combination Mask
@@ -1786,8 +1669,6 @@ class DAO():
         # detections) and select one representative per group.  The representative
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
-        selected_candidates = self._group_and_select(all_candidates, data_subtracted, psf)
-        # TODO: fix _refine_coordinates
-        # selected_candidates = self._refine_coordinates(selected_candidates[35:36],data_subtracted,nanmask,psf)
+        selected_candidates = self._group_and_select(all_candidates, data_subtracted, self.psf)
 
         return selected_candidates
