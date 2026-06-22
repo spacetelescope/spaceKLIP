@@ -1623,38 +1623,12 @@ class DAO():
         bkg, rms = estimate_bkg_and_rms(data,mask=dilated_mask)
         data_subtracted = data - bkg
 
-        # 1. Candidate detection via DAOStarFinder, or StarFinder
+        #Candidate detection via DAOStarFinder, or StarFinder
         if dao:
             dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
         else:
             dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))
 
-        # 2. Compute brightness cutoffs using numpy percentiles on the astropy column
-        peaks = dao_catalog['peak']
-        bright_cutoff = np.percentile(peaks, 86)
-        faint_cutoff = np.percentile(peaks, 14)
-
-        # 3. Define Tier Masks using Astropy Table Boolean Arrays
-        # Tier A: Bright / Saturated Stars
-        is_bright = peaks >= bright_cutoff
-
-        # Tier B: Average Stars (Strict shape cuts for nebula artifacts)
-        is_average = (peaks < bright_cutoff) & (peaks > faint_cutoff)
-        avg_sharp = (dao_catalog['sharpness'] >= 0.3) & (dao_catalog['sharpness'] <= 0.85)
-        avg_round = (dao_catalog['roundness'] >= -0.3) & (dao_catalog['roundness'] <= 0.3)
-        clean_average_star = is_average & avg_sharp & avg_round
-
-        # Tier C: Faint Stars (Relaxed shape cuts for noise-distorted objects)
-        is_faint = (peaks <= faint_cutoff) & (peaks > 0)
-        faint_sharp = (dao_catalog['sharpness'] >= 0.15) & (dao_catalog['sharpness'] <= 0.95)
-        faint_round = (dao_catalog['roundness'] >= -0.6) & (dao_catalog['roundness'] <= 0.6)
-        clean_faint_star = is_faint & faint_sharp & faint_round
-
-        # 4. Master Combination Mask
-        keep_mask = is_bright | clean_average_star | clean_faint_star
-
-        # 5. Slice the original Astropy Table using the masks
-        dao_catalog = dao_catalog[keep_mask]
 
         # Catalog candidates are prepended so they have priority inside each group.
         if self.catalog is not None and dao_catalog is not None:
