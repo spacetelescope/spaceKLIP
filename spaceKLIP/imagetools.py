@@ -18,7 +18,7 @@ import lmfit
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
-from spaceKLIP.widefield_utils import DAO, write_ds9_regions_from_sep_objects,stars_extractor,fit_psf, fetch_gaia_for_image_fov
+from spaceKLIP.widefield_utils import DAO, write_ds9_regions_from_sep_objects,stars_extractor,fit_psf, fetch_catalog_for_image_fov
 from astropy.table import Table
 
 # astropy imports
@@ -3588,8 +3588,9 @@ class ImageTools():
                                      fov_pix=65,
                                      threshold=1,
                                      fwhm=3,
-                                     incat_path=None,
-                                     use_gaia=True,
+                                     cat_ext=None,
+                                     use_gaia=False,
+                                     use_simbad=True,
                                      kwargs={},
                                      subdir='pretiles'):
         """
@@ -3620,11 +3621,16 @@ class ImageTools():
             Tile size in detector pixels.
         use_gaia : bool, optional
             If True, query Gaia EDR3 for sources in the image FOV and include them in the catalog and DS9 region file.
+            The default is False.
+        use_simbad : bool, optional
+            If True, query Simbad for sources in the image FOV and include them in the catalog and DS9 region file.
             The default is True.
-        incat_path : str, optional
-            Path to an input catalog (CSV file) of point sources to be included in the output catalog and DS9 region file.
-             If provided, the catalog must contain columns 'x' and 'y' with the pixel coordinates of the sources.
-             If both `incat_path` and `use_gaia` are provided, the Gaia sources will be added to the input catalog. The default is None
+        cat_ext : str, optional
+            Extension for the input catalog file (CSV file) of point sources to be included in the output catalog and DS9 region file.
+            If provided, the catalog must contain columns 'x' and 'y' with the pixel coordinates of the sources.
+            Must be the same file structure as fitsfile, but instead of ending with  '.fits', it ends with 'cat_ext'.
+            If None, the final star catalog will be generated only from the FITS file using DAOStarFinder.
+            The default is None
         kwargs : dict, optional
             Extra configuration for the diagnostic DS9 region output.
 
@@ -3677,7 +3683,6 @@ class ImageTools():
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
             for j in ww_sci:
-                incat_path_temp = incat_path
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
@@ -3691,6 +3696,7 @@ class ImageTools():
 
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
+                incat_path_temp = os.path.join(output_dir, tail.replace('.fits',cat_ext)) if cat_ext is not None else None
                 log.info('  --> Extract Tiles from: ' + tail)
                 if np.sum(np.isnan(data)) != 0:
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
@@ -3702,8 +3708,12 @@ class ImageTools():
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
                         if incat_path_temp is None and use_gaia:
                             log.info("Downloading catalog from GAIA")
-                            incat_path_temp = os.path.join(region_path.replace(".reg", "_gaia.csv"))
-                            result = fetch_gaia_for_image_fov(incat_path_temp,data, head_sci,npix=npix, verbose=True)
+                            incat_path_temp = region_path.replace(".reg", "_gaia.csv")
+                            result = fetch_catalog_for_image_fov(incat_path_temp,data, head_sci,use_gaia=True,npix=npix)
+                        elif incat_path_temp is None and use_simbad:
+                            log.info("Downloading catalog from SIMBAD")
+                            incat_path_temp = region_path.replace(".reg", "_simbad.csv")
+                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci,use_simbad=True, npix=npix)
                         elif incat_path_temp is not None:
                             log.info(f"Loading input catalog: {incat_path_temp}")
                             result = Table.read(incat_path_temp)
