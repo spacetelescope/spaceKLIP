@@ -14,6 +14,8 @@ from photutils.detection import DAOStarFinder
 from astropy.stats import SigmaClip
 from photutils.background import Background2D, MedianBackground
 from scipy.ndimage import binary_dilation
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -25,127 +27,195 @@ def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan):
     image[np.where(distance <= r)] = c
     return image
 
-def fetch_gaia_for_image_fov(
-    path2gaia,
-    image: np.ndarray,
-    header,
-    gaia_table: str = "gaiadr3.gaia_source",
-    row_limit: int = -1,
-    verbose: bool = False,
-    border=3,
-    npix=0,
-):
-    """Estimate image FOV from WCS and query Gaia over that footprint.
 
-    Parameters
-    ----------
-    path2gaia : str, optional
-        Path to save the Gaia query result CSV file.
-    image : 2D-array
-        Image data used only for its shape.
-    header : astropy.io.fits.Header
-        FITS header containing the celestial WCS for the image.
-    gaia_table : str, optional
-        Gaia TAP table to query. Defaults to Gaia DR3 source table.
-    row_limit : int, optional
-        Max number of returned rows. Use ``-1`` for no row limit.
-    verbose : bool, optional
-        Passed to ``Gaia.launch_job_async``.
-    border: int, optional
-        exclude border of x pixel from image to confirm coordinates are within the fov
-    npix : int or list of four int, optional
-        Number of pixels used to pad around the frames. If int, the same
-        number of pixels will be padded on each side. If list of four int,
-        a different number of pixels can be padded on the [left, right,
-        bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
+def fetch_catalog_for_image_fov(path2table,
+                                image: np.ndarray,
+                                header,
+                                use_gaia=False,
+                                use_simbad=False,
+                                border=3,
+                                npix=0,
+                            ):
+                            """Estimate image FOV from WCS and query Gaia over that footprint.
 
-    Returns
-    -------
-    astropy.table.Table
-        New Astropy table with selected Gaia columns plus WCS-derived ``x`` and ``y``.
+                            Parameters
+                            ----------
+                            path2table : str, optional
+                                Path to save the table query result CSV file.
+                            image : 2D-array
+                                Image data used only for its shape.
+                            header : astropy.io.fits.Header
+                                FITS header containing the celestial WCS for the image.
+                            use_gaia : bool, optional
+                               Enable Gaia query. Default is False.
+                            use_simbad : bool, optional
+                               Enable Simbad query. Default is False.
+                            row_limit : int, optional
+                                Max number of returned rows. Use ``-1`` for no row limit.
+                            verbose : bool, optional
+                                Passed to ``Gaia.launch_job_async``.
+                            border: int, optional
+                                exclude border of x pixel from image to confirm coordinates are within the fov
+                            npix : int or list of four int, optional
+                                Number of pixels used to pad around the frames. If int, the same
+                                number of pixels will be padded on each side. If list of four int,
+                                a different number of pixels can be padded on the [left, right,
+                                bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
 
-    """
-    from astroquery.gaia import Gaia
+                            Returns
+                            -------
+                            astropy.table.Table
+                                New Astropy table with selected columns plus WCS-derived ``x`` and ``y``.
 
-    if isinstance(npix, int):
-        npix = [npix, npix, npix, npix]  # left, right, bottom, top
-    else:
-        npix = npix
+                            """
 
-    data = np.asarray(image)
-    if data.ndim == 3:
-        data = data[0, :, :]
-    if data.ndim == 2:
-        pass
-    else:
-        raise ValueError(f"image must be a 3D or 2D, got shape {data.shape}")
+                            def query_gaia(path2table,
+                                            center_ra_deg,
+                                            center_dec_deg,
+                                            radius_deg,
+                                            gaia_table: str = "gaiadr3.gaia_source",
+                                           ):
+                                        """
+                                        Helper to fetch Gaia DR3 source data.
 
-    cel_wcs = WCS(header, naxis=2).celestial
-    ny, nx = data.shape
-    x_center = (nx) // 2.0
-    y_center = (ny) // 2.0
+                                        Parameters
+                                        ----------
+                                        path2table : str
+                                            Path to save the table query result CSV file.
+                                        center_ra_deg : float
+                                            Right ascension of the center of the search region in degrees.
+                                        center_dec_deg : float
+                                            Declination of the center of the search region in degrees.
+                                        radius_deg : float
+                                            Radius of the search region in degrees.
+                                        gaia_table : str, optional
+                                            Gaia TAP table to query. Defaults to Gaia DR3 source table.
 
-    center_ra_deg, center_dec_deg = cel_wcs.all_pix2world(x_center, y_center, 0)
-    pix_scales = np.sqrt(header['PIXAR_A2'])
-    fov_x_deg = float(nx * pix_scales)/3600
-    fov_y_deg = float(ny * pix_scales)/3600
-    radius_deg = 0.5 * float(np.hypot(fov_x_deg, fov_y_deg))
+                                        Returns
+                                        -------
 
-    query = (
-        "SELECT source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag FROM "
-        f"{gaia_table} "
-        "WHERE 1=CONTAINS(" 
-        "POINT('ICRS', ra, dec), "
-        f"CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f})"
-        ")"
-    )
+                                        """
+                                        from astroquery.gaia import Gaia
 
-    Gaia.MAIN_GAIA_TABLE = gaia_table
-    Gaia.ROW_LIMIT = int(row_limit)
-    Gaia.launch_job_async(query=query, dump_to_file=True, verbose=verbose, output_format='csv',output_file=path2gaia)
-    gaia_table = Table.read(path2gaia)
+                                        query = (
+                                            "SELECT source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag FROM "
+                                            f"{gaia_table} "
+                                            "WHERE 1=CONTAINS(" 
+                                            "POINT('ICRS', ra, dec), "
+                                            f"CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f})"
+                                            ")"
+                                        )
 
-    # Add detector pixel coordinates from catalog sky coordinates.
-    ra_col = "ra" if "ra" in gaia_table.colnames else ("RA" if "RA" in gaia_table.colnames else None)
-    dec_col = "dec" if "dec" in gaia_table.colnames else ("DEC" if "DEC" in gaia_table.colnames else None)
-    if ra_col is None or dec_col is None:
-        log.warning("Gaia table does not include ra/dec columns; returning sky-only table.")
-        return gaia_table
+                                        Gaia.MAIN_GAIA_TABLE = gaia_table
+                                        Gaia.ROW_LIMIT = int(-1)
+                                        Gaia.launch_job_async(query=query, dump_to_file=True, verbose=False, output_format='csv',output_file=path2table)
 
-    ra_arr = np.asarray(np.ma.filled(np.ma.asarray(gaia_table[ra_col]), np.nan), dtype=float)
-    dec_arr = np.asarray(np.ma.filled(np.ma.asarray(gaia_table[dec_col]), np.nan), dtype=float)
-    x, y = cel_wcs.all_world2pix(ra_arr, dec_arr, 0)
-    gaia_table["x"] = np.asarray(x, dtype=float)
-    gaia_table["y"] = np.asarray(y, dtype=float)
-    gaia_table['method'] = np.asarray(['catalog']*len(gaia_table), dtype=str)
 
-    mask = (
-            (gaia_table["x"] >= npix[0] + border)
-            & (gaia_table["x"] <= nx - (npix[1] + border))
-            & (gaia_table["y"] >= npix[2] + border)
-            & (gaia_table["y"] <= ny - (npix[3] + border))
-    )
-    gaia_table_selected=gaia_table[mask]
-    gaia_table_selected.write(path2gaia, format="csv", overwrite=True)
+                            def query_simbad(path2table,
+                                            center_ra_deg,
+                                            center_dec_deg,
+                                            radius_deg,
+                                            ):
+                                            """
+                                            Helper to fetch Simbad  source data.
 
-    return gaia_table_selected
+                                            Parameters
+                                            ----------
+                                            path2table : str
+                                                Path to save the table query result CSV file.
+                                            center_ra_deg : float
+                                                Right ascension of the center of the search region in degrees.
+                                            center_dec_deg : float
+                                                Declination of the center of the search region in degrees.
+                                            radius_deg : float
+                                                Radius of the search region in degrees.
 
-# def mask_core(data,coresat,showplots=False,cmap='Greys_r'):
-#     # Mask the PSF to exclude the core
-#     # Define a circular mask for the saturated core in the PSF data
-#     y_grid, x_grid = np.indices(data.shape)
-#     data_core_mask = (x_grid - data.shape[1]//2)**2 + (y_grid - data.shape[0]//2)**2 < coresat**2
-#     # masked_data = np.ma.masked_array(data, mask=data_core_mask)
-#     masked_data = data.copy()
-#     masked_data[data_core_mask] = 0
-#     if showplots:
-#         # Display the generated PSF
-#         norm = simple_norm(masked_data, 'log')
-#         plt.imshow(masked_data, origin='lower', cmap=cmap,norm=norm)
-#         plt.colorbar()
-#         plt.title('Generated PSF for F444W (Saturated Core Excluded)')
-#         plt.show()
-#     return masked_data
+                                            Returns
+                                            -------
+
+                                            """
+                                            from astroquery.simbad import Simbad
+                                            # Define center coordinates and radius
+                                            coord = SkyCoord(ra=center_ra_deg, dec=center_dec_deg, unit=(u.deg, u.deg), frame='icrs')
+
+                                            # 1. Reset fields to default, then add all 5 filters (case-sensitive)
+                                            Simbad.reset_votable_fields()
+                                            Simbad.add_votable_fields('flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)')
+
+                                            # Execute the cone search
+                                            simbad_table = Simbad.query_region(coord, radius=radius_deg * u.deg)
+                                            simbad_table = simbad_table[simbad_table['FLUX_K']>0]
+
+                                            # Only use this if your columns are returned as strings (hms/dms)
+                                            if np.any([isinstance(simbad_table['RA'][0], str),isinstance(simbad_table['DEC'][0], str)]):
+                                                coords = SkyCoord(simbad_table['RA'], simbad_table['DEC'],
+                                                                  unit=(u.hourangle, u.deg))
+                                                simbad_table['RA'] = coords.ra.deg
+                                                simbad_table['DEC'] = coords.dec.deg
+
+                                            simbad_table.write(path2table, format="csv", overwrite=True)
+
+
+
+                            if isinstance(npix, int):
+                                npix = [npix, npix, npix, npix]  # left, right, bottom, top
+                            else:
+                                npix = npix
+
+                            data = np.asarray(image)
+                            if data.ndim == 3:
+                                data = data[0, :, :]
+                            if data.ndim == 2:
+                                pass
+                            else:
+                                raise ValueError(f"image must be a 3D or 2D, got shape {data.shape}")
+
+                            cel_wcs = WCS(header, naxis=2).celestial
+                            ny, nx = data.shape
+                            x_center = nx // 2.0
+                            y_center = ny // 2.0
+
+                            center_ra_deg, center_dec_deg = cel_wcs.all_pix2world(x_center, y_center, 0)
+                            pix_scales = np.sqrt(header['PIXAR_A2'])
+                            fov_x_deg = float(nx * pix_scales) / 3600
+                            fov_y_deg = float(ny * pix_scales) / 3600
+                            radius_deg = 0.5 * float(np.hypot(fov_x_deg, fov_y_deg))
+
+                            if use_gaia:
+                                query_gaia(path2table, center_ra_deg, center_dec_deg, radius_deg)
+                            elif use_simbad:
+                                query_simbad(path2table, center_ra_deg, center_dec_deg, radius_deg)
+                            else:
+                                log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
+                                return Table()
+
+                            # fetch tabes...
+                            table = Table.read(path2table)
+
+                            # Add detector pixel coordinates from catalog sky coordinates.
+                            ra_col = "ra" if "ra" in table.colnames else ("RA" if "RA" in table.colnames else None)
+                            dec_col = "dec" if "dec" in table.colnames else ("DEC" if "DEC" in table.colnames else None)
+                            if ra_col is None or dec_col is None:
+                                log.warning("Gaia table does not include ra/dec columns; returning sky-only table.")
+                                return table
+
+                            ra_arr = np.asarray(np.ma.filled(np.ma.asarray(table[ra_col]), np.nan), dtype=float)
+                            dec_arr = np.asarray(np.ma.filled(np.ma.asarray(table[dec_col]), np.nan), dtype=float)
+                            x, y = cel_wcs.all_world2pix(ra_arr, dec_arr, 0)
+                            table["x"] = np.asarray(x, dtype=float)
+                            table["y"] = np.asarray(y, dtype=float)
+                            table['method'] = np.asarray(['catalog'] * len(table), dtype=str)
+
+                            mask = (
+                                    (table["x"] >= npix[0] + border)
+                                    & (table["x"] <= nx - (npix[1] + border))
+                                    & (table["y"] >= npix[2] + border)
+                                    & (table["y"] <= ny - (npix[3] + border))
+                            )
+                            table_selected = table[mask]
+                            table_selected.write(path2table, format="csv", overwrite=True)
+                            return table_selected
+
 
 def estimate_bkg_and_rms(data,mask,n=15):
     """Estimate background median and RMS from cutout border pixels.
@@ -1346,117 +1416,88 @@ class DAO():
 
         # --- select one representative per group ---
         selected = []
+        seen_catalog_ids = set()  # Prevent cross-group duplicate entries of the same star
+
         for indices in groups.values():
             group_cands = [candidates[i] for i in indices]
-            # If a group contains both DAO and catalog members, keep all catalog
-            # members and discard all DAO members. Catalog-only groups are
-            # ignored (no DAO group to replace).
+
             catalog_member_indices = [k for k, c in enumerate(group_cands)
                                       if c.get("method") == "catalog"]
             not_catalog_member_indices = [k for k, c in enumerate(group_cands)
-                                      if c.get("method") != "catalog"]
+                                          if c.get("method") != "catalog"]
+
+            # --- 1. PRIORITIZE CATALOG MEMBERS FIRST ---
             if catalog_member_indices:
+                # Sort catalog indices by peak brightness (brightest first)
+                catalog_member_indices.sort(key=lambda k: float(group_cands[k].get("peak", -np.inf)), reverse=True)
+
+                catalog_winner_found = False
                 for k in catalog_member_indices:
                     candidate = dict(group_cands[k])
-                    cx, cy = float(candidate["x"]), float(candidate["y"])
-                    if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr-self.npix[1] or cy > ny_arr-self.npix[3]:
+
+                    # Deduplication check
+                    obj_id = candidate.get("id") or candidate.get(
+                        "source_id") or f"{candidate['x']:.2f}_{candidate['y']:.2f}"
+                    if obj_id in seen_catalog_ids:
                         continue
-                    half = int(max(15, self.group_radius))
-                    xlo = max(0, int(round(cx)) - half)
-                    xhi = min(nx_arr, int(round(cx)) + half + 1)
-                    ylo = max(0, int(round(cy)) - half)
-                    yhi = min(ny_arr, int(round(cy)) + half + 1)
-                    local = data_arr[ylo:yhi, xlo:xhi]
-                    if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*self.nan_lim_percent):
-                        continue  # Avoid spurious large coresat estimates from mostly-NaN cutouts.
+
+                    cx, cy = float(candidate["x"]), float(candidate["y"])
+
+                    # Keep the border check to prevent out-of-bounds errors
+                    if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[
+                        3]:
+                        continue
+
+                    # NOTE: We can skip the cutout extraction and the ~np.isfinite(local)
+                    # validation check entirely! Catalog stars get an automatic pass.
+
+                    # Found the single brightest valid catalog star for this group!
                     selected.append(candidate)
-            else:
-                peaks =[]
-                d2 = []
-                for k in not_catalog_member_indices:
-                    candidate = dict(group_cands[k])
-                    cx, cy = float(candidate["x"]), float(candidate["y"])
-                    if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr-self.npix[1] or cy > ny_arr-self.npix[3]:
-                        continue
-                    half = int(max(15, self.group_radius))
-                    xlo = max(0, int(round(cx)) - half)
-                    xhi = min(nx_arr, int(round(cx)) + half + 1)
-                    ylo = max(0, int(round(cy)) - half)
-                    yhi = min(ny_arr, int(round(cy)) + half + 1)
-                    local = data_arr[ylo:yhi, xlo:xhi]
-                    if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0]*local.shape[1]*self.nan_lim_percent):
-                        continue  # Avoid spurious large coresat estimates from mostly-NaN cutouts.
-                    elif np.any(~np.isfinite(local)):
-                        sat_flag=True
-                        # Saturated group: estimate the NaN-core centroid on a group-wide
-                        # cutout and use that as the representative source position.
-                        sr, xcore, ycore = estimate_nan_core(local, margin=1)
-                        peaks.append([float(candidate.get("peak", 0.0))])
-                        d2.append([(cx - (xcore + xlo)) ** 2 + (cy - (ycore + ylo)) ** 2])
-                    else:
-                        sat_flag=False
-                        # Unsaturated group: use a group-wide PSF matched-filter peak to
-                        # avoid keeping a bright wing knot as the representative.
-                        peaks.append([float(candidate.get("peak", 0.0))])
-                        try:
-                            masked_psf_data = downsample_psf_to_detector(psf, self.oversampling)
-                            masked_psf_data = np.asarray(masked_psf_data, dtype=float)
-                            psf_sum = np.nansum(masked_psf_data)
-                            if np.isfinite(psf_sum) and psf_sum > 0:
-                                masked_psf_data = masked_psf_data / psf_sum
-                                img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
-                                corr = fftconvolve(img, masked_psf_data[::-1, ::-1], mode="same")
-                                iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
-                                d2.append([(cx - (float(ix) + xlo)) ** 2 + (cy - (float(iy) + ylo)) ** 2])
-                        except Exception:
-                            continue
+                    seen_catalog_ids.add(obj_id)
+                    catalog_winner_found = True
+                    break  # Stop checking other catalog stars in this group
 
-                peaks = np.array(peaks)
-                if len(peaks)==0:
-                    # All candidates have been dropped.
+                if catalog_winner_found:
+                    continue  # Successfully processed this group. Skip the DAO fallback completely.
+
+                # If all catalog stars in this group failed the NaN limit/border cuts,
+                # the code naturally falls through to the 'else' block below to evaluate the DAO detections instead.
+
+            # --- 2. FALLBACK TO DAO MEMBERS (OR IF CATALOGS FAILED QUALITY CUTS) ---
+            # We change this 'else:' to a flat block since catalog success triggers 'continue'
+            peaks = []
+            d2 = []
+            valid_not_catalog_indices = []
+
+            for k in not_catalog_member_indices:
+                candidate = dict(group_cands[k])
+                cx, cy = float(candidate["x"]), float(candidate["y"])
+                if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[3]:
                     continue
+                half = int(max(15, self.group_radius))
+                xlo = max(0, int(round(cx)) - half)
+                xhi = min(nx_arr, int(round(cx)) + half + 1)
+                ylo = max(0, int(round(cy)) - half)
+                yhi = min(ny_arr, int(round(cy)) + half + 1)
+                local = data_arr[ylo:yhi, xlo:xhi]
+                if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0] * local.shape[1] * self.nan_lim_percent):
+                    continue  # Avoid spurious large coresat estimates from mostly-NaN cutouts.
 
-                # Use the nearest DAO detection only to inherit metadata,
-                # but move the representative coordinates onto the NaN core.
-                if len(d2)>0:
-                    best_idx = int(np.lexsort((-peaks, d2))[0])
+                # Track indices that actually survived the initial border and NaN filters
+                valid_not_catalog_indices.append(k)
+
+                if np.any(~np.isfinite(local)):
+                    sat_flag = True
+                    # Saturated group: estimate the NaN-core centroid on a group-wide
+                    # cutout and use that as the representative source position.
+                    sr, xcore, ycore = estimate_nan_core(local, margin=1)
+                    peaks.append(float(candidate.get("peak", 0.0)))  # Flat float to prevent indexing quirks later
+                    d2.append((cx - (xcore + xlo)) ** 2 + (cy - (ycore + ylo)) ** 2)
                 else:
-                    best_idx = int(np.argmax(peaks))
-                best = dict(group_cands[best_idx])
-
-                # Use the measured wing spread to enlarge the local window used for
-                # the final centroid/core-radius refinement.
-                xg = np.array([float(c["x"]) for c in group_cands], dtype=float)
-                yg = np.array([float(c["y"]) for c in group_cands], dtype=float)
-                refx, refy = float(best["x"]), float(best["y"])
-                eff_group_radius = self._effective_radius(xg, yg, refx, refy, self.group_radius)
-
-                # Populate coresat for saturated representatives.
-                if sat_flag :
-                    cx, cy = float(best["x"]), float(best["y"])
-                    half = int(max(15, eff_group_radius))
-                    xlo = max(0, int(round(cx)) - half)
-                    xhi = min(nx_arr, int(round(cx)) + half + 1)
-                    ylo = max(0, int(round(cy)) - half)
-                    yhi = min(ny_arr, int(round(cy)) + half + 1)
-                    local = data_arr[ylo:yhi, xlo:xhi]
-                    if np.any(~np.isfinite(local)):
-                        sr, xcore, ycore = estimate_nan_core(
-                            local, center=(cx - xlo, cy - ylo), margin=1
-                        )
-                        best["x"] = float(xcore + xlo)
-                        best["y"] = float(ycore + ylo)
-                        if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or best["y"] > ny_arr - self.npix[3]:
-                            continue
-                else:
-                    # For unsaturated groups, place the representative on the local
-                    # PSF-correlation peak if it was measured above.
-                    half = int(max(8, eff_group_radius))
-                    xlo = max(0, int(np.floor(np.min(xg))) - half)
-                    xhi = min(nx_arr, int(np.ceil(np.max(xg))) + half + 1)
-                    ylo = max(0, int(np.floor(np.min(yg))) - half)
-                    yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
-                    local = data_arr[ylo:yhi, xlo:xhi]
+                    sat_flag = False
+                    # Unsaturated group: use a group-wide PSF matched-filter peak to
+                    # avoid keeping a bright wing knot as the representative.
+                    peaks.append(float(candidate.get("peak", 0.0)))
                     try:
                         masked_psf_data = downsample_psf_to_detector(psf, self.oversampling)
                         masked_psf_data = np.asarray(masked_psf_data, dtype=float)
@@ -1466,14 +1507,81 @@ class DAO():
                             img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
                             corr = fftconvolve(img, masked_psf_data[::-1, ::-1], mode="same")
                             iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
-                            best["x"] = float(ix + xlo)
-                            best["y"] = float(iy + ylo)
-                            if best["x"]  < self.npix[0] or best["y"]  < self.npix[2] or best["x"]  > nx_arr - self.npix[1] or best["y"]  > ny_arr - self.npix[3]:
-                                continue
+                            d2.append((cx - (float(ix) + xlo)) ** 2 + (cy - (float(iy) + ylo)) ** 2)
                     except Exception:
+                        # If cross-correlation fails, match array length by stripping this index back out
+                        valid_not_catalog_indices.pop()
+                        peaks.pop()
                         continue
 
-                selected.append(best)
+            peaks = np.array(peaks)
+            if len(peaks) == 0:
+                # All candidates have been dropped.
+                continue
+
+            # --- 3. RE-ALIGNED DAO REFINEMENT PIPELINE ---
+            if len(d2) > 0:
+                # lexsort sorts by d2 ascending, then by peaks descending (due to minus sign)
+                best_sub_idx = int(np.lexsort((d2, -peaks))[0])
+            else:
+                best_sub_idx = int(np.argmax(peaks))
+
+            # Map the inner sub-index loop choice cleanly back to the true group candidate index
+            best_idx = valid_not_catalog_indices[best_sub_idx]
+            best = dict(group_cands[best_idx])
+
+            # Use the measured wing spread to enlarge the local window used for
+            # the final centroid/core-radius refinement.
+            xg = np.array([float(c["x"]) for c in group_cands], dtype=float)
+            yg = np.array([float(c["y"]) for c in group_cands], dtype=float)
+            refx, refy = float(best["x"]), float(best["y"])
+            eff_group_radius = self._effective_radius(xg, yg, refx, refy, self.group_radius)
+
+            # Populate coresat for saturated representatives.
+            if sat_flag:
+                cx, cy = float(best["x"]), float(best["y"])
+                half = int(max(15, eff_group_radius))
+                xlo = max(0, int(round(cx)) - half)
+                xhi = min(nx_arr, int(round(cx)) + half + 1)
+                ylo = max(0, int(round(cy)) - half)
+                yhi = min(ny_arr, int(round(cy)) + half + 1)
+                local = data_arr[ylo:yhi, xlo:xhi]
+                if np.any(~np.isfinite(local)):
+                    sr, xcore, ycore = estimate_nan_core(
+                        local, center=(cx - xlo, cy - ylo), margin=1
+                    )
+                    best["x"] = float(xcore + xlo)
+                    best["y"] = float(ycore + ylo)
+                    if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or \
+                            best["y"] > ny_arr - self.npix[3]:
+                        continue
+            else:
+                # For unsaturated groups, place the representative on the local
+                # PSF-correlation peak if it was measured above.
+                half = int(max(8, eff_group_radius))
+                xlo = max(0, int(np.floor(np.min(xg))) - half)
+                xhi = min(nx_arr, int(np.ceil(np.max(xg))) + half + 1)
+                ylo = max(0, int(np.floor(np.min(yg))) - half)
+                yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
+                local = data_arr[ylo:yhi, xlo:xhi]
+                try:
+                    masked_psf_data = downsample_psf_to_detector(psf, self.oversampling)
+                    masked_psf_data = np.asarray(masked_psf_data, dtype=float)
+                    psf_sum = np.nansum(masked_psf_data)
+                    if np.isfinite(psf_sum) and psf_sum > 0:
+                        masked_psf_data = masked_psf_data / psf_sum
+                        img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
+                        corr = fftconvolve(img, masked_psf_data[::-1, ::-1], mode="same")
+                        iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
+                        best["x"] = float(ix + xlo)
+                        best["y"] = float(iy + ylo)
+                        if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or \
+                                best["y"] > ny_arr - self.npix[3]:
+                            continue
+                except Exception:
+                    continue
+
+            selected.append(best)
 
         log.info(f"Using {np.sum([i['method']=='catalog' for i in selected])} catalog seeds + {np.sum([i['method']!='catalog' for i in selected])} DAO detections after selections.")
         tbl = Table(rows=selected)
