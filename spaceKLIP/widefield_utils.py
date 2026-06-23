@@ -16,7 +16,7 @@ from photutils.background import Background2D, MedianBackground
 from scipy.ndimage import binary_dilation
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-import time
+import requests
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -169,12 +169,23 @@ def fetch_catalog_for_image_fov(path2table,
 
                                             # 1. Reset fields to default, then add your existing filters plus M, W2, and I2
                                             Simbad.reset_votable_fields()
-                                            Simbad.add_votable_fields(
-                                                'flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)'
-                                            )
+                                            Simbad.add_votable_fields('flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)')
+                                            try:
+                                                # Execute the cone search
+                                                simbad_table = Simbad.query_region(coord, radius=radius_deg * u.deg)
+                                            except requests.exceptions.ConnectionError:
+                                                log.warning("SIMBAD aborted the reused socket. Resetting connection pool...")
 
-                                            # Execute the cone search
-                                            simbad_table = Simbad.query_region(coord, radius=radius_deg * u.deg)
+                                                # Close the broken session cleanly
+                                                Simbad._session.close()
+
+                                                # Re-initialize a fresh, clean session object
+                                                Simbad._session = requests.Session()
+
+                                                # Retry the query on the fresh connection
+                                                Simbad.reset_votable_fields()
+                                                Simbad.add_votable_fields('flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)')
+                                                simbad_table = Simbad.query_region(coord, radius=radius_deg * u.deg)
 
                                             # Filter for sources that have at least one valid (positive/non-NaN) Filter
                                             # Note: SIMBAD uses NaN for missing flux values in Astroquery
@@ -190,7 +201,6 @@ def fetch_catalog_for_image_fov(path2table,
                                                 simbad_table['DEC'] = coords.dec.deg
 
                                             simbad_table.write(path2table, format="csv", overwrite=True)
-
 
 
                             if isinstance(npix, int):
@@ -221,7 +231,6 @@ def fetch_catalog_for_image_fov(path2table,
                                 query_gaia(path2table, center_ra_deg, center_dec_deg, radius_deg, use_allwise=use_allwise)
                             elif use_simbad:
                                 query_simbad(path2table, center_ra_deg, center_dec_deg, radius_deg)
-                                time.sleep(0.5)  # To avoid hitting Simbad rate limits
                             else:
                                 log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
                                 return Table()
@@ -684,231 +693,6 @@ def sextractor_flag_short(flag: int) -> str:
         return "neighbor"
     return "flagged"
 
-
-# def aperture_flag_short(ap_flag: int) -> str:
-#     """Return a short description for SEP aperture-photometry flags.
-#
-#     Parameters
-#     ----------
-#     ap_flag : int
-#         Bitmask flag returned by ``sep.sum_circle`` (or similar).
-#
-#     Returns
-#     -------
-#     str
-#         One-word summary (e.g. ``'ok'``, ``'truncated'``, ``'maskedpixels'``).
-#
-#     Notes
-#     -----
-#     This routine decodes a bitmask and returns the highest-priority label.
-#
-#     """
-#     f = int(ap_flag)
-#     if f == 0:
-#         return "ok"
-#     if f & getattr(sep, "APER_ALLMASKED", 64):
-#         return "allmasked"
-#     if f & getattr(sep, "APER_TRUNC", 16):
-#         return "truncated"
-#     if f & getattr(sep, "APER_NONPOSITIVE", 128):
-#         return "nonpositive"
-#     if f & getattr(sep, "APER_HASMASKED", 32):
-#         return "maskedpixels"
-#     return "flagged"
-
-
-# def _as_fixed_str_array(values: list[str], *, width: int = 64) -> np.ndarray:
-#     """Return a fixed-width unicode array for safe insertion into Astropy tables.
-#
-#     Parameters
-#     ----------
-#     values : list of str
-#         Input strings.
-#     width : int, optional
-#         Fixed string width (characters).
-#
-#     Returns
-#     -------
-#     numpy.ndarray
-#         Unicode array with dtype ``U<width>``.
-#
-#     """
-#     if width <= 0:
-#         width = 1
-#     return np.asarray(values, dtype=f"U{int(width)}")
-
-# def select_table(
-#     objects_tbl: Table,
-#     separation_pix = None,
-#     center: Literal["centroid", "peak"] = "peak",
-#     peak_col: str = "peak",
-#     ap_snr: float | None= None,
-#     maxrat: float | None = None,
-#     flag_sel: list[int] | None = None,
-#     ap_flag_sel: list[int] | None = None,
-#     window_shape: Literal["circle", "square"] = "circle",
-# ) -> Table:
-#     """Select detections using filters + non-maximum suppression.
-#
-#     Parameters
-#     ----------
-#     objects_tbl : astropy.table.Table
-#         SEP detections table.
-#     separation_pix : float, optional
-#         If provided, keep only the brightest detection within this radius.
-#     center : {'centroid', 'peak'}, optional
-#         Coordinates used for the separation check.
-#     peak_col : str, optional
-#         Column used to rank detections (default: ``'peak'``).
-#     ap_snr : float, optional
-#         If provided, apply an SNR cut (uses ``'peak_snr'`` if ``peak_col='peak'``
-#         else uses ``'ap_snr'``).
-#     maxrat : float, optional
-#         If provided, remove elongated detections using the ``'ellipt'`` column.
-#     flag_sel : list of int, optional
-#         Keep only rows whose SEP detection flag (``'flag'``) is exactly in this list.
-#     ap_flag_sel : list of int, optional
-#         Keep only rows whose aperture flag (``'ap_flag'``) is exactly in this list.
-#     window_shape : {'circle', 'square'}, optional
-#         Neighborhood shape for the separation check.
-#
-#     Returns
-#     -------
-#     astropy.table.Table
-#         Filtered table with a ``'id'`` column added.
-#
-#     Notes
-#     -----
-#     SEP coordinates are 0-indexed numpy pixel coordinates.
-#
-#     """
-#     # Work on a copy: this function is a selector and should not mutate inputs.
-#     objects_tbl = objects_tbl.copy()
-#
-#     # Remove objects that are too elongated to be astrophysical.
-#     if maxrat is not None:
-#         if "ellipt" not in objects_tbl.colnames:
-#             raise ValueError("objects_tbl is missing required column 'ellipt' for maxrat filtering")
-#         objects_tbl = objects_tbl[np.asarray(objects_tbl["ellipt"], dtype=float) <= float(maxrat)].copy()
-#
-#     # Remove objects with SNR lower than ap_snr.
-#     if ap_snr is not None:
-#         # If the user is ranking by peak, apply the SNR cut to the peak too.
-#         snr_col = "peak_snr" if peak_col == "peak" else "ap_snr"
-#         if snr_col not in objects_tbl.colnames:
-#             raise ValueError(f"objects_tbl is missing required column '{snr_col}' for snr filtering")
-#         objects_tbl = objects_tbl[np.asarray(objects_tbl[snr_col], dtype=float) >= float(ap_snr)].copy()
-#
-#     # Filter by SEP detection flags (SExtractor-style bitmask stored as an int).
-#     # NOTE: As requested, this is an *exact match* on the integer value.
-#     if flag_sel is not None:
-#         if "flag" not in objects_tbl.colnames:
-#             raise ValueError("flag_sel was provided but objects_tbl has no 'flag' column")
-#         good = np.isin(np.asarray(objects_tbl["flag"], dtype=int), np.asarray(flag_sel, dtype=int))
-#         objects_tbl = objects_tbl[good].copy()
-#
-#     # Filter by SEP aperture-photometry flags (returned by sep.sum_circle).
-#     # NOTE: As requested, this is an *exact match* on the integer value.
-#     if ap_flag_sel is not None:
-#         if "ap_flag" not in objects_tbl.colnames:
-#             raise ValueError("ap_flag_sel was provided but objects_tbl has no 'ap_flag' column")
-#         good = np.isin(np.asarray(objects_tbl["ap_flag"], dtype=int), np.asarray(ap_flag_sel, dtype=int))
-#         objects_tbl = objects_tbl[good].copy()
-#
-#     if separation_pix is None or separation_pix <= 0:
-#         objects_tbl["id"] = np.arange(len(objects_tbl), dtype=int)
-#         return objects_tbl.copy()
-#
-#     # After filtering, we may end up with an empty table; short-circuit.
-#     if len(objects_tbl) == 0:
-#         objects_tbl["id"] = np.arange(0, dtype=int)
-#         return objects_tbl.copy()
-#
-#     if center not in ("centroid", "peak"):
-#         raise ValueError("center must be 'centroid' or 'peak'")
-#
-#     if peak_col not in objects_tbl.colnames:
-#         raise ValueError(
-#             f"peak_col='{peak_col}' not in table columns. Available: {', '.join(objects_tbl.colnames)}"
-#         )
-#
-#     if center == "peak":
-#         req = {"xpeak", "ypeak"}
-#         xcol, ycol = "xpeak", "ypeak"
-#     else:
-#         req = {"x", "y"}
-#         xcol, ycol = "x", "y"
-#
-#     missing = req.difference(objects_tbl.colnames)
-#     if missing:
-#         raise ValueError(
-#             f"objects_tbl missing required columns for center='{center}': {', '.join(sorted(missing))}"
-#         )
-#
-#     if separation_pix is not None:
-#         # Coordinates in SEP are 0-indexed; the relative distances are the same in DS9.
-#         x = np.asarray(objects_tbl[xcol], dtype=float)
-#         y = np.asarray(objects_tbl[ycol], dtype=float)
-#         coords = np.column_stack([x, y])
-#
-#         peaks = np.asarray(objects_tbl[peak_col], dtype=float)
-#         # Highest peak first; stable tie-breaker by index (lower index first).
-#         order = np.lexsort((np.arange(len(peaks)), -peaks))
-#
-#         if window_shape not in ("circle", "square"):
-#             raise ValueError("window_shape must be 'circle' or 'square'")
-#
-#         sepv = float(separation_pix)
-#         # A square of side (2*separation_pix + 1) has half-width separation_pix + 0.5.
-#         sep_eff = (sepv + 0.5) if window_shape == "square" else sepv
-#
-#         suppressed = np.zeros(len(objects_tbl), dtype=bool)
-#         keep: list[int] = []
-#         # Prefer scipy KDTree if available (fast for large catalogs), otherwise fallback.
-#         try:
-#             from scipy.spatial import cKDTree  # type: ignore
-#
-#             tree = cKDTree(coords)
-#             for idx in order:
-#                 if suppressed[idx]:
-#                     continue
-#                 keep.append(int(idx))
-#                 if window_shape == "square":
-#                     # Chebyshev (L-infinity) neighborhood => axis-aligned square.
-#                     neighbors = cast(
-#                         list[int],
-#                         tree.query_ball_point(coords[idx], r=float(sep_eff), p=np.inf),
-#                     )
-#                 else:
-#                     neighbors = cast(list[int], tree.query_ball_point(coords[idx], r=float(sep_eff)))
-#                 for j in neighbors:
-#                     suppressed[int(j)] = True
-#                 suppressed[idx] = False
-#         except Exception:
-#             for idx in order:
-#                 if suppressed[idx]:
-#                     continue
-#                 keep.append(int(idx))
-#                 dx = coords[:, 0] - coords[idx, 0]
-#                 dy = coords[:, 1] - coords[idx, 1]
-#                 if window_shape == "square":
-#                     mask = (np.abs(dx) <= sep_eff) & (np.abs(dy) <= sep_eff)
-#                 else:
-#                     mask = (dx * dx + dy * dy) <= (sepv * sepv)
-#                 suppressed[mask] = True
-#                 suppressed[idx] = False
-#
-#         # Return in original order for easier cross-referencing.
-#         keep_sorted = np.sort(np.asarray(keep, dtype=int))
-#         sel_objects_tbl=objects_tbl[keep_sorted].copy()
-#         sel_objects_tbl["id"] = np.arange(len(sel_objects_tbl), dtype=int)
-#         return sel_objects_tbl
-#     else:
-#         objects_tbl["id"] = np.arange(len(objects_tbl), dtype=int)
-#         return objects_tbl.copy()
-
-
-
 def write_ds9_regions_from_sep_objects(
     objects_tbl: Table,
     output_path: str | Path,
@@ -992,6 +776,41 @@ def write_ds9_regions_from_sep_objects(
 
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
     return out
+
+
+def extract_image_centers(hdul_list):
+    """Reads headers of all matching FITS files and extracts center coordinates."""
+    ra_centers = []
+    dec_centers = []
+
+    if not file_paths:
+        raise FileNotFoundError(f"No FITS files found in {fits_directory}")
+
+    for hdul in hdul_list:
+        # 1. Parse the World Coordinate System from the primary or image header
+        # Note: spaceKLIP / JWST data might store this in extension 1 ('SCI')
+        header = hdul[0].header if 'NAXIS' in hdul[0].header else hdul[1].header
+        wcs = WCS(header)
+
+        # 2. Find the pixel dimensions of the detector array
+        naxis1 = header.get('NAXIS1', 0)
+        naxis2 = header.get('NAXIS2', 0)
+
+        if naxis1 == 0 or naxis2 == 0:
+            continue  # Skip files without explicit spatial footprints
+
+        # 3. Compute the exact pixel center of this frame
+        center_x = naxis1 / 2.0
+        center_y = naxis2 / 2.0
+
+        # 4. Transform pixel center to world coordinate (SkyCoord)
+        center_sky = wcs.pixel_to_world(center_x, center_y)
+
+        ra_centers.append(center_sky.ra.deg)
+        dec_centers.append(center_sky.dec.deg)
+
+    # 5. Compile everything into a single vectorized SkyCoord Array
+    return SkyCoord(ra=ra_centers, dec=dec_centers, unit=(u.deg, u.deg))
 
 class DAO():
     """
