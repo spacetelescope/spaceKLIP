@@ -77,39 +77,39 @@ class MCMCTools:
         # self.database = database
         self.crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
         self.crpix2 = (data.shape[-2] - 1.) / 2. + 1  # (data.shape[-2]) // 2. + 1.  # 1-indexed
-        if 'rotate' not in kwargs.keys():
+        if 'rotate' not in kwargs:
             self.rotate = False
         else:
             self.rotate = kwargs['rotate']
-        if 'r' in kwargs.keys():
+        if 'r' in kwargs:
             self.r = kwargs['r']
         else:
             self.r = 0
-        if 'nsteps' in kwargs.keys():
+        if 'nsteps' in kwargs:
             self.nsteps = kwargs['nsteps']
         else:
             self.nsteps = 5000
-        if 'nwalkers' in kwargs.keys():
+        if 'nwalkers' in kwargs:
             self.nwalkers = kwargs['nwalkers']
         else:
             self.nwalkers = 30
-        if 'verbose' in kwargs.keys():
+        if 'verbose' in kwargs:
             self.verbose = kwargs['verbose']
         else:
             self.verbose = False        
-        if 'center_masked' in kwargs.keys():
+        if 'center_masked' in kwargs:
             self.center_masked = kwargs['center_masked']
         else:
             self.center_masked = False
-        if 'size' in kwargs.keys():
+        if 'size' in kwargs:
             self.size = kwargs['size'] + 1 if kwargs['size'] % 2 == 0 else kwargs['size']
         else:
             self.size = 31
-        if 'oversample' in kwargs.keys():
+        if 'oversample' in kwargs:
             self.oversample = kwargs['oversample']
         else:
             self.oversample = 1
-        if 'x_guess' in kwargs.keys() and 'y_guess' in kwargs.keys():
+        if 'x_guess' in kwargs and 'y_guess' in kwargs:
             self.x_guess = kwargs['x_guess']
             self.y_guess = kwargs['y_guess']
         else:
@@ -121,56 +121,56 @@ class MCMCTools:
                 self.max_index = np.where(data == self.max_value)
             self.x_guess = self.max_index[1][0]
             self.y_guess = self.max_index[0][0]
-        if 'flux_guess' in kwargs.keys():
+        if 'flux_guess' in kwargs:
             self.flux_guess = kwargs['flux_guess']
         else:
             self.flux_guess = np.nanmax(data)
-        if 'contrast_guess' in kwargs.keys():
+        if 'contrast_guess' in kwargs:
             self.contrast_guess = kwargs['contrast_guess']
         else:
             self.contrast_guess = 1e-1
-        if 'sep_guess' in kwargs.keys():
+        if 'sep_guess' in kwargs:
             self.sep_guess = kwargs['sep_guess']
         else:
             self.sep_guess = 1
-        if 'theta_guess' in kwargs.keys():
+        if 'theta_guess' in kwargs:
             self.theta_guess = kwargs['theta_guess']
         else:
             self.theta_guess = 0
-        if 'psi_guess' in kwargs.keys():
+        if 'psi_guess' in kwargs:
             self.psi_guess = kwargs['psi_guess']
         else:
             self.psi_guess = 0
-        if 'x_limits' in kwargs.keys():
+        if 'x_limits' in kwargs:
             self.dx_limits = [-kwargs['x_limits'], kwargs['x_limits']]
         else:
             self.dx_limits = [- 5, + 5]
-        if 'y_limits' in kwargs.keys():
+        if 'y_limits' in kwargs:
             self.dy_limits = [-kwargs['y_limits'], kwargs['y_limits']]
         else:
             self.dy_limits = [- 5, + 5]
-        if 'flux_limits' in kwargs.keys():
+        if 'flux_limits' in kwargs:
             self.flux_limits = [self.flux_guess * 10 ** (-kwargs['flux_limits']),
                            self.flux_guess * 10 ** (kwargs['flux_limits'])]
         else:
             self.flux_limits = [self.flux_guess * 1e-1, self.flux_guess * 1e1]
-        if 'contrast_limits' in kwargs.keys():
+        if 'contrast_limits' in kwargs:
             self.contrast_limits = [kwargs['contrast_limits'][0], kwargs['contrast_limits'][1]]
         else:
             self.contrast_limits = [self.contrast_guess * 1e-1, self.contrast_guess * 1e1] # if self.contrast_guess * 1e1 <= 1 else 1]
-        if 'sep_limits' in kwargs.keys():
+        if 'sep_limits' in kwargs:
             self.sep_limits = kwargs['sep_limits']
         else:
             self.sep_limits = [1, 10]
-        if 'theta_limits' in kwargs.keys():
+        if 'theta_limits' in kwargs:
             self.theta_limits = kwargs['theta_limits']
         else:
             self.theta_limits = [0, 360]
-        if 'psi_limits' in kwargs.keys():
+        if 'psi_limits' in kwargs:
             self.psi_limits = kwargs['psi_limits']
         else:
             self.psi_limits = [0, 360]
-        if 'binarity' not in kwargs.keys() or kwargs['binarity']:
+        if 'binarity' not in kwargs or kwargs['binarity']:
             if type is not None:
                 if type == 'SCI':# and kwargs['binarity']:
                     self.binarity = True
@@ -202,19 +202,23 @@ class MCMCTools:
             else:
                 self.initial_guess = [0, 0, self.flux_guess]  # x, y, flux
                 self.limits = [self.dx_limits, self.dy_limits, self.flux_limits]  # x, y, flux
-        if 'debug' in kwargs.keys():
+        if 'debug' in kwargs:
             self.debug = kwargs['debug']
         else:
             self.debug = False
-        if 'burnin' in kwargs.keys():
+        if 'burnin' in kwargs:
             self.burnin = kwargs['burnin']
         else:
             self.burnin = None
-        if 'thin' in kwargs.keys():
+        if 'thin' in kwargs:
             self.thin = kwargs['thin']
         else:
             self.thin = None
-        if 'save_figures' in kwargs.keys():
+        if 'moves' in kwargs:
+            self.moves = kwargs['moves']
+        else:
+            self.moves = emcee.moves.StretchMove()
+        if 'save_figures' in kwargs:
             self.save_figures = kwargs['save_figures']
         else:
             self.save_figures = True
@@ -567,9 +571,8 @@ class MCMCTools:
         # Add a small random offset to the initial guess to initialize walkers
         pos = initial_guess + 1e-4 * np.random.randn(nwalkers, ndim)
 
-        # moves = [(emcee.moves.DEMove(), 0.7), (emcee.moves.DESnookerMove(), 0.3), ]
         # Create the MCMC sampler object
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=(data_masked, psf_masked, limits, centers, binarity, rotate, r)) #, moves=moves,
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=(data_masked, psf_masked, limits, centers, binarity, rotate, r), moves=self.moves)
         # Run the MCMC sampler for a number of steps
 
         sampler.run_mcmc(pos, nsteps+self.burnin if self.burnin is not None else nsteps, progress=verbose)
