@@ -401,7 +401,10 @@ def fit_psf(
 
     # Robust background subtraction is critical at low S/N.
     # try:
-    bkg, rms = estimate_bkg_and_rms(data)
+    struct_element = np.ones((3, 3), dtype=bool)
+    dilated_mask = binary_dilation(nanmask.astype(bool), structure=struct_element)
+
+    bkg, rms = estimate_bkg_and_rms(data, mask=dilated_mask)
     # except:
     #     log.warning("Robust background estimation failed; proceeding basic background estimation.")
     #     bkg = np.nanmedian(data)
