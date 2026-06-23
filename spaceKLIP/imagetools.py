@@ -3978,28 +3978,12 @@ class ImageTools():
                                                                                   showplots=False)
 
                             else:
-                                if 'r' not in kwargs.keys():
+                                if 'r' not in kwargs:
                                    kwargs['r'] = coresat
                                    if coresat > 0:
                                        kwargs['center_masked'] = True
                                    else:
                                        kwargs['center_masked'] = False
-                                if 'size' not in kwargs.keys():
-                                       kwargs['size'] = 31
-                                if 'x_guess' not in kwargs.keys():
-                                   kwargs['x_guess'] = tile.shape[1]//2
-                                if 'y_guess' not in kwargs.keys():
-                                    kwargs['y_guess'] = tile.shape[0]//2
-                                if 'binarity' not in kwargs.keys():
-                                    kwargs['binarity'] = False
-                                if 'verbose' not in kwargs.keys():
-                                    kwargs['verbose'] = True
-                                if 'nsteps' not in kwargs.keys():
-                                    kwargs['nsteps'] = 1000
-                                if 'x_limits' not in kwargs.keys():
-                                    kwargs['x_limits'] = 2
-                                if 'y_limits' not in kwargs.keys():
-                                    kwargs['y_limits'] = 2
 
                                 MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j],
                                                                  kwargs=kwargs)
@@ -4085,8 +4069,8 @@ class ImageTools():
                                                     center_mask=center_mask, maskoffs=maskoffs,new_fitsfile=tile_fitsfile)
                             tile_fitsfile_list.append(tile_fitsfile)
                             maskfile = ut.write_msk(maskfile, mask, tile_fitsfile)
-                            nanmaskfile = ut.write_msk(nanmaskfile, nanmasktile,tile_fitsfile, '_nanmask.fits')
-                            pass
+                            # nanmaskfile = ut.write_msk(nanmaskfile, nanmasktile,tile_fitsfile, '_nanmask.fits')
+                pass
             key_tile_fitsfile_list.extend(tile_fitsfile_list)
 
         # I need to create a new database from scratch since I'm creating snapshots of stars from the original
