@@ -3745,8 +3745,7 @@ class ImageTools():
                                     psf=psf_no_coronmsk)
 
                         objects_tbl_selected = dao.dao_source_extractor(data=data[0],
-                                                                        nanmask=nanmask,
-                                                                        )
+                                                                        nanmask=nanmask)
                         objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
 
                         out = write_ds9_regions_from_sep_objects(objects_tbl_selected,
@@ -3755,8 +3754,8 @@ class ImageTools():
                                                                 circle_radius=circle_radius,
                                                                 color="green",
                                                                 )
-                        log.info(f"Wrote COMBINED DS9 region file: {out} ({len(objects_tbl_selected)} detections)")
-
+                log.info(f"Wrote COMBINED DS9 region file: {out} ({len(objects_tbl_selected)} detections)")
+                
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
                                         center_mask=center_mask, maskoffs=maskoffs)
@@ -3768,7 +3767,6 @@ class ImageTools():
                 self.database.update_obs(key, j, fitsfile, maskfile,
                                          center_shift=center_shift, center_mask=center_mask,
                                          nanmaskfile=nanmaskfile)
-
                 pass
 
     def extract_tiles(self,
@@ -3960,11 +3958,11 @@ class ImageTools():
                             x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fow=51,showplots=False)
-                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fow=51,showplots=False)
+                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fow=fov_pixels*2,showplots=False)
+                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fow=fov_pixels*2,showplots=False)
 
                             if medbkg_method is not None:
-                                pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fow=51, showplots=False)
+                                pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fow=fov_pixels*2, showplots=False)
                                 tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
 
                             coresat = source['coresat']
@@ -3985,8 +3983,13 @@ class ImageTools():
                                    else:
                                        kwargs['center_masked'] = False
 
-                                MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j],
-                                                                 kwargs=kwargs)
+                                kwargs['x_guess'] = tile.shape[1] // 2
+                                kwargs['y_guess'] = tile.shape[0] // 2
+                                kwargs['x_limits'] = coresat*2
+                                kwargs['y_limits'] = coresat*2
+                                kwargs['size'] = int(np.min([kwargs['x_guess']-kwargs['x_limits'],kwargs['y_guess']-kwargs['y_limits']]))
+
+                                MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs)
                                 if not os.path.exists(output_dir + '/mcmcfit/'):
                                     os.makedirs(output_dir + '/mcmcfit/')
 
