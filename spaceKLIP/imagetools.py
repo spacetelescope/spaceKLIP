@@ -3592,6 +3592,8 @@ class ImageTools():
                                      use_gaia=False,
                                      use_allwise=False,
                                      use_simbad=True,
+                                     sharpness_range=(0.15, 0.95),
+                                     roundness_range=(-0.7, 0.7),
                                      kwargs={},
                                      subdir='pretiles'):
         """
@@ -3632,6 +3634,10 @@ class ImageTools():
             Must be the same file structure as fitsfile, but instead of ending with  '.fits', it ends with 'cat_ext'.
             If None, the final star catalog will be generated only from the FITS file using DAOStarFinder.
             The default is None
+        sharpness_range : tuple of float, optional
+            Acceptable range of ``DAOStarFinder`` sharpness values.
+        roundness_range : tuple of float, optional
+            Acceptable range of ``DAOStarFinder`` roundness values.
         kwargs : dict, optional
             Extra configuration for the diagnostic DS9 region output.
 
@@ -3734,8 +3740,8 @@ class ImageTools():
 
                         dao = DAO(threshold=threshold,
                                     fwhm=fwhm,
-                                    sharpness_range=(0.15,0.95),
-                                    roundness_range=(-0.7,0.7),
+                                    sharpness_range=sharpness_range,
+                                    roundness_range=roundness_range,
                                     catalog=result,
                                     group_box=group_box,
                                     npix=npix,
