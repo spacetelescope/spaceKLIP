@@ -18,6 +18,7 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 import requests
 from skimage.measure import label, regionprops
+from collections import defaultdict
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -1106,7 +1107,7 @@ class DAO():
             _patch = data_arr[_ylo:_yhi, _xlo:_xhi]
             _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
             if _sr > 0:
-                if _ecc <=0.75 and _sol>=0.85:
+                if _ecc <=0.75 and _sol>=0.85 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
                     _c['x'] = _x+_xlo
                     _c['y'] = _y+_ylo
                     _c['eccsat'] = _ecc
