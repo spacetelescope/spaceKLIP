@@ -543,8 +543,7 @@ def fit_psf(
         plt.title('Data to fit with fitted center')
         plt.show()
         pass
-    if np.any(np.isnan([fitted_x_pos,fitted_y_pos])):
-        pass
+
     return fitted_x_pos,fitted_y_pos,fitted_flux
 
 def estimate_nan_core(data,
@@ -1115,7 +1114,10 @@ class DAO():
             _ylo = int(_cy) - _quick_r
             _yhi = int(_cy) + _quick_r + 1
             _patch = data_arr[_ylo:_yhi, _xlo:_xhi]
-            _sr, _, _ = estimate_nan_core(_patch, margin=1)
+            _sr, _x, _y = estimate_nan_core(_patch, margin=1)
+            if _sr >0:
+                _c['x'] = _x+_xlo
+                _c['y'] = _y+_ylo
             _c['coresat'] = _sr
             _prov_sat.append(float(_sr))
             _rmax.append(float(max(_patch.shape)))
@@ -1183,14 +1185,12 @@ class DAO():
                     cx, cy = float(candidate["x"]), float(candidate["y"])
 
                     # Keep the border check to prevent out-of-bounds errors
-                    if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[
-                        3]:
+                    if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[3]:
                         continue
 
                     # NOTE: We can skip the cutout extraction and the ~np.isfinite(local)
                     # validation check entirely! Catalog stars get an automatic pass.
 
-                    # Found the single brightest valid catalog star for this group!
                     selected.append(candidate)
                     seen_catalog_ids.add(obj_id)
                     catalog_winner_found = True
@@ -1286,13 +1286,10 @@ class DAO():
                 yhi = min(ny_arr, int(round(cy)) + half + 1)
                 local = data_arr[ylo:yhi, xlo:xhi]
                 if np.any(~np.isfinite(local)):
-                    sr, xcore, ycore = estimate_nan_core(
-                        local, center=(cx - xlo, cy - ylo), margin=1
-                    )
+                    sr, xcore, ycore = estimate_nan_core(local, center=(cx - xlo, cy - ylo), margin=1)
                     best["x"] = float(xcore + xlo)
                     best["y"] = float(ycore + ylo)
-                    if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or \
-                            best["y"] > ny_arr - self.npix[3]:
+                    if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or best["y"] > ny_arr - self.npix[3]:
                         continue
             else:
                 # For unsaturated groups, place the representative on the local
@@ -1314,8 +1311,7 @@ class DAO():
                         iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
                         best["x"] = float(ix + xlo)
                         best["y"] = float(iy + ylo)
-                        if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or \
-                                best["y"] > ny_arr - self.npix[3]:
+                        if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or best["y"] > ny_arr - self.npix[3]:
                             continue
                 except Exception:
                     continue
