@@ -3755,7 +3755,7 @@ class ImageTools():
                                                                 color="green",
                                                                 )
                 log.info(f"Wrote COMBINED DS9 region file: {out} ({len(objects_tbl_selected)} detections)")
-                
+
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
                                         center_mask=center_mask, maskoffs=maskoffs)
@@ -3966,6 +3966,8 @@ class ImageTools():
                                 tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
 
                             coresat = source['coresat']
+                            eccsat = source['ecc']
+                            solsat = source['sol']
                             log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
                             if coresat ==0 and not mcmc_for_all:
                                 fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(imaging_psf,
@@ -4063,6 +4065,8 @@ class ImageTools():
                             head_sci['CRPIX1'] = crpix1
                             head_sci['CRPIX2'] = crpix2
                             head_sci['CORESAT'] = coresat
+                            head_sci['ECCSAT'] = eccsat
+                            head_sci['SOLSAT'] = solsat
 
                             # Save fits file.
                             tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,
