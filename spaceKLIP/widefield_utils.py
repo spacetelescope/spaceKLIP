@@ -815,7 +815,7 @@ class DAO():
                 sharpness_range=(0.2, 1.0),
                 roundness_range=(-1.0, 1.0),
                 fwhm=2.5,
-                group_radius=15.0,
+                group_radius=1,
                 catalog=None,
                 nan_lim_percent=0.51,
                 two_pass=True,
@@ -1093,17 +1093,17 @@ class DAO():
         # Pre-compute a provisional NaN-core radius for every candidate so
         # that _candidate_radius can scale the grouping window correctly even
         # before the formal coresat is estimated inside _group_and_select.
-        _quick_r = max(1, int(self.group_radius))
+        # _quick_r = max(1, int(self.group_radius))
         _prov_sat = []
         _rmax = []
         _keep_mask = []
 
         for _c in candidates:
             _cx, _cy = float(_c["x"]), float(_c["y"])
-            _xlo = int(_cx) - _quick_r
-            _xhi = int(_cx) + _quick_r + 1
-            _ylo = int(_cy) - _quick_r
-            _yhi = int(_cy) + _quick_r + 1
+            _xlo = int(_cx) - 31
+            _xhi = int(_cx) + 32
+            _ylo = int(_cy) - 31
+            _yhi = int(_cy) + 32
             _patch = data_arr[_ylo:_yhi, _xlo:_xhi]
             _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
             if _sr > 0:
@@ -1127,12 +1127,8 @@ class DAO():
         candidates = candidates[_keep_mask]
         xs = np.array([c["x"] for c in candidates], dtype=float)
         ys = np.array([c["y"] for c in candidates], dtype=float)
-
+        cand_radii = np.array([max(self.group_radius,min(int(c['coresat'])*2,30)) for c in candidates])
         n=len(candidates)
-        cand_radii = np.array(
-            [self._candidate_radius(c, _quick_r, ps, np.nanmedian(_rmax)) for c, ps in zip(candidates, _prov_sat)],
-            dtype=float,
-        )
 
         # --- union-find for connected-component grouping ---
         parent = list(range(n))
