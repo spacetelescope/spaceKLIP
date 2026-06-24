@@ -170,8 +170,10 @@ def fetch_catalog_for_image_fov(path2table,
                                             coord = SkyCoord(ra=center_ra_deg, dec=center_dec_deg, unit=(u.deg, u.deg), frame='icrs')
 
                                             # 1. Reset fields to default, then add your existing filters plus M, W2, and I2
+                                            Simbad.ROW_LIMIT = -1
                                             Simbad.reset_votable_fields()
-                                            Simbad.add_votable_fields('flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)')
+                                            # Simbad.add_votable_fields('flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)','otype')
+                                            Simbad.add_votable_fields('otype')
                                             try:
                                                 # Execute the cone search
                                                 simbad_table = Simbad.query_region(coord, radius=radius_deg * u.deg)
@@ -185,15 +187,32 @@ def fetch_catalog_for_image_fov(path2table,
                                                 Simbad._session = requests.Session()
 
                                                 # Retry the query on the fresh connection
+                                                Simbad.ROW_LIMIT = -1
                                                 Simbad.reset_votable_fields()
-                                                Simbad.add_votable_fields('flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)')
+                                                # Simbad.add_votable_fields('flux(K)', 'flux(H)', 'flux(J)', 'flux(V)', 'flux(B)','otype')
+                                                Simbad.add_votable_fields('otype')
                                                 simbad_table = Simbad.query_region(coord, radius=radius_deg * u.deg)
 
                                             # Filter for sources that have at least one valid (positive/non-NaN) Filter
                                             # Note: SIMBAD uses NaN for missing flux values in Astroquery
 
-                                            has_K = ~np.isnan(simbad_table['FLUX_K'])
-                                            simbad_table = simbad_table[has_K]
+                                            # has_K = ~np.isnan(simbad_table['FLUX_K'])
+                                            # simbad_table = simbad_table[has_K]
+                                            all_stellar_otypes = [
+                                                '*', 'MS*', 'sg*', 'gs*', 's*r', 's*y', 's*b', 'PM*', 'HV*',
+                                                'YSO', 'Pr*', 'TTau*', 'HerbigAeBe', 'OrionV*', 'BrownD*',
+                                                'V*', 'IrV*', 'Pu*', 'bCepV*', 'cC*', 'aCeV*', 'delSctV*',
+                                                'gamDorV*', 'RRlyrV*', 'PVTelV*', 'RVTauV*', 'alphaCygV*', 'LPV*',
+                                                'MiraV*', 'SRV*', 'rcbV*', 'RotV*', 'alpha2CVnV*', 'SXAriV*',
+                                                'BYDraV*', 'FKComV*', 'ellVar', 'EclV*', 'AlgolV*', 'betaLyrV*',
+                                                'WUMaV*', 'Er*', 'Fl*', 'FUOriV*', 'Em*', 'Be*', 'Ae*', 'WR*',
+                                                'Pe*', 'HB*', 'HotSubd*', 'C*', 'S*', 'ch*', 'Am*', 'Ap*', 'Ba*',
+                                                '**', 'SB*', 'EB*', 'PMB*', 'VB*', 'AstromB*', 'WD*', 'N*', 'SN*',
+                                                'Psr', 'XB', 'LMXB', 'HMXB', 'out', 'EmO', 'blu','UV','X','NearIR',
+                                                'MidIR','FarIR','mmRad','Low-Mass*', 'YSO_Candidate', 'YSO', 'Star'
+                                            ]
+                                            # Keep only row entries that match the official SIMBAD star taxonomy
+                                            simbad_table = simbad_table[np.isin(simbad_table['OTYPE'],all_stellar_otypes)]
 
                                             # Only use this if your columns are returned as strings (hms/dms)
                                             if np.any([isinstance(simbad_table['RA'][0], str),isinstance(simbad_table['DEC'][0], str)]):
