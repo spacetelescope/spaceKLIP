@@ -1107,22 +1107,23 @@ class DAO():
             _yhi = int(_cy) + _quick_r + 1
             _patch = data_arr[_ylo:_yhi, _xlo:_xhi]
             _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
-            if _ecc <=0.75 and _sol>=0.85:
-                if _sr >0:
+            if _sr > 0:
+                if _ecc <=0.75 and _sol>=0.85:
                     _c['x'] = _x+_xlo
                     _c['y'] = _y+_ylo
                     _c['eccsat'] = _ecc
                     _c['solsat'] = _sol
-                    pass
+
                 else:
-                    _c['eccsat'] = 0
-                    _c['solsat'] = 1
-                _c['coresat'] = _sr
-                _prov_sat.append(float(_sr))
-                _rmax.append(float(max(_patch.shape)))
-                _keep_mask.append(True)
+                    _keep_mask.append(False)
+                    continue
             else:
-                _keep_mask.append(False)
+                _c['eccsat'] = 0
+                _c['solsat'] = 1
+            _c['coresat'] = _sr
+            _prov_sat.append(float(_sr))
+            _rmax.append(float(max(_patch.shape)))
+            _keep_mask.append(True)
 
         candidates = candidates[_keep_mask]
         n=len(candidates)
@@ -1161,7 +1162,7 @@ class DAO():
         seen_catalog_ids = set()  # Prevent cross-group duplicate entries of the same star
 
         for indices in groups.values():
-            group_cands = [candidates[i] for i in indices]
+            group_cands = candidates[np.isin(candidates['id'], indices)]
 
             catalog_member_indices = [k for k, c in enumerate(group_cands)
                                       if c.get("method") == "catalog"]
@@ -1498,6 +1499,7 @@ class DAO():
         # detections) and select one representative per group.  The representative
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
+        all_candidates['id']=[int(i) for i in range(len(all_candidates))]
         selected_candidates = self._group_and_select(all_candidates, data_subtracted, self.psf)
 
         return selected_candidates
