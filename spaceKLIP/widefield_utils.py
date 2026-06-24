@@ -1087,8 +1087,6 @@ class DAO():
         if len(candidates) == 0:
             return []
 
-        xs = np.array([c["x"] for c in candidates], dtype=float)
-        ys = np.array([c["y"] for c in candidates], dtype=float)
         ny_arr, nx_arr = data_arr.shape
 
         # Pre-compute a provisional NaN-core radius for every candidate so
@@ -1126,8 +1124,10 @@ class DAO():
             _keep_mask.append(True)
 
         candidates = candidates[_keep_mask]
-        n=len(candidates)
+        xs = np.array([c["x"] for c in candidates], dtype=float)
+        ys = np.array([c["y"] for c in candidates], dtype=float)
 
+        n=len(candidates)
         cand_radii = np.array(
             [self._candidate_radius(c, _quick_r, ps, np.nanmedian(_rmax)) for c, ps in zip(candidates, _prov_sat)],
             dtype=float,
@@ -1152,10 +1152,9 @@ class DAO():
                     _union(i, j)
 
         # Collect groups by root index.
-        from collections import defaultdict
         groups: dict[int, list[int]] = defaultdict(list)
         for i in range(n):
-            groups[_find(i)].append(i)
+            groups[_find(i)].append(candidates['id'][i])
 
         # --- select one representative per group ---
         selected = []
@@ -1501,5 +1500,6 @@ class DAO():
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
         selected_candidates = self._group_and_select(all_candidates, data_subtracted, self.psf)
+        # selected_candidates = all_candidates
 
         return selected_candidates
