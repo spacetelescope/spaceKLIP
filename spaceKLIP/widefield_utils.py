@@ -815,7 +815,7 @@ class DAO():
                 sharpness_range=(0.2, 1.0),
                 roundness_range=(-1.0, 1.0),
                 fwhm=2.5,
-                group_radius=1,
+                group_box=1,
                 catalog=None,
                 nan_lim_percent=0.51,
                 two_pass=True,
@@ -842,13 +842,10 @@ class DAO():
             Acceptable range of ``DAOStarFinder`` sharpness values.
         roundness_range : tuple of float, optional
             Acceptable range of ``DAOStarFinder`` roundness values.
-        group_radius : float, optional
-            Grouping radius (pixels). All ``DAOStarFinder`` detections within this
-            distance of each other are treated as belonging to the same star, and
-            only one representative is kept.  The same radius is also used as the
-            minimum allowed separation between any two sources in the final
-            catalog.  Should be set to roughly 1–2 times the PSF wing extent; a
-            value of ~15 pixels works well for JWST NIRCam wide-field data.
+        group_box : float, optional
+            Grouping box (pixels). All ``DAOStarFinder`` detections within box of base
+            group_box to each other are treated as belonging to the same star, and
+            only one representative is kept.
         catalog : astropy.table.Table, str, or None, optional
             External source catalog used to override DAO detections when overlapping.
             Accepts an ``astropy.table.Table`` with ``x`` and ``y`` pixel-coordinate
@@ -883,7 +880,7 @@ class DAO():
         self.fwhm=fwhm
         self.sharpness_range=sharpness_range
         self.roundness_range=roundness_range
-        self.group_radius=group_radius
+        self.group_box=group_box
         self.catalog=catalog
         self.nan_lim_percent=nan_lim_percent
         self.two_pass = two_pass
@@ -1069,7 +1066,7 @@ class DAO():
             Full (ungrouped) candidate list from ``_dao``.
         data_arr : 2D-array
             Science image (used for NaN proximity checks).
-        group_radius : float
+        group_box : float
             Maximum separation (pixels) for two candidates to be in the
             same group.
         npix : int or list of four int, optional
@@ -1093,7 +1090,6 @@ class DAO():
         # Pre-compute a provisional NaN-core radius for every candidate so
         # that _candidate_radius can scale the grouping window correctly even
         # before the formal coresat is estimated inside _group_and_select.
-        # _quick_r = max(1, int(self.group_radius))
         _prov_sat = []
         _rmax = []
         _keep_mask = []
@@ -1127,31 +1123,57 @@ class DAO():
         candidates = candidates[_keep_mask]
         xs = np.array([c["x"] for c in candidates], dtype=float)
         ys = np.array([c["y"] for c in candidates], dtype=float)
-        cand_radii = np.array([max(self.group_radius,min(int(c['coresat'])*2,30)) for c in candidates])
+        cand_radii = np.array([max(self.group_box,min(int(c['coresat'])*2,30)) for c in candidates])
         n=len(candidates)
 
-        # --- union-find for connected-component grouping ---
-        parent = list(range(n))
 
-        def _find(a):
-            while parent[a] != a:
-                parent[a] = parent[parent[a]]  # path compression
-                a = parent[a]
-            return a
+        # --- Saturated-First, Peak-Sorted Suppression (Square Bounding Box) ---
 
-        def _union(a, b):
-            parent[_find(a)] = _find(b)
+        # Define the base width of your square FOV footprint in pixels
+        # (e.g., set this to your fov_pix or tile width, like 75.0)
+        half_box = cand_radii / 2.0
 
-        for i in range(n):
-            for j in range(i + 1, n):
-                pair_r = max(float(cand_radii[i]), float(cand_radii[j]))
-                if (xs[i] - xs[j]) ** 2 + (ys[i] - ys[j]) ** 2 < pair_r ** 2:
-                    _union(i, j)
+        # 1. Extract the columns
+        peaks = np.array(candidates['peak'], dtype=float)
+        coresats = np.array(candidates['coresat'], dtype=float)
 
-        # Collect groups by root index.
-        groups: dict[int, list[int]] = defaultdict(list)
-        for i in range(n):
-            groups[_find(i)].append(candidates['id'][i])
+        # 2. Sort by coresat first (highest to lowest), then by peak (highest to lowest)
+        sorting_keys = [(coresats[idx], peaks[idx]) for idx in range(n)]
+
+        # Combine the tuple values into a single sortable metric securely
+        max_peak = np.max(peaks) if len(peaks) > 0 else 1.0
+        sort_weights = np.array([c * (max_peak * 10) + p for c, p in sorting_keys])
+        sorted_indices = np.argsort(sort_weights)[::-1]
+
+        keep_indices = []
+        dropped_indices = set()
+
+        # 3. Iteratively evaluate stars based on the new priority order
+        for i in sorted_indices:
+            if i in dropped_indices:
+                continue  # Skip if this star was already dropped
+
+            # Keep this star! It has the highest priority in its vicinity
+            keep_indices.append(i)
+
+            # Eliminate any remaining neighbors inside its square footprint
+            for j in sorted_indices:
+                if j == i or j in dropped_indices:
+                    continue
+
+                # Calculate absolute differences along both axes independently
+                dx = abs(xs[i] - xs[j])
+                dy = abs(ys[i] - ys[j])
+
+                # Check if candidate j falls entirely inside the square box centered on i
+                if dx < half_box[j] and dy < half_box[j]:
+                    dropped_indices.add(j)  # Drop the neighbor inside the box
+
+        # 4. Map the chosen sources back to your groups dictionary
+        groups: dict[int, list[int]] = {}
+        for idx in keep_indices:
+            cand_id = candidates['id'][idx]
+            groups[cand_id] = [cand_id]
 
         # --- select one representative per group ---
         selected = []
@@ -1210,7 +1232,7 @@ class DAO():
                 cx, cy = float(candidate["x"]), float(candidate["y"])
                 if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[3]:
                     continue
-                half = int(max(15, self.group_radius))
+                half = int(max(15, self.group_box))
                 xlo = max(0, int(round(cx)) - half)
                 xhi = min(nx_arr, int(round(cx)) + half + 1)
                 ylo = max(0, int(round(cy)) - half)
@@ -1271,12 +1293,12 @@ class DAO():
             xg = np.array([float(c["x"]) for c in group_cands], dtype=float)
             yg = np.array([float(c["y"]) for c in group_cands], dtype=float)
             refx, refy = float(best["x"]), float(best["y"])
-            eff_group_radius = self._effective_radius(xg, yg, refx, refy, self.group_radius)
+            eff_group_box = self._effective_radius(xg, yg, refx, refy, self.group_box)
 
             # Populate coresat for saturated representatives.
             if sat_flag:
                 cx, cy = float(best["x"]), float(best["y"])
-                half = int(max(15, eff_group_radius))
+                half = int(max(15, eff_group_box))
                 xlo = max(0, int(round(cx)) - half)
                 xhi = min(nx_arr, int(round(cx)) + half + 1)
                 ylo = max(0, int(round(cy)) - half)
@@ -1291,7 +1313,7 @@ class DAO():
             else:
                 # For unsaturated groups, place the representative on the local
                 # PSF-correlation peak if it was measured above.
-                half = int(max(8, eff_group_radius))
+                half = int(max(8, eff_group_box))
                 xlo = max(0, int(np.floor(np.min(xg))) - half)
                 xhi = min(nx_arr, int(np.ceil(np.max(xg))) + half + 1)
                 ylo = max(0, int(np.floor(np.min(yg))) - half)
