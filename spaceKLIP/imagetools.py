@@ -3592,8 +3592,8 @@ class ImageTools():
                                      use_gaia=False,
                                      use_allwise=False,
                                      use_simbad=True,
-                                     sharpness_range=(0.15, 0.95),
-                                     roundness_range=(-0.7, 0.7),
+                                     sharpness_range=(0.3, 0.85),
+                                     roundness_range=(-0.3, 0.3),
                                      kwargs={},
                                      subdir='pretiles'):
         """
