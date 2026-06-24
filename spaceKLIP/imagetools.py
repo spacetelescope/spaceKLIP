@@ -3584,7 +3584,7 @@ class ImageTools():
 
     def prepare_tiles_for_extraction(self,
                                      npix=0,
-                                     group_radius=15,
+                                     group_box=15,
                                      fov_pix=65,
                                      threshold=3,
                                      fwhm=2,
@@ -3611,13 +3611,10 @@ class ImageTools():
             number of pixels will be padded on each side. If list of four int,
             a different number of pixels can be padded on the [left, right,
             bottom, top] of the frames. The default is 1.
-        group_radius : float, optional
-            Grouping radius (pixels). All ``DAOStarFinder`` detections within this
-            distance of each other are treated as belonging to the same star, and
-            only one representative is kept.  The same radius is also used as the
-            minimum allowed separation between any two sources in the final
-            catalog.  Should be set to roughly 1–2 times the PSF wing extent; a
-            value of ~15 pixels works well for JWST NIRCam wide-field data.
+        group_box : float, optional
+            Grouping box (pixels). All ``DAOStarFinder`` detections within box of base
+            group_box to each other are treated as belonging to the same star, and
+            only one representative is kept.
         fov_pix : int
             Tile size in detector pixels.
         use_gaia : bool, optional
@@ -3740,7 +3737,7 @@ class ImageTools():
                                     sharpness_range=(0.15,0.95),
                                     roundness_range=(-0.7,0.7),
                                     catalog=result,
-                                    group_radius=group_radius,
+                                    group_box=group_box,
                                     npix=npix,
                                     psf=psf_no_coronmsk)
 
