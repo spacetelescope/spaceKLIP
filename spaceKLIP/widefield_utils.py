@@ -17,6 +17,7 @@ from scipy.ndimage import binary_dilation
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 import requests
+from skimage.measure import label, regionprops
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -430,10 +431,8 @@ def fit_psf(
     if coresat is not None:
         core_mask_x = (nx - 1) / 2
         core_mask_y = (ny - 1) / 2
-    # if coresat and coresat > 0 and np.any(~np.isfinite(data)):
-    # if np.any(~np.isfinite(data)):
     else:
-        coresat, core_mask_x, core_mask_y = estimate_nan_core(data, margin=0)
+        coresat, core_mask_x, core_mask_y, eccentricity, solidity = estimate_nan_core(data, margin=0)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -550,30 +549,7 @@ def estimate_nan_core(data,
                       center=None,
                       margin=1,
                       nanmask=None
-) -> tuple[int, float, float]:
-    """Estimate centroid and radius of a connected non-finite (NaN/Inf) core.
-
-    Parameters
-    ----------
-    data : 2D-array
-        Image cutout.
-    center : tuple of float, optional
-        Starting point ``(x, y)`` for the flood-fill. If None, uses the image
-        center.
-    margin : int, optional
-        Extra pixels added to the returned radius.
-    nanmask: list, None, optional
-        nanmask is a boolean array of the same shape as data, where True values indicate pixels to be treated as NaN
-        in the analysis.
-
-    Returns
-    -------
-    radius : int
-        Radius in pixels of the connected non-finite region.
-    x_center, y_center : float
-        Region centroid in cutout coordinates.
-
-    """
+                      ):
     nandata = np.asarray(data.copy())
     if nanmask is not None:
         nandata[nanmask.astype(bool)] = np.nan
@@ -585,11 +561,10 @@ def estimate_nan_core(data,
         cx, cy = center
 
     bad = ~np.isfinite(nandata)
-    if len(bad)>0:
+    if len(bad) > 0:
         sx = int(np.clip(round(cx), 0, nx - 1))
         sy = int(np.clip(round(cy), 0, ny - 1))
 
-        # If the exact center is finite, look for a bad pixel close to the center.
         if not bad[sy, sx]:
             found = False
             for dy in range(-2, 3):
@@ -603,9 +578,8 @@ def estimate_nan_core(data,
                 if found:
                     break
             if not found:
-                return 0, float(cx), float(cy)
+                return 0, float(cx), float(cy), np.nan, np.nan
 
-        # Flood-fill the connected bad region (4-connected).
         region = np.zeros_like(bad, dtype=bool)
         stack = [(sy, sx)]
         region[sy, sx] = True
@@ -617,17 +591,30 @@ def estimate_nan_core(data,
                     stack.append((yy, xx))
 
         if not np.any(region):
-            return 0, float(cx), float(cy)
+            return 0, float(cx), float(cy), np.nan, np.nan
 
         yy, xx = np.indices(nandata.shape)
         x_cent = float(np.mean(xx[region]))
         y_cent = float(np.mean(yy[region]))
         rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
         radius = int(np.ceil(np.nanmax(rr[region])) + int(margin))
-        return radius, x_cent, y_cent
+
+        # --- SHAPE ANALYSIS ---
+        # Label the connected region so regionprops can analyze it
+        labeled_region = label(region)
+        props = regionprops(labeled_region)
+
+        if len(props) > 0:
+            eccentricity = props[0].eccentricity
+            solidity = props[0].solidity
+        else:
+            eccentricity, solidity = np.nan, np.nan
+
+        return radius, x_cent, y_cent, eccentricity, solidity
 
     else:
-        return 0, float(cx), float(cy)
+        return 0, float(cx), float(cy), np.nan, np.nan
+
 
 def stars_extractor(data,
                     coords,
@@ -942,6 +929,8 @@ class DAO():
             return None
         # out = []
         tbl['coresat'] = 0
+        tbl['eccsat'] = 0.0
+        tbl['solsat'] = 1.0
         tbl['method'] = 'dao'
         tbl.rename_column('xcentroid', 'x')
         tbl.rename_column('ycentroid', 'y')
@@ -953,7 +942,7 @@ class DAO():
                 & (tbl["y"] >= self.npix[2] + border)
                 & (tbl["y"] <= ny - (self.npix[3] + border))
         )
-        tbl_selected = tbl[mask]['x','y','peak','coresat','method','sharpness','roundness']
+        tbl_selected = tbl[mask]['x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness']
 
         return tbl_selected
 
@@ -983,6 +972,8 @@ class DAO():
 
         # Conform to your pipeline's existing structure
         tbl['coresat'] = 0
+        tbl['eccsat'] = 0.0
+        tbl['solsat'] = 1.0
         tbl['method'] = 'starfinder'
         tbl.rename_column('xcentroid', 'x')
         tbl.rename_column('ycentroid', 'y')
@@ -1027,7 +1018,7 @@ class DAO():
         )
 
         # Filter table and cleanly select your required columns
-        tbl_selected = tbl[mask_indices]['x', 'y', 'peak', 'coresat', 'method', 'sharpness', 'roundness']
+        tbl_selected = tbl[mask_indices]['x', 'y', 'peak', 'coresat', 'eccsat', 'solsat', 'method', 'sharpness', 'roundness']
 
         return tbl_selected
 
@@ -1106,7 +1097,8 @@ class DAO():
         _quick_r = max(1, int(self.group_radius))
         _prov_sat = []
         _rmax = []
-        _candidates = []
+        _keep_mask = []
+
         for _c in candidates:
             _cx, _cy = float(_c["x"]), float(_c["y"])
             _xlo = int(_cx) - _quick_r
@@ -1114,16 +1106,25 @@ class DAO():
             _ylo = int(_cy) - _quick_r
             _yhi = int(_cy) + _quick_r + 1
             _patch = data_arr[_ylo:_yhi, _xlo:_xhi]
-            _sr, _x, _y = estimate_nan_core(_patch, margin=1)
-            if _sr >0:
-                _c['x'] = _x+_xlo
-                _c['y'] = _y+_ylo
-            _c['coresat'] = _sr
-            _prov_sat.append(float(_sr))
-            _rmax.append(float(max(_patch.shape)))
-            _candidates.append(_c)
+            _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
+            if _ecc <=0.75 and _sol>=0.85:
+                if _sr >0:
+                    _c['x'] = _x+_xlo
+                    _c['y'] = _y+_ylo
+                    _c['eccsat'] = _ecc
+                    _c['solsat'] = _sol
+                    pass
+                else:
+                    _c['eccsat'] = 0
+                    _c['solsat'] = 1
+                _c['coresat'] = _sr
+                _prov_sat.append(float(_sr))
+                _rmax.append(float(max(_patch.shape)))
+                _keep_mask.append(True)
+            else:
+                _keep_mask.append(False)
 
-        candidates = _candidates
+        candidates = candidates[_keep_mask]
         n=len(candidates)
 
         cand_radii = np.array(
@@ -1177,8 +1178,7 @@ class DAO():
                     candidate = dict(group_cands[k])
 
                     # Deduplication check
-                    obj_id = candidate.get("id") or candidate.get(
-                        "source_id") or f"{candidate['x']:.2f}_{candidate['y']:.2f}"
+                    obj_id = candidate.get("id") or candidate.get("source_id") or f"{candidate['x']:.2f}_{candidate['y']:.2f}"
                     if obj_id in seen_catalog_ids:
                         continue
 
@@ -1229,7 +1229,7 @@ class DAO():
                     sat_flag = True
                     # Saturated group: estimate the NaN-core centroid on a group-wide
                     # cutout and use that as the representative source position.
-                    sr, xcore, ycore = estimate_nan_core(local, margin=1)
+                    sr, xcore, ycore, eccentricity, solidity = estimate_nan_core(local, margin=1)
                     peaks.append(float(candidate.get("peak", 0.0)))  # Flat float to prevent indexing quirks later
                     d2.append((cx - (xcore + xlo)) ** 2 + (cy - (ycore + ylo)) ** 2)
                 else:
@@ -1286,7 +1286,7 @@ class DAO():
                 yhi = min(ny_arr, int(round(cy)) + half + 1)
                 local = data_arr[ylo:yhi, xlo:xhi]
                 if np.any(~np.isfinite(local)):
-                    sr, xcore, ycore = estimate_nan_core(local, center=(cx - xlo, cy - ylo), margin=1)
+                    sr, xcore, ycore, eccentricity, solidity = estimate_nan_core(local, center=(cx - xlo, cy - ylo), margin=1)
                     best["x"] = float(xcore + xlo)
                     best["y"] = float(ycore + ylo)
                     if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or best["y"] > ny_arr - self.npix[3]:
@@ -1360,7 +1360,7 @@ class DAO():
             yhi = min(ny, int(round(y_fit)) + half + 1)
             cut = data[ylo:yhi, xlo:xhi]
             nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
-            sat_r, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
+            sat_r, _, _, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
 
             nxpsf, nypsf = psf.shape
             xlo_psf = max(0, int(round(nxpsf//2)) - half)
