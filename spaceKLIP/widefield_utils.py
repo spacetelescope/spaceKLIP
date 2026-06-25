@@ -18,7 +18,6 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 import requests
 from skimage.measure import label, regionprops
-from collections import defaultdict
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -81,6 +80,7 @@ def fetch_catalog_for_image_fov(path2table,
                                            radius_deg,
                                            gaia_table: str = "gaiadr3.gaia_source",
                                            use_allwise: bool = False,
+                                           use_mocadb: bool = False,
                                            ):
                                 """
                                 Helper to fetch Gaia DR3 source data, with an optional ALLWISE W2 filter proxy.
@@ -100,7 +100,9 @@ def fetch_catalog_for_image_fov(path2table,
                                 use_allwise : bool, optional
                                     If True, queries and filters for objects with ALLWISE W2 measurements.
                                     Defaults to False.
-
+                                use_mocadb : bool, optional
+                                    If True, queries and filters for objects with MOCADB measurements.
+                                    Defaults to False.
                                 Returns
                                 -------
                                 None
@@ -146,6 +148,7 @@ def fetch_catalog_for_image_fov(path2table,
                                             center_ra_deg,
                                             center_dec_deg,
                                             radius_deg,
+                                            use_mocadb=False
                                             ):
                                             """
                                             Helper to fetch Simbad  source data.
@@ -160,6 +163,9 @@ def fetch_catalog_for_image_fov(path2table,
                                                 Declination of the center of the search region in degrees.
                                             radius_deg : float
                                                 Radius of the search region in degrees.
+                                            use_mocadb : bool, optional
+                                                If True, queries and filters for objects with MOCADB measurements.
+                                                Defaults to False.
 
                                             Returns
                                             -------
@@ -220,9 +226,50 @@ def fetch_catalog_for_image_fov(path2table,
                                                                   unit=(u.hourangle, u.deg))
                                                 simbad_table['RA'] = coords.ra.deg
                                                 simbad_table['DEC'] = coords.dec.deg
-
+                                            #TODO: MOCADB timing out. sqlalchemy.exc.OperationalError: (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on '104.248.106.21' (timed out)")
+                                            if use_mocadb:
+                                                simbad_table = query_mocadb(simbad_table)
                                             simbad_table.write(path2table, format="csv", overwrite=True)
 
+                            def query_mocadb(table):
+                                from mocapy import *
+                                # Create a moca engine object
+                                moca = MocaEngine()
+
+                                ### Change this for a list of all target names
+                                simbadids = table['MAIN_ID'].tolist()
+
+                                table['MSUN'] = np.full(len(table), '', dtype=object)
+                                table['SPT'] = np.full(len(table), '', dtype=object)
+                                table['J'] = np.full(len(table), '', dtype=object)
+                                table['K'] = np.full(len(table), '', dtype=object)
+                                table['E(B-V)'] = np.full(len(table), '', dtype=object)
+                                table['E(B-V)_unc'] = np.full(len(table), '', dtype=object)
+                                table['MEMBERSHIP'] = np.full(len(table), '', dtype=object)
+
+                                for simbadid in simbadids:
+                                    df2 = Table.from_pandas(moca.query(
+                                        f"SELECT mechanics_all_designations.designation, summary_all_objects.moca_oid, cat_2mass.j_m, cat_2mass.k_m, summary_all_objects.spectral_type, summary_all_objects.spt_ref, data_extinction.e_bv, data_extinction.e_bv_unc, data_masses.mass_msun, calc_banyan_sigma.best_ya "
+                                        f"FROM mechanics_all_designations "
+                                        f"JOIN summary_all_objects ON mechanics_all_designations.moca_oid = summary_all_objects.moca_oid "
+                                        f"JOIN cat_2mass ON mechanics_all_designations.moca_oid = cat_2mass.moca_oid "
+                                        f"JOIN data_extinction ON mechanics_all_designations.moca_oid = data_extinction.moca_oid "
+                                        f"JOIN data_masses ON mechanics_all_designations.moca_oid = data_masses.moca_oid "
+                                        f"JOIN calc_banyan_sigma ON mechanics_all_designations.moca_oid = calc_banyan_sigma.moca_oid "
+                                        f"WHERE mechanics_all_designations.designation = '{simbadid}'"
+                                        f"LIMIT 20"
+                                    ))
+
+                                    if len(df2) > 0:
+                                        table['MSUN'][table['MAIN_ID'] == simbadid] = df2['mass_msun'][0]
+                                        table['SPT'][table['MAIN_ID'] == simbadid] = df2['spectral_type'][0]
+                                        table['J'][table['MAIN_ID'] == simbadid] = df2['j_m'][0]
+                                        table['K'][table['MAIN_ID'] == simbadid] = df2['k_m'][0]
+                                        table['E(B-V)'][table['MAIN_ID'] == simbadid] = df2['e_bv'][0]
+                                        table['E(B-V)_unc'][table['MAIN_ID'] == simbadid] = df2['e_bv_unc'][0]
+                                        table['MEMBERSHIP'][table['MAIN_ID'] == simbadid] = df2['best_ya'][0]
+
+                                return table
 
                             if isinstance(npix, int):
                                 npix = [npix, npix, npix, npix]  # left, right, bottom, top
@@ -251,7 +298,7 @@ def fetch_catalog_for_image_fov(path2table,
                             if use_gaia or use_allwise:
                                 query_gaia(path2table, center_ra_deg, center_dec_deg, radius_deg, use_allwise=use_allwise)
                             elif use_simbad:
-                                query_simbad(path2table, center_ra_deg, center_dec_deg, radius_deg)
+                                query_simbad(path2table, center_ra_deg, center_dec_deg, radius_deg, use_mocadb=use_mocadb)
                             else:
                                 log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
                                 return Table()
@@ -953,13 +1000,31 @@ class DAO():
         tbl.rename_column('ycentroid', 'y')
         tbl.rename_column('roundness1', 'roundness')
 
-        mask = (
+        mask1 = (
                 (tbl["x"] >= self.npix[0] + border)
                 & (tbl["x"] <= nx - (self.npix[1] + border))
                 & (tbl["y"] >= self.npix[2] + border)
                 & (tbl["y"] <= ny - (self.npix[3] + border))
+                & (tbl["roundness"] >= self.roundness_range[0])
+                & (tbl["roundness"] <= self.roundness_range[1])
+                & (tbl["sharpness"] >= self.sharpness_range[0])
+                & (tbl["sharpness"] <= self.sharpness_range[1])
         )
-        tbl_selected = tbl[mask]['x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness']
+        #TODO: figure out how to set up proper mask for saturated sources. For now using the same for both.
+        mask2 = (
+                (tbl["x"] >= self.npix[0] + border)
+                & (tbl["x"] <= nx - (self.npix[1] + border))
+                & (tbl["y"] >= self.npix[2] + border)
+                & (tbl["y"] <= ny - (self.npix[3] + border))
+                & (tbl["roundness"] >= -0.5)
+                & (tbl["roundness"] <= 0.5)
+                & (tbl["sharpness"] >= self.sharpness_range[0])
+                & (tbl["sharpness"] <= self.sharpness_range[1])
+        )
+        is_coresat = tbl["coresat"] > 0
+        final_mask = np.where(is_coresat, mask1, mask1)
+
+        tbl_selected = tbl[final_mask]['x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness']
 
         return tbl_selected
 
