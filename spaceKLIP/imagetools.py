@@ -3584,7 +3584,6 @@ class ImageTools():
 
     def prepare_tiles_for_extraction(self,
                                      npix=0,
-                                     group_box=15,
                                      fov_pix=65,
                                      threshold=3,
                                      fwhm=2,
@@ -3613,10 +3612,6 @@ class ImageTools():
             number of pixels will be padded on each side. If list of four int,
             a different number of pixels can be padded on the [left, right,
             bottom, top] of the frames. The default is 1.
-        group_box : float, optional
-            Grouping box (pixels). All ``DAOStarFinder`` detections within box of base
-            group_box to each other are treated as belonging to the same star, and
-            only one representative is kept.
         fov_pix : int
             Tile size in detector pixels.
         use_gaia : bool, optional
@@ -3697,9 +3692,6 @@ class ImageTools():
                 mask = ut.read_msk(maskfile)
                 nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                 nanmask = ut.read_msk(nanmaskfile)
-                filt = self.database.obs[key]['FILTER'][j]
-                apername = self.database.obs[key]['APERNAME'][j]
-                date = fits.getheader(self.database.obs[key]['FITSFILE'][j], 0)['DATE-BEG']
 
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
@@ -3733,7 +3725,6 @@ class ImageTools():
                                     sharpness_range=sharpness_range,
                                     roundness_range=roundness_range,
                                     catalog=result,
-                                    group_box=group_box,
                                     npix=npix,
                                     fov=fov_pix)
 
