@@ -1184,19 +1184,16 @@ class DAO():
             keep_indices.append(idx)
 
             # Find all neighbors within the box_size
-            neighbors = tree.query_ball_point(coords[idx], r=self.fov//2)
-            if np.any([i in neighbors for i in [23,40,41]]):
-                pass
+            neighbors = tree.query_ball_point(coords[idx], r=self.fov / 2.0, p=np.inf)
             # Mark the representative and all its neighbors as visited
             visited[neighbors] = True
-            pass
 
         # 5. Return the filtered Astropy Table (sorted by original order)
         keep_indices = sorted(keep_indices)
         log.info(f"Using {np.sum([i['method']=='catalog' for i in catalog[keep_indices]])} catalog seeds + {np.sum([i['method']!='catalog' for i in catalog[keep_indices]])} DAO detections after selections.")
         return catalog[keep_indices]
 
-    def _clean_catalog(self,candidates, data_arr,psf):
+    def _clean_catalog(self,candidates, data_arr):
         """Group nearby candidates and select one representative per star.
 
         DAOStarFinder often returns several detections for a single bright or
