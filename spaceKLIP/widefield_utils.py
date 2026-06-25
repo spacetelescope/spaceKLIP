@@ -6,18 +6,20 @@ from astropy.visualization import simple_norm
 from photutils.psf import FittableImageModel
 from astropy.modeling import fitting
 import spaceKLIP.utils as ut
-import numpy as np
 from astropy.table import Table, vstack
 from astropy.wcs import WCS
 from scipy.signal import fftconvolve
 from photutils.detection import DAOStarFinder,StarFinder
 from astropy.stats import SigmaClip
 from photutils.background import Background2D, MedianBackground
-from scipy.ndimage import binary_dilation
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 import requests
+import numpy as np
 from skimage.measure import label, regionprops
+from scipy.ndimage import binary_dilation
+from photutils.aperture import CircularAperture, aperture_photometry
+from scipy.spatial import KDTree
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -319,6 +321,8 @@ def fetch_catalog_for_image_fov(path2table,
                             table["x"] = np.asarray(x, dtype=float)
                             table["y"] = np.asarray(y, dtype=float)
                             table['method'] = np.asarray(['catalog'] * len(table), dtype=str)
+                            table['roundness'] = 0.0
+                            table['sharpness'] = 0.5
 
                             mask = (
                                     (table["x"] >= npix[0] + border)
@@ -499,7 +503,7 @@ def fit_psf(
         core_mask_x = (nx - 1) / 2
         core_mask_y = (ny - 1) / 2
     else:
-        coresat, core_mask_x, core_mask_y, eccentricity, solidity = estimate_nan_core(data, margin=0, dx_range=3,dy_range=3)
+        coresat, core_mask_x, core_mask_y, eccentricity, solidity = estimate_nan_core(data, margin=0)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -612,77 +616,79 @@ def fit_psf(
 
     return fitted_x_pos,fitted_y_pos,fitted_flux
 
-def estimate_nan_core(data,
-                      center=None,
-                      margin=1,
-                      nanmask=None,
-                      dx_range=10,
-                      dy_range=10,
-                      ):
-    nandata = np.asarray(data.copy())
+def estimate_nan_core(data, center=None, margin=1, nanmask=None):
+    nandata = np.array(data, dtype=float)
     if nanmask is not None:
         nandata[nanmask.astype(bool)] = np.nan
 
+    bad_mask = ~np.isfinite(nandata)
     ny, nx = nandata.shape
-    if center is None:
-        cx, cy = (nx - 1) / 2, (ny - 1) / 2
-    else:
-        cx, cy = center
 
-    bad = ~np.isfinite(nandata)
-    if len(bad) > 0:
-        sx = int(np.clip(round(cx), 0, nx - 1))
-        sy = int(np.clip(round(cy), 0, ny - 1))
+    default_cx, default_cy = center if center is not None else ((nx - 1) / 2, (ny - 1) / 2)
 
-        if not bad[sy, sx]:
-            found = False
-            for dy in range(-dy_range, dy_range+1):
-                for dx in range(-dx_range,dx_range+1):
-                    y = sy + dy
-                    x = sx + dx
-                    if 0 <= y < ny and 0 <= x < nx and bad[y, x]:
-                        sy, sx = y, x
-                        found = True
-                        break
-                if found:
-                    break
-            if not found:
-                return 0, float(cx), float(cy), np.nan, np.nan
+    if not np.any(bad_mask):
+        return 0, float(default_cx), float(default_cy), 0, 1
 
-        region = np.zeros_like(bad, dtype=bool)
-        stack = [(sy, sx)]
-        region[sy, sx] = True
-        while stack:
-            y, x = stack.pop()
-            for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-                if 0 <= yy < ny and 0 <= xx < nx and bad[yy, xx] and not region[yy, xx]:
-                    region[yy, xx] = True
-                    stack.append((yy, xx))
+    labeled_mask = label(bad_mask)
+    props = regionprops(labeled_mask)
 
-        if not np.any(region):
-            return 0, float(cx), float(cy), np.nan, np.nan
+    if not props:
+        return 0, float(default_cx), float(default_cy), 0, 1
 
-        yy, xx = np.indices(nandata.shape)
-        x_cent = float(np.mean(xx[region]))
-        y_cent = float(np.mean(yy[region]))
-        rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
-        radius = int(np.ceil(np.nanmax(rr[region])) + int(margin))
+    best_prop = None
+    best_score = -float('inf')
 
-        # --- SHAPE ANALYSIS ---
-        # Label the connected region so regionprops can analyze it
-        labeled_region = label(region)
-        props = regionprops(labeled_region)
+    # Calculate a robust image background level to handle negative/zero values cleanly
+    # We use nanmedian to ignore the bad pixels themselves
+    img_background = np.nanmedian(nandata)
 
-        if len(props) > 0:
-            eccentricity = props[0].eccentricity
-            solidity = props[0].solidity
-        else:
-            eccentricity, solidity = np.nan, np.nan
+    for prop in props:
+        # Isolate this specific single cluster
+        single_cluster_mask = (labeled_mask == prop.label)
 
-        return radius, x_cent, y_cent, eccentricity, solidity
+        # --- NEW STELLAR WING VALIDATION ---
+        # 1. Dilate the cluster mask by 2 pixels to capture the immediate perimeter
+        dilated = binary_dilation(single_cluster_mask, iterations=2)
+        perimeter_mask = dilated & ~single_cluster_mask
 
-    else:
-        return 0, float(cx), float(cy), np.nan, np.nan
+        # 2. Extract valid data values on this perimeter
+        # We replace any other NaNs with the background so they don't break the mean
+        perimeter_data = np.where(np.isnan(nandata), img_background, nandata)[perimeter_mask]
+
+        # 3. Calculate the average perimeter brightness relative to the background
+        # If the cluster is in the background, this brightness will be near 1.0.
+        # If it is a real star core, the wings will be hundreds/thousands of times higher.
+        avg_perimeter_brightness = np.mean(perimeter_data) - img_background
+        brightness_factor = max(1.0, avg_perimeter_brightness)
+
+        # --- COMBINED SCORING ---
+        # Geometric score (perfect circle/box = 1.0)
+        shape_score = prop.solidity * (1.0 - prop.eccentricity)
+
+        # Multiply shape by brightness.
+        # A bad pixel cluster in the dark background will get a tiny score.
+        # A true saturated core with bright stellar wings will score massive points.
+        total_score = shape_score * brightness_factor
+
+        if total_score > best_score:
+            best_score = total_score
+            best_prop = prop
+
+    # If even our best choice is just sitting in the background noise,
+    # it means there is likely NO saturated core in this image tile at all.
+    if best_score <= 1.0:
+        return 0, float(default_cx), float(default_cy), 0, 1
+
+    # Process winning cluster
+    winning_region = (labeled_mask == best_prop.label)
+    yy, xx = np.indices(nandata.shape)
+    x_cent = float(np.mean(xx[winning_region]))
+    y_cent = float(np.mean(yy[winning_region]))
+
+    rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
+    radius = int(np.ceil(np.max(rr[winning_region])) + int(margin))
+
+    return radius, x_cent, y_cent, best_prop.eccentricity, best_prop.solidity
 
 
 def stars_extractor(data,
@@ -889,6 +895,7 @@ class DAO():
                 two_pass=True,
                 showplots=False,
                 psf=None,
+                fov=31
                  ):
         """
         Initialize the spaceKLIP DAOStarFinder source extraction tools class.
@@ -954,6 +961,7 @@ class DAO():
         self.two_pass = two_pass
         self.showplots = showplots
         self.psf=psf
+        self.fov=fov
         pass
 
     def _dao(self,data,mask,mrms,border=3):
@@ -990,7 +998,8 @@ class DAO():
                             sharplo=self.sharpness_range[0], sharphi=self.sharpness_range[1],
                             roundlo=self.roundness_range[0], roundhi=self.roundness_range[1])
 
-        tbl = dao(np.nan_to_num(data, nan=0.0), mask=mask)
+        # tbl = dao(np.nan_to_num(data, nan=0.0), mask=mask)
+        tbl = dao(data, mask=mask)
         if tbl is None or len(tbl) == 0:
             return None
         # out = []
@@ -1140,7 +1149,54 @@ class DAO():
         wing_spread = float(np.percentile(d, 95))
         return float(np.clip(max(float(base_radius), wing_spread + 3.0), float(base_radius), 40.0))
 
-    def _group_and_select(self,candidates, data_arr, psf):
+    def _group_catalog(self, catalog, ideal_roundness=0.0, ideal_sharpness=0.5):
+        """
+        Groups catalog sources within a box_size and selects the best stellar representative.
+
+        Parameters:
+        catalog (astropy.table.Table): Must contain columns 'x', 'y', 'flux', 'roundness', 'sharpness'
+        box_size (float): The maximum distance to group sources.
+        """
+        # 1. Calculate a custom "star score" (Higher is better)
+        # Using np.log1p for flux to balance its weight against shape metrics
+        roundness_penalty = np.abs(catalog['roundness'] - ideal_roundness)
+        sharpness_penalty = np.abs(catalog['sharpness'] - ideal_sharpness)
+        star_score = np.log1p(catalog['flux']) - roundness_penalty - sharpness_penalty
+
+        # 2. Build KDTree for fast spatial queries
+        coords = np.vstack((catalog['x'], catalog['y'])).T
+        tree = KDTree(coords)
+
+        # 3. Sort indices by star_score from best to worst
+        sorted_indices = np.argsort(star_score)[::-1]
+
+        # Track visited points using a fast boolean mask
+        num_entries = len(catalog)
+        visited = np.zeros(num_entries, dtype=bool)
+        keep_indices = []
+
+        # 4. Greedy elimination loop
+        for idx in sorted_indices:
+            if visited[idx]:
+                continue
+
+            # Keep this source as the group representative
+            keep_indices.append(idx)
+
+            # Find all neighbors within the box_size
+            neighbors = tree.query_ball_point(coords[idx], r=self.fov//2)
+            if np.any([i in neighbors for i in [23,40,41]]):
+                pass
+            # Mark the representative and all its neighbors as visited
+            visited[neighbors] = True
+            pass
+
+        # 5. Return the filtered Astropy Table (sorted by original order)
+        keep_indices = sorted(keep_indices)
+        log.info(f"Using {np.sum([i['method']=='catalog' for i in catalog[keep_indices]])} catalog seeds + {np.sum([i['method']!='catalog' for i in catalog[keep_indices]])} DAO detections after selections.")
+        return catalog[keep_indices]
+
+    def _clean_catalog(self,candidates, data_arr,psf):
         """Group nearby candidates and select one representative per star.
 
         DAOStarFinder often returns several detections for a single bright or
@@ -1150,11 +1206,6 @@ class DAO():
         ----------
         candidates : list of dict
             Full (ungrouped) candidate list from ``_dao``.
-        data_arr : 2D-array
-            Science image (used for NaN proximity checks).
-        group_box : float
-            Maximum separation (pixels) for two candidates to be in the
-            same group.
         npix : int or list of four int, optional
             Number of pixels used to pad around the frames. If int, the same
             number of pixels will be padded on each side. If list of four int,
@@ -1171,15 +1222,14 @@ class DAO():
         if len(candidates) == 0:
             return []
 
-        ny_arr, nx_arr = data_arr.shape
 
         # Pre-compute a provisional NaN-core radius for every candidate so
         # that _candidate_radius can scale the grouping window correctly even
-        # before the formal coresat is estimated inside _group_and_select.
+        # before the formal coresat is estimated inside _clean_catalog.
         _prov_sat = []
         _rmax = []
         _keep_mask = []
-
+        candidates['flux'] = 0.0
         for _c in candidates:
             _cx, _cy = float(_c["x"]), float(_c["y"])
             _xlo = int(_cx) - 31
@@ -1202,231 +1252,23 @@ class DAO():
                 _c['eccsat'] = 0
                 _c['solsat'] = 1
             _c['coresat'] = _sr
+            # Extract quick aperture photometry
+            positions = np.transpose((_x, _y))
+            apertures = CircularAperture(positions, r=15)
+            nansat_mask = np.isnan(_patch)
+            _patch[_patch<0] = 0
+            phot_table = aperture_photometry(_patch, apertures, mask=nansat_mask, method='exact')
+            _c['flux'] = phot_table['aperture_sum'][0]
             _prov_sat.append(float(_sr))
             _rmax.append(float(max(_patch.shape)))
             _keep_mask.append(True)
 
         candidates = candidates[_keep_mask]
-        xs = np.array([c["x"] for c in candidates], dtype=float)
-        ys = np.array([c["y"] for c in candidates], dtype=float)
-        cand_radii = np.array([max(self.group_box,min(int(c['coresat'])*2,30)) for c in candidates])
-        n=len(candidates)
+        candidates = self._group_catalog(candidates)
+        pass
 
-
-        # --- Saturated-First, Peak-Sorted Suppression (Square Bounding Box) ---
-
-        # Define the base width of your square FOV footprint in pixels
-        # (e.g., set this to your fov_pix or tile width, like 75.0)
-        half_box = cand_radii / 2.0
-
-        # 1. Extract the columns
-        peaks = np.array(candidates['peak'], dtype=float)
-        coresats = np.array(candidates['coresat'], dtype=float)
-
-        # 2. Sort by coresat first (highest to lowest), then by peak (highest to lowest)
-        sorting_keys = [(coresats[idx], peaks[idx]) for idx in range(n)]
-
-        # Combine the tuple values into a single sortable metric securely
-        max_peak = np.max(peaks) if len(peaks) > 0 else 1.0
-        sort_weights = np.array([c * (max_peak * 10) + p for c, p in sorting_keys])
-        sorted_indices = np.argsort(sort_weights)[::-1]
-
-        keep_indices = []
-        dropped_indices = set()
-
-        # 3. Iteratively evaluate stars based on the new priority order
-        for i in sorted_indices:
-            if i in dropped_indices:
-                continue  # Skip if this star was already dropped
-
-            # Keep this star! It has the highest priority in its vicinity
-            keep_indices.append(i)
-
-            # Eliminate any remaining neighbors inside its square footprint
-            for j in sorted_indices:
-                if j == i or j in dropped_indices:
-                    continue
-
-                # Calculate absolute differences along both axes independently
-                dx = abs(xs[i] - xs[j])
-                dy = abs(ys[i] - ys[j])
-
-                # Check if candidate j falls entirely inside the square box centered on i
-                if dx < half_box[j] and dy < half_box[j]:
-                    dropped_indices.add(j)  # Drop the neighbor inside the box
-
-        # 4. Map the chosen sources back to your groups dictionary
-        groups: dict[int, list[int]] = {}
-        for idx in keep_indices:
-            cand_id = candidates['id'][idx]
-            groups[cand_id] = [cand_id]
-
-        # --- select one representative per group ---
-        selected = []
-        seen_catalog_ids = set()  # Prevent cross-group duplicate entries of the same star
-
-        for indices in groups.values():
-            group_cands = candidates[np.isin(candidates['id'], indices)]
-
-            catalog_member_indices = [k for k, c in enumerate(group_cands)
-                                      if c.get("method") == "catalog"]
-            not_catalog_member_indices = [k for k, c in enumerate(group_cands)
-                                          if c.get("method") != "catalog"]
-
-            # --- 1. PRIORITIZE CATALOG MEMBERS FIRST ---
-            if catalog_member_indices:
-                # Sort catalog indices by peak brightness (brightest first)
-                catalog_member_indices.sort(key=lambda k: float(group_cands[k].get("peak", -np.inf)), reverse=True)
-
-                catalog_winner_found = False
-                for k in catalog_member_indices:
-                    candidate = dict(group_cands[k])
-
-                    # Deduplication check
-                    obj_id = candidate.get("id") or candidate.get("source_id") or f"{candidate['x']:.2f}_{candidate['y']:.2f}"
-                    if obj_id in seen_catalog_ids:
-                        continue
-
-                    cx, cy = float(candidate["x"]), float(candidate["y"])
-
-                    # Keep the border check to prevent out-of-bounds errors
-                    if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[3]:
-                        continue
-
-                    # NOTE: We can skip the cutout extraction and the ~np.isfinite(local)
-                    # validation check entirely! Catalog stars get an automatic pass.
-
-                    selected.append(candidate)
-                    seen_catalog_ids.add(obj_id)
-                    catalog_winner_found = True
-                    break  # Stop checking other catalog stars in this group
-
-                if catalog_winner_found:
-                    continue  # Successfully processed this group. Skip the DAO fallback completely.
-
-                # If all catalog stars in this group failed the NaN limit/border cuts,
-                # the code naturally falls through to the 'else' block below to evaluate the DAO detections instead.
-
-            # --- 2. FALLBACK TO DAO MEMBERS (OR IF CATALOGS FAILED QUALITY CUTS) ---
-            # We change this 'else:' to a flat block since catalog success triggers 'continue'
-            peaks = []
-            d2 = []
-            valid_not_catalog_indices = []
-
-            for k in not_catalog_member_indices:
-                candidate = dict(group_cands[k])
-                cx, cy = float(candidate["x"]), float(candidate["y"])
-                if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[3]:
-                    continue
-                half = int(max(15, self.group_box))
-                xlo = max(0, int(round(cx)) - half)
-                xhi = min(nx_arr, int(round(cx)) + half + 1)
-                ylo = max(0, int(round(cy)) - half)
-                yhi = min(ny_arr, int(round(cy)) + half + 1)
-                local = data_arr[ylo:yhi, xlo:xhi]
-                if np.sum(~np.isfinite(local)) > np.ceil(local.shape[0] * local.shape[1] * self.nan_lim_percent):
-                    continue  # Avoid spurious large coresat estimates from mostly-NaN cutouts.
-
-                # Track indices that actually survived the initial border and NaN filters
-                valid_not_catalog_indices.append(k)
-
-                if np.any(~np.isfinite(local)):
-                    sat_flag = True
-                    # Saturated group: estimate the NaN-core centroid on a group-wide
-                    # cutout and use that as the representative source position.
-                    sr, xcore, ycore, eccentricity, solidity = estimate_nan_core(local, margin=1)
-                    peaks.append(float(candidate.get("peak", 0.0)))  # Flat float to prevent indexing quirks later
-                    d2.append((cx - (xcore + xlo)) ** 2 + (cy - (ycore + ylo)) ** 2)
-                else:
-                    sat_flag = False
-                    # Unsaturated group: use a group-wide PSF matched-filter peak to
-                    # avoid keeping a bright wing knot as the representative.
-                    peaks.append(float(candidate.get("peak", 0.0)))
-                    try:
-                        masked_psf_data = downsample_psf_to_detector(psf, self.oversampling)
-                        masked_psf_data = np.asarray(masked_psf_data, dtype=float)
-                        psf_sum = np.nansum(masked_psf_data)
-                        if np.isfinite(psf_sum) and psf_sum > 0:
-                            masked_psf_data = masked_psf_data / psf_sum
-                            img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
-                            corr = fftconvolve(img, masked_psf_data[::-1, ::-1], mode="same")
-                            iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
-                            d2.append((cx - (float(ix) + xlo)) ** 2 + (cy - (float(iy) + ylo)) ** 2)
-                    except Exception:
-                        # If cross-correlation fails, match array length by stripping this index back out
-                        valid_not_catalog_indices.pop()
-                        peaks.pop()
-                        continue
-
-            peaks = np.array(peaks)
-            if len(peaks) == 0:
-                # All candidates have been dropped.
-                continue
-
-            # --- 3. RE-ALIGNED DAO REFINEMENT PIPELINE ---
-            if len(d2) > 0:
-                # lexsort sorts by d2 ascending, then by peaks descending (due to minus sign)
-                best_sub_idx = int(np.lexsort((d2, -peaks))[0])
-            else:
-                best_sub_idx = int(np.argmax(peaks))
-
-            # Map the inner sub-index loop choice cleanly back to the true group candidate index
-            best_idx = valid_not_catalog_indices[best_sub_idx]
-            best = dict(group_cands[best_idx])
-
-            # Use the measured wing spread to enlarge the local window used for
-            # the final centroid/core-radius refinement.
-            xg = np.array([float(c["x"]) for c in group_cands], dtype=float)
-            yg = np.array([float(c["y"]) for c in group_cands], dtype=float)
-            refx, refy = float(best["x"]), float(best["y"])
-            eff_group_box = self._effective_radius(xg, yg, refx, refy, self.group_box)
-
-            # Populate coresat for saturated representatives.
-            if sat_flag:
-                cx, cy = float(best["x"]), float(best["y"])
-                half = int(max(15, eff_group_box))
-                xlo = max(0, int(round(cx)) - half)
-                xhi = min(nx_arr, int(round(cx)) + half + 1)
-                ylo = max(0, int(round(cy)) - half)
-                yhi = min(ny_arr, int(round(cy)) + half + 1)
-                local = data_arr[ylo:yhi, xlo:xhi]
-                if np.any(~np.isfinite(local)):
-                    sr, xcore, ycore, eccentricity, solidity = estimate_nan_core(local, center=(cx - xlo, cy - ylo), margin=1)
-                    best["x"] = float(xcore + xlo)
-                    best["y"] = float(ycore + ylo)
-                    if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or best["y"] > ny_arr - self.npix[3]:
-                        continue
-            else:
-                # For unsaturated groups, place the representative on the local
-                # PSF-correlation peak if it was measured above.
-                half = int(max(8, eff_group_box))
-                xlo = max(0, int(np.floor(np.min(xg))) - half)
-                xhi = min(nx_arr, int(np.ceil(np.max(xg))) + half + 1)
-                ylo = max(0, int(np.floor(np.min(yg))) - half)
-                yhi = min(ny_arr, int(np.ceil(np.max(yg))) + half + 1)
-                local = data_arr[ylo:yhi, xlo:xhi]
-                try:
-                    masked_psf_data = downsample_psf_to_detector(psf, self.oversampling)
-                    masked_psf_data = np.asarray(masked_psf_data, dtype=float)
-                    psf_sum = np.nansum(masked_psf_data)
-                    if np.isfinite(psf_sum) and psf_sum > 0:
-                        masked_psf_data = masked_psf_data / psf_sum
-                        img = np.nan_to_num(local - np.nanmedian(local), nan=0.0)
-                        corr = fftconvolve(img, masked_psf_data[::-1, ::-1], mode="same")
-                        iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
-                        best["x"] = float(ix + xlo)
-                        best["y"] = float(iy + ylo)
-                        if best["x"] < self.npix[0] or best["y"] < self.npix[2] or best["x"] > nx_arr - self.npix[1] or best["y"] > ny_arr - self.npix[3]:
-                            continue
-                except Exception:
-                    continue
-
-            selected.append(best)
-
-        log.info(f"Using {np.sum([i['method']=='catalog' for i in selected])} catalog seeds + {np.sum([i['method']!='catalog' for i in selected])} DAO detections after selections.")
-        tbl = Table(rows=selected)
-        tbl['id']=[i for i in range(len(tbl))]
-        return tbl
+        candidates['id']=[i for i in range(len(candidates))]
+        return candidates
 
     def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None,fit_radius=71):
         '''
@@ -1604,7 +1446,7 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        selected_candidates = self._group_and_select(all_candidates, data_subtracted, self.psf)
+        selected_candidates = self._clean_catalog(all_candidates, data_subtracted)
         # selected_candidates = all_candidates
 
         return selected_candidates
