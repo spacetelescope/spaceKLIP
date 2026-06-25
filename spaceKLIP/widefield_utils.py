@@ -20,6 +20,7 @@ from skimage.measure import label, regionprops
 from scipy.ndimage import binary_dilation
 from photutils.aperture import CircularAperture, aperture_photometry
 from scipy.spatial import KDTree
+from skimage.color import label2rgb
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -331,6 +332,25 @@ def fetch_catalog_for_image_fov(path2table,
                                     & (table["y"] <= ny - (npix[3] + border))
                             )
                             table_selected = table[mask]
+                            table_selected['flux'] = 0.0
+                            table_selected['coresat'] = 0.0
+                            for _c in table_selected:
+                                _cx, _cy = float(_c["x"]), float(_c["y"])
+                                _xlo = int(_cx) - 31
+                                _xhi = int(_cx) + 32
+                                _ylo = int(_cy) - 31
+                                _yhi = int(_cy) + 32
+                                _patch = data[_ylo:_yhi, _xlo:_xhi]
+                                _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
+                                _c['coresat'] = _sr
+                                # Extract quick aperture photometry
+                                positions = np.transpose((_x, _y))
+                                apertures = CircularAperture(positions, r=15)
+                                nansat_mask = np.isnan(_patch)
+                                _patch[_patch < 0] = 0
+                                phot_table = aperture_photometry(_patch, apertures, mask=nansat_mask, method='exact')
+                                _c['flux'] = phot_table['aperture_sum'][0]
+
                             table_selected.write(path2table, format="csv", overwrite=True)
                             return table_selected
 
@@ -616,15 +636,115 @@ def fit_psf(
 
     return fitted_x_pos,fitted_y_pos,fitted_flux
 
-def estimate_nan_core(data, center=None, margin=1, nanmask=None):
+def inspect_regions(nandata, labeled_mask, props, best_prop=None, catalog_entry=None):
+    """Plots only the colored mask overlay with concise ID, Flux, Roundness, and Solidity metrics."""
+    plt.figure(figsize=(8, 8))
+
+    # Clean data for display (replace NaNs and negatives with median)
+    display_img = nandata.copy()
+    clean_bg = np.nanmedian(np.where(display_img < 0, np.nan, display_img))
+    display_img[~np.isfinite(display_img) | (display_img < 0)] = clean_bg
+
+    # Normalize image for label2rgb blending
+    img_min, img_max = display_img.min(), display_img.max()
+    if img_max > img_min:
+        norm_img = (display_img - img_min) / (img_max - img_min)
+    else:
+        norm_img = np.zeros_like(display_img)
+
+    # CHANGE: Set bg_color to a mid-gray tuple (R, G, B) so it is highly visible
+    overlay = label2rgb(
+        labeled_mask,
+        image=norm_img,
+        bg_label=0,
+        bg_color=(0.9, 0.9, 0.9),
+        alpha=0.3,
+    )
+    plt.imshow(overlay, origin="lower")
+    plt.title("Detected Regions Overlay")
+
+    # MINIMAL CHANGE: Extract photometry metrics to display them in the loops
+    star_flux = float(catalog_entry['flux']) if catalog_entry is not None else 0.0
+    star_round = float(catalog_entry['roundness']) if catalog_entry is not None else 0.0
+    star_sharp = float(catalog_entry['sharpness']) if catalog_entry is not None else 0.5
+
+    print(f"\n--- INSPECTING {len(props)} REGIONS ---")
+    for prop in props:
+        # Cast tracking properties safely
+        label_id = int(round(float(prop.label)))
+        is_winner = best_prop and (label_id == int(round(float(best_prop.label))))
+        status = "[WINNER]" if is_winner else ""
+
+        # Calculate metrics
+        single_cluster_mask = labeled_mask == prop.label
+        solidity = float(prop.solidity)
+
+        # Print detailed stats to console including photometry metrics used in decision
+        print(
+            f"Label {label_id:2d} {status}: "
+            f"Flux={star_flux:.2f} | "
+            f"Rnd={star_round:.2f} | "
+            f"Shrp={star_sharp:.2f} | "
+            f"Solidity={solidity:.2f} | "
+            f"Centroid=({prop.centroid[1]:.1f}, {prop.centroid[0]:.1f})"
+        )
+
+        # Draw bounding boxes
+        minr, minc, maxr, maxc = prop.bbox
+        rect = plt.Rectangle(
+            (minc, minr),
+            maxc - minc,
+            maxr - minr,
+            fill=False,
+            edgecolor="red" if is_winner else "cyan",
+            linewidth=2.5 if is_winner else 1.5,
+        )
+        plt.gca().add_patch(rect)
+
+        # Create a clean metadata label string using original layout names
+        label_text = (
+            f"ID:{label_id}\n"
+            f"F:{star_flux:.2f}\n"
+            f"R:{star_round:.2f}\n"
+            f"S:{star_sharp:.2f}\n"
+            f"Sol:{solidity:.2f}"
+        )
+
+        # Position the text neatly above or to the side of the box
+        plt.text(
+            maxc + 1,
+            minr,
+            label_text,
+            color="yellow",
+            fontsize=9,
+            weight="bold",
+            bbox=dict(facecolor="black", alpha=0.6, boxstyle="round,pad=0.2"),
+        )
+
+    plt.tight_layout()
+    plt.show()
+
+def estimate_nan_core(data, catalog_entry=None, center=None, margin=1, nanmask=None, debug=False):
+    """
+    Estimates the saturated core radius using geometric solidity for mask quality,
+    while using true aperture photometry metrics (flux, sharpness, roundness) for star selection.
+
+    Parameters:
+    catalog_entry (dict or Table row): Must contain 'flux', 'sharpness', 'roundness' for the candidate star.
+    """
     nandata = np.array(data, dtype=float)
     if nanmask is not None:
         nandata[nanmask.astype(bool)] = np.nan
 
-    bad_mask = ~np.isfinite(nandata)
     ny, nx = nandata.shape
-
     default_cx, default_cy = center if center is not None else ((nx - 1) / 2, (ny - 1) / 2)
+
+    # Clean background estimation (ignoring negative border pixels)
+    img_background = np.nanmedian(np.where(nandata < 0, np.nan, nandata))
+
+    # Calculate a rough noise estimate to find bright stars
+    bright_star_thresh = 3 * img_background
+    bad_mask = (~np.isfinite(nandata)) | (nandata > bright_star_thresh)
 
     if not np.any(bad_mask):
         return 0, float(default_cx), float(default_cy), 0, 1
@@ -638,48 +758,47 @@ def estimate_nan_core(data, center=None, margin=1, nanmask=None):
     best_prop = None
     best_score = -float('inf')
 
-    # Calculate a robust image background level to handle negative/zero values cleanly
-    # We use nanmedian to ignore the bad pixels themselves
-    img_background = np.nanmedian(nandata)
+    # Get true photometry parameters from the star catalog entry if available
+    # Defaulting to ideal values if no photometry catalog is provided to the function
+    star_flux = float(catalog_entry['flux']) if catalog_entry is not None else 1.0
+    star_sharp = float(catalog_entry['sharpness']) if catalog_entry is not None else 0.5
+    star_round = float(catalog_entry['roundness']) if catalog_entry is not None else 0.0
+
+    # Calculate penalties for the physical star parameters (DAOPhot standard)
+    sharpness_penalty = np.abs(star_sharp - 0.5)
+    roundness_penalty = np.abs(star_round - 0.0)
+
+    # Base star profile quality score
+    star_profile_score = np.log10(max(1.0, star_flux)) - sharpness_penalty - roundness_penalty
 
     for prop in props:
-        # Isolate this specific single cluster
         single_cluster_mask = (labeled_mask == prop.label)
 
-        # --- NEW STELLAR WING VALIDATION ---
-        # 1. Dilate the cluster mask by 2 pixels to capture the immediate perimeter
         dilated = binary_dilation(single_cluster_mask, iterations=2)
         perimeter_mask = dilated & ~single_cluster_mask
 
-        # 2. Extract valid data values on this perimeter
-        # We replace any other NaNs with the background so they don't break the mean
-        perimeter_data = np.where(np.isnan(nandata), img_background, nandata)[perimeter_mask]
+        # Clean both NaNs and negative borders for the perimeter background check
+        perimeter_data = np.where((np.isnan(nandata)) | (nandata < 0), img_background, nandata)[perimeter_mask]
 
-        # 3. Calculate the average perimeter brightness relative to the background
-        # If the cluster is in the background, this brightness will be near 1.0.
-        # If it is a real star core, the wings will be hundreds/thousands of times higher.
         avg_perimeter_brightness = np.mean(perimeter_data) - img_background
         brightness_factor = max(1.0, avg_perimeter_brightness)
 
-        # --- COMBINED SCORING ---
-        # Geometric score (perfect circle/box = 1.0)
-        shape_score = prop.solidity * (1.0 - prop.eccentricity)
+        # 1. Mask Solidity: Geometric quality of the core mask (Closer to 1.0 is a clean box/circle core)
+        solidity_score = prop.solidity
 
-        # Multiply shape by brightness.
-        # A bad pixel cluster in the dark background will get a tiny score.
-        # A true saturated core with bright stellar wings will score massive points.
-        total_score = shape_score * brightness_factor
+        # 2. Total Score combines mask quality, wing brightness, and the external photometry star quality
+        total_score = solidity_score + brightness_factor + star_profile_score
 
         if total_score > best_score:
             best_score = total_score
             best_prop = prop
 
-    # If even our best choice is just sitting in the background noise,
-    # it means there is likely NO saturated core in this image tile at all.
+    if debug:
+        inspect_regions(nandata, labeled_mask, props, best_prop)
+
     if best_score <= 1.0:
         return 0, float(default_cx), float(default_cy), 0, 1
 
-    # Process winning cluster
     winning_region = (labeled_mask == best_prop.label)
     yy, xx = np.indices(nandata.shape)
     x_cent = float(np.mean(xx[winning_region]))
@@ -889,9 +1008,8 @@ class DAO():
                 sharpness_range=(0.2, 1.0),
                 roundness_range=(-1.0, 1.0),
                 fwhm=2.5,
-                group_box=1,
                 catalog=None,
-                nan_lim_percent=0.51,
+                nan_lim_percent=0.75,
                 two_pass=True,
                 showplots=False,
                 psf=None,
@@ -917,10 +1035,6 @@ class DAO():
             Acceptable range of ``DAOStarFinder`` sharpness values.
         roundness_range : tuple of float, optional
             Acceptable range of ``DAOStarFinder`` roundness values.
-        group_box : float, optional
-            Grouping box (pixels). All ``DAOStarFinder`` detections within box of base
-            group_box to each other are treated as belonging to the same star, and
-            only one representative is kept.
         catalog : astropy.table.Table, str, or None, optional
             External source catalog used to override DAO detections when overlapping.
             Accepts an ``astropy.table.Table`` with ``x`` and ``y`` pixel-coordinate
@@ -955,7 +1069,6 @@ class DAO():
         self.fwhm=fwhm
         self.sharpness_range=sharpness_range
         self.roundness_range=roundness_range
-        self.group_box=group_box
         self.catalog=catalog
         self.nan_lim_percent=nan_lim_percent
         self.two_pass = two_pass
@@ -1036,6 +1149,23 @@ class DAO():
         final_mask = np.where(is_coresat, mask1, mask1)
 
         tbl_selected = tbl[final_mask]['x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness']
+        tbl_selected['flux'] = 0.0
+        for _c in tbl_selected:
+            _cx, _cy = float(_c["x"]), float(_c["y"])
+            _xlo = int(_cx) - 31
+            _xhi = int(_cx) + 32
+            _ylo = int(_cy) - 31
+            _yhi = int(_cy) + 32
+            _patch = data[_ylo:_yhi, _xlo:_xhi]
+            _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
+            _c['coresat'] = _sr
+            # Extract quick aperture photometry
+            positions = np.transpose((_x, _y))
+            apertures = CircularAperture(positions, r=15)
+            nansat_mask = np.isnan(_patch)
+            _patch[_patch < 0] = 0
+            phot_table = aperture_photometry(_patch, apertures, mask=nansat_mask, method='exact')
+            _c['flux'] = phot_table['aperture_sum'][0]
 
         return tbl_selected
 
@@ -1185,13 +1315,18 @@ class DAO():
 
             # Find all neighbors within the box_size
             neighbors = tree.query_ball_point(coords[idx], r=self.fov / 2.0, p=np.inf)
+            if idx in [250] :
+                pass
             # Mark the representative and all its neighbors as visited
             visited[neighbors] = True
+
 
         # 5. Return the filtered Astropy Table (sorted by original order)
         keep_indices = sorted(keep_indices)
         log.info(f"Using {np.sum([i['method']=='catalog' for i in catalog[keep_indices]])} catalog seeds + {np.sum([i['method']!='catalog' for i in catalog[keep_indices]])} DAO detections after selections.")
-        return catalog[keep_indices]
+        catalog=catalog[keep_indices]
+        catalog['id']=[i for i in range(len(catalog))]
+        return catalog
 
     def _clean_catalog(self,candidates, data_arr):
         """Group nearby candidates and select one representative per star.
@@ -1219,24 +1354,35 @@ class DAO():
         if len(candidates) == 0:
             return []
 
-
+        data_temp =np.copy(data_arr)
+        # left, right, bottom, top
+        # 1. Top border: rows from 0 up to X
+        data_temp[:self.npix[3], :] = -1
+        # 2. Bottom border: rows from the bottom up to X
+        data_temp[-self.npix[2]:, :] = -1
+        # 3. Left border: columns from 0 up to X
+        data_temp[:, :self.npix[0]] = -1
+        # 4. Right border: columns from the right up to X
+        data_temp[:, -self.npix[1]:] = -1
         # Pre-compute a provisional NaN-core radius for every candidate so
         # that _candidate_radius can scale the grouping window correctly even
         # before the formal coresat is estimated inside _clean_catalog.
         _prov_sat = []
         _rmax = []
         _keep_mask = []
-        candidates['flux'] = 0.0
+        # candidates['flux'] = 0.0
         for _c in candidates:
             _cx, _cy = float(_c["x"]), float(_c["y"])
             _xlo = int(_cx) - 31
             _xhi = int(_cx) + 32
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
-            _patch = data_arr[_ylo:_yhi, _xlo:_xhi]
+            _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
+            if np.isin(_c['id'], [250]):
+                pass
             _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
             if _sr > 0:
-                if _ecc <=0.75 and _sol>=0.85 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
+                if _ecc <=0.8 and _sol>=0.8 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
                     _c['x'] = _x+_xlo
                     _c['y'] = _y+_ylo
                     _c['eccsat'] = _ecc
@@ -1261,10 +1407,8 @@ class DAO():
             _keep_mask.append(True)
 
         candidates = candidates[_keep_mask]
-        candidates = self._group_catalog(candidates)
-        pass
-
         candidates['id']=[i for i in range(len(candidates))]
+        candidates = self._group_catalog(candidates)
         return candidates
 
     def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None,fit_radius=71):
@@ -1443,7 +1587,7 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        selected_candidates = self._clean_catalog(all_candidates, data_subtracted)
+        selected_candidates = self._clean_catalog(all_candidates, data_subtracted,)
         # selected_candidates = all_candidates
 
         return selected_candidates
