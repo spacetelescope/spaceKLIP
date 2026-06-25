@@ -1315,8 +1315,6 @@ class DAO():
 
             for k in not_catalog_member_indices:
                 candidate = dict(group_cands[k])
-                if candidate['id'] == 88:
-                    pass
                 cx, cy = float(candidate["x"]), float(candidate["y"])
                 if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[3]:
                     continue
