@@ -3728,16 +3728,6 @@ class ImageTools():
                             log.info(f"No catalog provide. incat_path = {incat_path_temp} and use_gaia = {use_gaia}")
                             result = Table()
 
-                        offsetpsf_func = JWST_PSF(apername,
-                                                  filt,
-                                                  date=date,
-                                                  fov_pix=fov_pix,
-                                                  oversample=2,
-                                                  sp=None,
-                                                  use_coeff=False)
-                        psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
-                        psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
-
                         dao = DAO(threshold=threshold,
                                     fwhm=fwhm,
                                     sharpness_range=sharpness_range,
@@ -3745,7 +3735,7 @@ class ImageTools():
                                     catalog=result,
                                     group_box=group_box,
                                     npix=npix,
-                                    psf=psf_no_coronmsk)
+                                    fov=fov_pix)
 
                         objects_tbl_selected = dao.dao_source_extractor(data=data[0],
                                                                         nanmask=nanmask)
