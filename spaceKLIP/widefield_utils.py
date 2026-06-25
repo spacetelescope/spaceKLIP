@@ -38,7 +38,8 @@ def fetch_catalog_for_image_fov(path2table,
                                 use_simbad=False,
                                 border=3,
                                 npix=0,
-                            ):
+                                use_mocadb: bool = False
+                                ):
                             """Estimate image FOV from WCS and query Gaia over that footprint.
 
                             Parameters
@@ -67,6 +68,8 @@ def fetch_catalog_for_image_fov(path2table,
                                 number of pixels will be padded on each side. If list of four int,
                                 a different number of pixels can be padded on the [left, right,
                                 bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
+                            use_mocadb : bool, optional
+                                If True, queries the MOCADB database for a MOC of the image footprint.
 
                             Returns
                             -------
@@ -80,7 +83,6 @@ def fetch_catalog_for_image_fov(path2table,
                                            radius_deg,
                                            gaia_table: str = "gaiadr3.gaia_source",
                                            use_allwise: bool = False,
-                                           use_mocadb: bool = False,
                                            ):
                                 """
                                 Helper to fetch Gaia DR3 source data, with an optional ALLWISE W2 filter proxy.
@@ -100,9 +102,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 use_allwise : bool, optional
                                     If True, queries and filters for objects with ALLWISE W2 measurements.
                                     Defaults to False.
-                                use_mocadb : bool, optional
-                                    If True, queries and filters for objects with MOCADB measurements.
-                                    Defaults to False.
+
                                 Returns
                                 -------
                                 None
@@ -232,7 +232,7 @@ def fetch_catalog_for_image_fov(path2table,
                                             simbad_table.write(path2table, format="csv", overwrite=True)
 
                             def query_mocadb(table):
-                                from mocapy import *
+                                from mocapy import MocaEngine
                                 # Create a moca engine object
                                 moca = MocaEngine()
 
@@ -499,7 +499,7 @@ def fit_psf(
         core_mask_x = (nx - 1) / 2
         core_mask_y = (ny - 1) / 2
     else:
-        coresat, core_mask_x, core_mask_y, eccentricity, solidity = estimate_nan_core(data, margin=0)
+        coresat, core_mask_x, core_mask_y, eccentricity, solidity = estimate_nan_core(data, margin=0, dx_range=3,dy_range=3)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -615,7 +615,9 @@ def fit_psf(
 def estimate_nan_core(data,
                       center=None,
                       margin=1,
-                      nanmask=None
+                      nanmask=None,
+                      dx_range=10,
+                      dy_range=10,
                       ):
     nandata = np.asarray(data.copy())
     if nanmask is not None:
@@ -634,8 +636,8 @@ def estimate_nan_core(data,
 
         if not bad[sy, sx]:
             found = False
-            for dy in range(-2, 3):
-                for dx in range(-2, 3):
+            for dy in range(-dy_range, dy_range+1):
+                for dx in range(-dx_range,dx_range+1):
                     y = sy + dy
                     x = sx + dx
                     if 0 <= y < ny and 0 <= x < nx and bad[y, x]:
@@ -1313,6 +1315,8 @@ class DAO():
 
             for k in not_catalog_member_indices:
                 candidate = dict(group_cands[k])
+                if candidate['id'] == 88:
+                    pass
                 cx, cy = float(candidate["x"]), float(candidate["y"])
                 if cx < self.npix[0] or cy < self.npix[2] or cx > nx_arr - self.npix[1] or cy > ny_arr - self.npix[3]:
                     continue
