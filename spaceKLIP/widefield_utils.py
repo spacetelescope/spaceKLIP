@@ -687,10 +687,10 @@ def inspect_regions(nandata, labeled_mask, props, best_prop=None):
             f"Centroid=({prop.centroid[1]:.1f}, {prop.centroid[0]:.1f})"
         )
 
-        # Draw bounding boxes
+        # Draw bounding boxes (FIXED: Added -0.5 offset for perfect pixel boundary alignment)
         minr, minc, maxr, maxc = prop.bbox
         rect = plt.Rectangle(
-            (minc, minr),
+            (minc - 0.5, minr - 0.5),   # Shift anchor to the true bottom-left pixel edge
             maxc - minc,
             maxr - minr,
             fill=False,
@@ -702,9 +702,6 @@ def inspect_regions(nandata, labeled_mask, props, best_prop=None):
         # Create a clean metadata label string using original layout names
         label_text = (
             f"ID:{label_id}\n"
-            f"Sol:{solidity:.2f}\n"
-            f"AF:{area_factor:.2f}\n"
-            f"BF:{brightness_factor:.2f}\n"
             f"Sc:{score:.2f}"
         )
 
@@ -740,12 +737,27 @@ def estimate_nan_core(data, center=None, margin=1, nanmask=None, debug=False):
 
     # Calculate a rough noise estimate to find bright stars
     bright_star_thresh = 3 * img_background
-    bad_mask = (~np.isfinite(nandata)) | (nandata > bright_star_thresh)
 
-    if not np.any(bad_mask):
+    # 1. Isolate and label ONLY the NaN/Infinite cores
+    nan_mask = ~np.isfinite(nandata)
+    labeled_nan_mask = label(nan_mask)
+    num_nan_cores = np.max(labeled_nan_mask)
+
+    # 2. Isolate and label ONLY the pure bright pixels (excluding the NaNs)
+    bright_mask = (nandata > bright_star_thresh) & (~nan_mask)
+    labeled_bright_mask = label(bright_mask)
+
+    # 3. Shift the bright pixel IDs up so they do not conflict with NaN IDs
+    if num_nan_cores > 0:
+        labeled_bright_mask[labeled_bright_mask > 0] += num_nan_cores
+
+    # 4. Merge them into a single master mask where touching regions keep distinct IDs
+    labeled_mask = np.where(labeled_nan_mask > 0, labeled_nan_mask, labeled_bright_mask)
+
+    if not np.any(labeled_mask):
         return 0, float(default_cx), float(default_cy), 0, 1
 
-    labeled_mask = label(bad_mask)
+    # Now props contains completely unmixed regions
     props = regionprops(labeled_mask)
 
     if not props:
@@ -753,35 +765,6 @@ def estimate_nan_core(data, center=None, margin=1, nanmask=None, debug=False):
 
     best_prop = None
     best_score = -float('inf')
-    # for prop in props:
-    #     single_cluster_mask = (labeled_mask == prop.label)
-    #
-    #     dilated = binary_dilation(single_cluster_mask, iterations=2)
-    #     perimeter_mask = dilated & single_cluster_mask & (nandata>=0)
-    #
-    #     # Clean both NaNs and negative borders for the perimeter background check
-    #     # perimeter_data = np.where((np.isnan(nandata)) | (nandata <= 0), img_background, nandata)[perimeter_mask]
-    #     perimeter_data = nandata[perimeter_mask]
-    #
-    #     avg_perimeter_brightness = np.nanmedian(perimeter_data)
-    #     brightness_factor = max(0, avg_perimeter_brightness)
-    #
-    #     # Scale by log10 of the core area to heavily prioritize large star cores over 3-pixel noise
-    #     area_factor = np.log10(max(1.0, float(prop.area)))
-    #
-    #     # 1. Mask Solidity: Geometric quality of the core mask (Closer to 1.0 is a clean box/circle core)
-    #     solidity_score = prop.solidity
-    #
-    #     # 2. Total Score combines mask quality, wing brightness, and the external photometry star quality
-    #     total_score = solidity_score * brightness_factor * area_factor
-    #
-    #     prop.brightness_factor=brightness_factor
-    #     prop.area_factor=area_factor
-    #     prop.score=total_score
-    #
-    #     if total_score > best_score:
-    #         best_score = total_score
-    #         best_prop = prop
 
     for prop in props:
         single_cluster_mask = (labeled_mask == prop.label)
@@ -805,7 +788,7 @@ def estimate_nan_core(data, center=None, margin=1, nanmask=None, debug=False):
         # ---------------------------------------------------------------
 
         dilated = binary_dilation(single_cluster_mask, iterations=2)
-        perimeter_mask = dilated & single_cluster_mask & (nandata >= 0)
+        perimeter_mask = dilated & (nandata >= 0)
 
         perimeter_data = nandata[perimeter_mask]
 
@@ -1413,8 +1396,6 @@ class DAO():
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
-            if np.isin(_c['id'], [22,32,68,99,125,250,344]):
-                pass
             _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
             if _sr > 0:
                 if _ecc <=0.8 and _sol>=0.8 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
@@ -1622,7 +1603,7 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        selected_candidates = self._clean_catalog(all_candidates, data_subtracted)
-        # selected_candidates = all_candidates
+        # selected_candidates = self._clean_catalog(all_candidates, data_subtracted)
+        selected_candidates = all_candidates
 
         return selected_candidates
