@@ -341,7 +341,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 _ylo = int(_cy) - 31
                                 _yhi = int(_cy) + 32
                                 _patch = data[_ylo:_yhi, _xlo:_xhi]
-                                _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
+                                _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1)
                                 _c['coresat'] = _sr
                                 # Extract quick aperture photometry
                                 positions = np.transpose((_x, _y))
@@ -523,7 +523,7 @@ def fit_psf(
         core_mask_x = (nx - 1) / 2
         core_mask_y = (ny - 1) / 2
     else:
-        coresat, core_mask_x, core_mask_y, eccentricity, solidity = estimate_nan_core(data, margin=0)
+        coresat, core_mask_x, core_mask_y, eccentricity, solidity = inspect_region_for_best_prop(data, margin=0)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -636,7 +636,7 @@ def fit_psf(
 
     return fitted_x_pos,fitted_y_pos,fitted_flux
 
-def inspect_regions(nandata, labeled_mask, props, best_prop=None):
+def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_cent=None):
     """Plots only the colored mask overlay with concise ID, Flux, Roundness, and Solidity metrics."""
     plt.figure(figsize=(8, 8))
 
@@ -698,7 +698,7 @@ def inspect_regions(nandata, labeled_mask, props, best_prop=None):
             linewidth=2.5 if is_winner else 1.5,
         )
         plt.gca().add_patch(rect)
-
+        plt.plot(x_cent, y_cent, "xk", ms=7)
         # Create a clean metadata label string using original layout names
         label_text = (
             f"ID:{label_id}\n"
@@ -719,10 +719,18 @@ def inspect_regions(nandata, labeled_mask, props, best_prop=None):
     plt.tight_layout()
     plt.show()
 
-def estimate_nan_core(data, center=None, margin=1, nanmask=None, debug=False):
+def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, debug=False):
     """
-    Estimates the saturated core radius using geometric solidity for mask quality,
-    while using true aperture photometry metrics (flux, sharpness, roundness) for star selection.
+    Inspect a region looking for different props, identify the best one and return it's properties.
+
+    data: 2D array of image data to analyze
+    center: (x, y) tuple for the center of the region to analyze; if None, the function will find the brightest pixel in the data
+    margin: number of pixels to include around the detected region for analysis
+    nanmask: optional 2D boolean array of the same shape as data, where True indicates pixels to ignore (e.g., NaNs or masked regions)
+    debug: if True, will make a plot with additional debug information
+
+    Returns:
+    A list of properties for the best prop in the region
 
     """
     nandata = np.array(data, dtype=float)
@@ -804,29 +812,42 @@ def estimate_nan_core(data, center=None, margin=1, nanmask=None, debug=False):
         prop.area_factor = area_factor
         prop.score = total_score
 
-        # Override prop.solidity so your inspect_regions function prints the correct value
+        # Override prop.solidity so your inspect_region function prints the correct value
         prop.custom_solidity = solidity_score
 
         if total_score > best_score:
             best_score = total_score
             best_prop = prop
 
-    if debug:
-        inspect_regions(nandata, labeled_mask, props, best_prop)
-
-    if best_score <= 1.0:
+    if best_score <= 0.0:
         return 0, float(default_cx), float(default_cy), 0, 1
+
+    # winning_region = (labeled_mask == best_prop.label)
+    # yy, xx = np.indices(nandata.shape)
+    # x_cent = float(np.mean(xx[winning_region]))
+    # y_cent = float(np.mean(yy[winning_region]))
 
     winning_region = (labeled_mask == best_prop.label)
     yy, xx = np.indices(nandata.shape)
-    x_cent = float(np.mean(xx[winning_region]))
-    y_cent = float(np.mean(yy[winning_region]))
 
-    rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
-    if len(rr[winning_region&np.isnan(nandata)])>0:
+    # Check if the winning region corresponds to a saturated NaN core
+    if np.any(np.isnan(nandata[winning_region])):
+        # Saturated core: use the geometric center of the mask
+        x_cent = float(np.mean(xx[winning_region]))
+        y_cent = float(np.mean(yy[winning_region]))
+        rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
         radius = int(np.ceil(np.max(rr[winning_region&np.isnan(nandata)])) + int(margin))
     else:
+        # Unsaturated star: isolate region pixels and locate the peak flux pixel
+        region_data = np.where(winning_region, nandata, -np.inf)
+        y_peak, x_peak = np.unravel_index(np.argmax(region_data), region_data.shape)
+        x_cent = float(x_peak)
+        y_cent = float(y_peak)
         radius = 0
+
+    if debug:
+        inspect_region(nandata, labeled_mask, props, best_prop, x_cent, y_cent)
+
     return radius, x_cent, y_cent, best_prop.eccentricity, best_prop.custom_solidity
 
 
@@ -1177,7 +1198,7 @@ class DAO():
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
             _patch = data[_ylo:_yhi, _xlo:_xhi]
-            _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
+            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1)
             _c['coresat'] = _sr
             # Extract quick aperture photometry
             positions = np.transpose((_x, _y))
@@ -1398,7 +1419,7 @@ class DAO():
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
-            _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
+            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1)
             # if _c['id'] in [279,326,345]:
             #     pass
             if _sr > 0:
@@ -1474,7 +1495,7 @@ class DAO():
             yhi = min(ny, int(round(y_fit)) + half + 1)
             cut = data[ylo:yhi, xlo:xhi]
             nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
-            sat_r, _, _, _, _ = estimate_nan_core(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
+            sat_r, _, _, _, _ = inspect_region_for_best_prop(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
 
             nxpsf, nypsf = psf.shape
             xlo_psf = max(0, int(round(nxpsf//2)) - half)
@@ -1556,7 +1577,7 @@ class DAO():
           catalog members from that group and discard all DAO members.
         * Otherwise, if any candidate has NaN pixels nearby (saturated core), the
           NaN-core centroid is used and its radius estimated with
-          ``estimate_nan_core``.
+          ``inspect_region_for_best_prop``.
         * Otherwise the source is re-centered on the strongest group-wide
           PSF-correlation peak, with the highest ``DAOStarFinder`` peak used as a
           fallback.
