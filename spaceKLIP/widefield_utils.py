@@ -679,7 +679,8 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
             solidity = float(prop.custom_solidity)
             brightness_factor = float(prop.brightness_factor)
             area_factor = float(prop.area_factor)
-            boxy_score = float(prop.boxy_score)
+            boxy_factor = float(prop.boxy_factor)
+            distance_factor = float(prop.distance_factor)
             score = float(prop.score)
 
             # Print detailed stats to console including photometry metrics used in decision
@@ -687,7 +688,8 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
                 f"Label {label_id:2d}: "
                 f"Solidity={solidity:.2f} | "
                 f"Area Factor={area_factor:.2f} | "
-                f"Boxy Score={boxy_score:.2f} | "
+                f"Boxy Factor={boxy_factor:.2f} | "
+                f"Distance Factor={distance_factor:.2f} | "
                 f"Brightness={brightness_factor:.2f} | "
                 f"Score={score:.2f} | "
                 f"Centroid=({prop.centroid[1]:.1f}, {prop.centroid[0]:.1f}) {status}"
@@ -726,7 +728,175 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
         plt.show()
         pass
 
-def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, threshold=1.5, debug=False, id=None):
+# def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, threshold=1.5, debug=False, id=None):
+#     """
+#     Inspect a region looking for different props, identify the best one and return it's properties.
+#
+#     data: 2D array of image data to analyze
+#     center: (x, y) tuple for the center of the region to analyze; if None, the function will find the brightest pixel in the data
+#     margin: number of pixels to include around the detected region for analysis
+#     nanmask: optional 2D boolean array of the same shape as data, where True indicates pixels to ignore (e.g., NaNs or masked regions)
+#     debug: if True, will make a plot with additional debug information
+#
+#     Returns:
+#     A list of properties for the best prop in the region
+#
+#     """
+#     nandata = np.array(data, dtype=float)
+#     if nanmask is not None:
+#         nandata[nanmask.astype(bool)] = np.nan
+#
+#     ny, nx = nandata.shape
+#     default_cx, default_cy = center if center is not None else ((nx - 1) / 2, (ny - 1) / 2)
+#
+#     # Clean background estimation (ignoring negative border pixels)
+#     img_background = np.nanmedian(np.where(nandata <= 0, np.nan, nandata))
+#
+#     # Calculate a rough noise estimate to find bright stars
+#     bright_star_thresh = threshold * img_background
+#
+#     # 1. Isolate and label ONLY the NaN/Infinite cores
+#     nan_mask = ~np.isfinite(nandata)
+#     labeled_nan_mask = label(nan_mask)
+#     num_nan_cores = np.max(labeled_nan_mask)
+#
+#     # 2. Isolate and label ONLY the pure bright pixels (excluding the NaNs)
+#     bright_mask = (nandata > bright_star_thresh) & (~nan_mask)
+#     labeled_bright_mask = label(bright_mask)
+#
+#     # 3. Shift the bright pixel IDs up so they do not conflict with NaN IDs
+#     if num_nan_cores > 0:
+#         labeled_bright_mask[labeled_bright_mask > 0] += num_nan_cores
+#
+#     # 4. Merge them into a single master mask where touching regions keep distinct IDs
+#     labeled_mask = np.where(labeled_nan_mask > 0, labeled_nan_mask, labeled_bright_mask)
+#
+#     if not np.any(labeled_mask):
+#         return 0, float(default_cx), float(default_cy), 0, 1
+#
+#     # Now props contains completely unmixed regions
+#     props = regionprops(labeled_mask)
+#     # Filter out any props that are smaller than 1 pixels before the loop starts
+#     props = [p for p in props if p.area >= 1]
+#
+#     if not props:
+#         return 0, float(default_cx), float(default_cy), 0, 1
+#
+#     best_prop = None
+#     best_score = -float('inf')
+#     yy, xx = np.indices(nandata.shape)
+#
+#     for prop in props:
+#         single_cluster_mask = (labeled_mask == prop.label)
+#
+#         # --- Extract sub-masks within this specific region ---
+#         region_nans = single_cluster_mask & (~np.isfinite(nandata))
+#         region_bright = single_cluster_mask & (nandata > bright_star_thresh)
+#
+#         # Decide solidity strategy based on presence of NaNs
+#         if np.any(region_nans):
+#             # Evaluate solidity ONLY on the NaN core cluster
+#             core_label = label(region_nans)
+#             core_props = regionprops(core_label)
+#             # Take the largest NaN cluster inside this prop if multiple exist
+#             solidity_score = max([p.solidity for p in core_props]) if core_props else 0.0
+#             dilated = binary_dilation(region_nans, iterations=5)
+#             perimeter_mask = dilated & (nandata >= 0)
+#             perimeter_data = nandata[perimeter_mask]
+#             avg_perimeter_brightness = np.nansum(perimeter_data)#-img_background)
+#             brightness_factor = max(0.01, avg_perimeter_brightness)
+#             # Saturated core: use the geometric center of the mask
+#             x_cent = float(np.mean(xx[core_label.astype(bool)]))
+#             y_cent = float(np.mean(yy[core_label.astype(bool)]))
+#             rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
+#             radius = int(np.ceil(np.max(rr[core_label.astype(bool)])) + int(margin))
+#             fwhm_temp = max(fwhm,min(radius,10))
+#         else:
+#             # Evaluate solidity ONLY on the bright pixel cluster
+#             star_label = label(region_bright)
+#             star_props = regionprops(star_label)
+#             solidity_score = max([p.solidity for p in star_props]) if star_props else 0.0
+#             perimeter_data = nandata[region_bright]
+#             avg_perimeter_brightness = np.nansum(perimeter_data)#-img_background)
+#             brightness_factor = max(0.01, avg_perimeter_brightness)
+#             fwhm_temp = fwhm
+#
+#         # # Gaussian scaling function: peaks at 1.0 when prop.area == max_star_area
+#         # area_diff = float(prop.area) - max_star_area
+#         # area_factor = np.exp(-0.5 * (area_diff / area_sigma) ** 2)
+#         # Extract the bounding box dimensions of the region
+#         minr, minc, maxr, maxc = prop.bbox
+#         dx = float(maxc - minc)
+#         dy = float(maxr - minr)
+#
+#         # Calculate the target stellar area based on FWHM
+#         # Target linear dimension (diameter) based on your 1.5x FWHM radius profile
+#         target_dim = 3.0 * float(fwhm_temp)
+#         dim_sigma = target_dim / 2
+#         # Evaluate independent Gaussian profiles for both X and Y dimensions
+#         gaussian_dx = np.exp(-0.5 * ((dx - target_dim) / dim_sigma) ** 2)
+#         gaussian_dy = np.exp(-0.5 * ((dy - target_dim) / dim_sigma) ** 2)
+#
+#         # Combine them into a joint spatial scale factor (peaks at 1.0)
+#         area_factor = max(1e-5,gaussian_dx * gaussian_dy)
+#
+#         #Calculate how close to a square the region is
+#         boxy_factor = min(dx, dy) / max(dx, dy)
+#
+#         # Define independent spatial scales for a rectangular frame
+#         sigma_nx = float(nx) / 3.0
+#         sigma_ny = float(ny) / 3.0
+#
+#         # Extract centroid coordinates (prop.centroid is ordered as (y, x))
+#         ry, rx = prop.centroid
+#
+#         # Evaluate independent 2D Gaussian decay for rectangular geometry
+#         dx_norm = ((rx - default_cx) / sigma_nx) ** 2
+#         dy_norm = ((ry - default_cy) / sigma_ny) ** 2
+#
+#         # Distance factor: 1.0 at center, smoothly dropping toward 0.0 at the edges
+#         distance_factor = np.exp(-0.5 * (dx_norm + dy_norm))
+#
+#         # Total Score now uses the dynamically calculated solidity_score
+#         total_score = solidity_score * brightness_factor * area_factor * boxy_factor * distance_factor
+#
+#         prop.custom_solidity = solidity_score
+#         prop.brightness_factor = brightness_factor
+#         prop.area_factor = area_factor
+#         prop.boxy_factor = boxy_factor
+#         prop.distance_factor = distance_factor
+#         prop.score = total_score
+#
+#         if total_score > best_score:
+#             best_score = total_score
+#             best_prop = prop
+#
+#     if best_score <= 0.0:
+#         return 0, float(default_cx), float(default_cy), 0, 1
+#
+#     winning_region = (labeled_mask == best_prop.label)
+#     # Check if the winning region corresponds to a saturated NaN core
+#     if np.any(np.isnan(nandata[winning_region])):
+#         # Saturated core: use the geometric center of the mask
+#         x_cent = float(np.mean(xx[winning_region]))
+#         y_cent = float(np.mean(yy[winning_region]))
+#         rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
+#         radius = int(np.ceil(np.max(rr[winning_region&np.isnan(nandata)])) + int(margin))
+#     else:
+#         # Unsaturated star: isolate region pixels and locate the peak flux pixel
+#         region_data = np.where(winning_region, nandata, -np.inf)
+#         y_peak, x_peak = np.unravel_index(np.argmax(region_data), region_data.shape)
+#         x_cent = float(x_peak)
+#         y_cent = float(y_peak)
+#         radius = 0
+#
+#     if debug:
+#         inspect_region(nandata, labeled_mask, props, best_prop, x_cent, y_cent, id)
+#
+#     return radius, x_cent, y_cent, best_prop.eccentricity, best_prop.custom_solidity
+
+def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, threshold=1.5, peak_fraction=0.5,
+                                 debug=False, id=None):
     """
     Inspect a region looking for different props, identify the best one and return it's properties.
 
@@ -791,63 +961,108 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         region_nans = single_cluster_mask & (~np.isfinite(nandata))
         region_bright = single_cluster_mask & (nandata > bright_star_thresh)
 
-        # Decide solidity strategy based on presence of NaNs
+        # Decide solidity and eccentricity strategy based on presence of NaNs
         if np.any(region_nans):
             # Evaluate solidity ONLY on the NaN core cluster
             core_label = label(region_nans)
             core_props = regionprops(core_label)
             # Take the largest NaN cluster inside this prop if multiple exist
             solidity_score = max([p.solidity for p in core_props]) if core_props else 0.0
+            eccentricity_score = float(prop.eccentricity)  # Saturated cores use full region bounds
+
             dilated = binary_dilation(region_nans, iterations=5)
             perimeter_mask = dilated & (nandata >= 0)
             perimeter_data = nandata[perimeter_mask]
-            avg_perimeter_brightness = np.nansum(perimeter_data)#-img_background)
+            avg_perimeter_brightness = np.nansum(perimeter_data)  # -img_background)
             brightness_factor = max(0.01, avg_perimeter_brightness)
             # Saturated core: use the geometric center of the mask
             x_cent = float(np.mean(xx[core_label.astype(bool)]))
             y_cent = float(np.mean(yy[core_label.astype(bool)]))
             rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
             radius = int(np.ceil(np.max(rr[core_label.astype(bool)])) + int(margin))
-            fwhm_temp = max(fwhm,min(radius,10))
+            fwhm_temp = max(fwhm, min(radius, 10))
+            minr, minc, maxr, maxc = prop.bbox
         else:
-            # Evaluate solidity ONLY on the bright pixel cluster
-            star_label = label(region_bright)
+            # --- Dynamic peak thresholding to strip unknown nebulosity ---
+            region_intensities = nandata[region_bright]
+
+            # Find peak intensity and local cloud median background
+            peak_flux = np.nanmax(region_intensities) if len(region_intensities) > 0 else bright_star_thresh
+            cloud_median = np.nanmedian(region_intensities) if len(region_intensities) > 0 else bright_star_thresh
+
+            # Dynamically slice based on the configurable peak_fraction parameter
+            dynamic_thresh = cloud_median + peak_fraction * (peak_flux - cloud_median)
+
+            # Re-mask this region using the localized high-contrast threshold
+            clean_star_mask = region_bright & (nandata >= dynamic_thresh)
+
+            # Evaluate solidity and geometry on this dynamically isolated peak
+            star_label = label(clean_star_mask)
             star_props = regionprops(star_label)
-            solidity_score = max([p.solidity for p in star_props]) if star_props else 0.0
-            perimeter_data = nandata[region_bright]
-            avg_perimeter_brightness = np.nansum(perimeter_data)#-img_background)
+
+            # Target the largest distinct peak structure found inside the cloud
+            best_star_subprop = max(star_props, key=lambda p: p.area) if star_props else None
+
+            if best_star_subprop is not None:
+                # FIX: Evaluate metrics safely on the reduced area to isolate from nebulosity
+                solidity_score = float(best_star_subprop.solidity)
+                eccentricity_score = float(best_star_subprop.eccentricity)
+                # Override bounding box variables so dx and dy measure only the clean peak
+                minr, minc, maxr, maxc = best_star_subprop.bbox
+                # Use clean stellar peak area for scoring metrics
+                perimeter_data = nandata[clean_star_mask]
+            else:
+                solidity_score = 0.0
+                eccentricity_score = float(prop.eccentricity)
+                minr, minc, maxr, maxc = prop.bbox
+                perimeter_data = nandata[region_bright]
+
+            avg_perimeter_brightness = np.nansum(perimeter_data)  # -img_background)
             brightness_factor = max(0.01, avg_perimeter_brightness)
             fwhm_temp = fwhm
 
-        # # Gaussian scaling function: peaks at 1.0 when prop.area == max_star_area
-        # area_diff = float(prop.area) - max_star_area
-        # area_factor = np.exp(-0.5 * (area_diff / area_sigma) ** 2)
-        # Extract the bounding box dimensions of the region
-        minr, minc, maxr, maxc = prop.bbox
+        # Extract bounding box dimensions (overridden above for unsaturated stars in nebulosity)
         dx = float(maxc - minc)
         dy = float(maxr - minr)
 
-        # Calculate the target stellar area based on FWHM
         # Target linear dimension (diameter) based on your 1.5x FWHM radius profile
         target_dim = 3.0 * float(fwhm_temp)
-        dim_sigma = target_dim / 2
+        # Added a wider, gentler standard deviation slope to prevent too quick decay to 0
+        dim_sigma = target_dim * 1.2
+
         # Evaluate independent Gaussian profiles for both X and Y dimensions
         gaussian_dx = np.exp(-0.5 * ((dx - target_dim) / dim_sigma) ** 2)
         gaussian_dy = np.exp(-0.5 * ((dy - target_dim) / dim_sigma) ** 2)
 
         # Combine them into a joint spatial scale factor (peaks at 1.0)
-        area_factor = max(1e-5,gaussian_dx * gaussian_dy)
+        area_factor = max(1e-5, gaussian_dx * gaussian_dy)
 
-        #Calculate how close to a square the region is
-        boxy_score = min(dx, dy) / max(dx, dy)
+        # Calculate how close to a square the region is, strictly bounded between 0 and 1
+        boxy_factor = min(dx, dy) / max(1e-5, max(dx, dy))
 
-        # Total Score now uses the dynamically calculated solidity_score
-        total_score = solidity_score * brightness_factor * area_factor * boxy_score
+        # Define independent spatial scales for a rectangular frame
+        sigma_nx = float(nx) / 3.0
+        sigma_ny = float(ny) / 3.0
+
+        # Extract centroid coordinates (prop.centroid is ordered as (y, x))
+        ry, rx = prop.centroid
+
+        # Evaluate independent 2D Gaussian decay for rectangular geometry
+        dx_norm = ((rx - default_cx) / sigma_nx) ** 2
+        dy_norm = ((ry - default_cy) / sigma_ny) ** 2
+
+        # Distance factor: 1.0 at center, smoothly dropping toward 0.0 at the edges
+        distance_factor = np.exp(-0.5 * (dx_norm + dy_norm))
+
+        # Total Score now uses the dynamically calculated parameters
+        total_score = solidity_score * brightness_factor * area_factor * boxy_factor * distance_factor
 
         prop.custom_solidity = solidity_score
+        prop.custom_eccentricity = eccentricity_score
         prop.brightness_factor = brightness_factor
         prop.area_factor = area_factor
-        prop.boxy_score = boxy_score
+        prop.boxy_factor = boxy_factor
+        prop.distance_factor = distance_factor
         prop.score = total_score
 
         if total_score > best_score:
@@ -858,13 +1073,14 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         return 0, float(default_cx), float(default_cy), 0, 1
 
     winning_region = (labeled_mask == best_prop.label)
+
     # Check if the winning region corresponds to a saturated NaN core
     if np.any(np.isnan(nandata[winning_region])):
         # Saturated core: use the geometric center of the mask
         x_cent = float(np.mean(xx[winning_region]))
         y_cent = float(np.mean(yy[winning_region]))
         rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
-        radius = int(np.ceil(np.max(rr[winning_region&np.isnan(nandata)])) + int(margin))
+        radius = int(np.ceil(np.max(rr[winning_region & np.isnan(nandata)])) + int(margin))
     else:
         # Unsaturated star: isolate region pixels and locate the peak flux pixel
         region_data = np.where(winning_region, nandata, -np.inf)
@@ -876,8 +1092,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
     if debug:
         inspect_region(nandata, labeled_mask, props, best_prop, x_cent, y_cent, id)
 
-    return radius, x_cent, y_cent, best_prop.eccentricity, best_prop.custom_solidity
-
+    return radius, x_cent, y_cent, best_prop.custom_eccentricity, best_prop.custom_solidity
 
 def stars_extractor(data,
                     coords,
@@ -1445,33 +1660,33 @@ class DAO():
             _ylo = int(_cy) - self.fov//2
             _yhi = int(_cy) + self.fov//2+1
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
-            # if _c['id'] in [204,206,268]:
+            # if _c['id'] in [32,37,93,281,286,324]:
             #     #for debugging purposes
             #     _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1, fwhm=self.fwhm, threshold=self.threshold,debug=True,id=_c['id'])
             # else:
             _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm, threshold=self.threshold)
             if _sr > 0:
-                if _ecc <=0.9 and _sol>=0.75 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
+                if np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent): #_ecc >=0.7 and _sol>=0.75 and
                     _c['x'] = _x+_xlo
                     _c['y'] = _y+_ylo
                     _c['eccsat'] = _ecc
                     _c['solsat'] = _sol
                 else:
-                    # if _c['id'] in [204,206,268]:
+                    # if _c['id'] in [32, 37, 93, 281, 286, 324]:
                     #     pass
                     _keep_mask.append(False)
                     continue
             else:
-                if _ecc <=0.9 and _sol>=0.4:
-                    _c['x'] = _x+_xlo
-                    _c['y'] = _y+_ylo
-                    _c['eccsat'] = _ecc
-                    _c['solsat'] = _sol
-                else:
-                    # if _c['id'] in [204,206,268]:
-                    #     pass
-                    _keep_mask.append(False)
-                    continue
+                # if _ecc >=0.7 and _sol>=0.4:
+                _c['x'] = _x+_xlo
+                _c['y'] = _y+_ylo
+                _c['eccsat'] = _ecc
+                _c['solsat'] = _sol
+                # else:
+                #     if _c['id'] in [32, 37, 93, 281, 286, 324]:
+                #         pass
+                #     _keep_mask.append(False)
+                #     continue
             _c['coresat'] = _sr
             # Extract quick aperture photometry
             positions = np.transpose((_x, _y))
