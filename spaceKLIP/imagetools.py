@@ -3708,11 +3708,11 @@ class ImageTools():
                         if incat_path_temp is None and use_gaia:
                             log.info("Downloading catalog from GAIA")
                             incat_path_temp = region_path.replace(".reg", "_gaia.csv")
-                            result = fetch_catalog_for_image_fov(incat_path_temp,data, head_sci,use_gaia=True,use_allwise=use_allwise,npix=npix,fwhm=fwhm)
+                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, use_gaia=True, npix=npix, fwhm=fwhm, threshold=threshold, use_allwise=use_allwise)
                         elif incat_path_temp is None and use_simbad:
                             log.info("Downloading catalog from SIMBAD")
                             incat_path_temp = region_path.replace(".reg", "_simbad.csv")
-                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci,use_simbad=True, npix=npix,fwhm=fwhm)
+                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, use_simbad=True, npix=npix, fwhm=fwhm, threshold=threshold)
                         elif incat_path_temp is not None:
                             log.info(f"Loading input catalog: {incat_path_temp}")
                             result = Table.read(incat_path_temp)
