@@ -42,7 +42,8 @@ def fetch_catalog_for_image_fov(path2table,
                                 border=3,
                                 npix=0,
                                 use_mocadb: bool = False,
-                                fwhm: float = 2.5
+                                fwhm: float = 2.5,
+                                threshold: float = 2.0,
                                 ):
                             """Estimate image FOV from WCS and query Gaia over that footprint.
 
@@ -342,7 +343,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 _ylo = int(_cy) - 31
                                 _yhi = int(_cy) + 32
                                 _patch = data[_ylo:_yhi, _xlo:_xhi]
-                                _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=fwhm)
+                                _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=fwhm,threshold=threshold)
                                 _c['coresat'] = _sr
                                 # Extract quick aperture photometry
                                 positions = np.transpose((_x, _y))
@@ -525,7 +526,7 @@ def fit_psf(
         core_mask_x = (nx - 1) / 2
         core_mask_y = (ny - 1) / 2
     else:
-        coresat, core_mask_x, core_mask_y, eccentricity, solidity = inspect_region_for_best_prop(data, fwhm=fwhm, margin=0)
+        coresat, core_mask_x, core_mask_y, eccentricity, solidity = inspect_region_for_best_prop(data, fwhm=fwhm,threshold=threshold, margin=0)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -638,90 +639,94 @@ def fit_psf(
 
     return fitted_x_pos,fitted_y_pos,fitted_flux
 
-def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_cent=None):
-    """Plots only the colored mask overlay with concise ID, Flux, Roundness, and Solidity metrics."""
-    plt.figure(figsize=(8, 8))
+def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_cent=None, id=None):
+    with plt.style.context('spaceKLIP.sk_style'):
+        """Plots only the colored mask overlay with concise ID, Flux, Roundness, and Solidity metrics."""
+        plt.figure(figsize=(8, 8))
 
-    # Clean data for display (replace NaNs and negatives with median)
-    display_img = nandata.copy()
-    clean_bg = np.nanmedian(np.where(display_img < 0, np.nan, display_img))
-    display_img[~np.isfinite(display_img) | (display_img < 0)] = clean_bg
+        # Clean data for display (replace NaNs and negatives with median)
+        display_img = nandata.copy()
+        clean_bg = np.nanmedian(np.where(display_img < 0, np.nan, display_img))
+        display_img[~np.isfinite(display_img) | (display_img < 0)] = clean_bg
 
-    # Normalize image for label2rgb blending
-    img_min, img_max = display_img.min(), display_img.max()
-    if img_max > img_min:
-        norm_img = (display_img - img_min) / (img_max - img_min)
-    else:
-        norm_img = np.zeros_like(display_img)
+        # Normalize image for label2rgb blending
+        img_min, img_max = display_img.min(), display_img.max()
+        if img_max > img_min:
+            norm_img = (display_img - img_min) / (img_max - img_min)
+        else:
+            norm_img = np.zeros_like(display_img)
 
-    # CHANGE: Set bg_color to a mid-gray tuple (R, G, B) so it is highly visible
-    overlay = label2rgb(
-        labeled_mask,
-        image=norm_img,
-        bg_label=0,
-        bg_color=(0.95, 0.95, 0.95),
-        alpha=0.3,
-    )
-    plt.imshow(overlay, origin="lower")
-    plt.title("Detected Regions Overlay")
-
-    print(f"\n--- INSPECTING {len(props)} REGIONS ---")
-    for prop in props:
-        # Cast tracking properties safely
-        label_id = int(round(float(prop.label)))
-        is_winner = best_prop and (label_id == int(round(float(best_prop.label))))
-        status = "[WINNER]" if is_winner else ""
-
-        # Calculate metrics
-        single_cluster_mask = labeled_mask == prop.label
-        solidity = float(prop.custom_solidity)
-        brightness_factor = float(prop.brightness_factor)
-        area_factor = float(prop.area_factor)
-        score = float(prop.score)
-
-        # Print detailed stats to console including photometry metrics used in decision
-        print(
-            f"Label {label_id:2d} {status}: "
-            f"Solidity={solidity:.2f} | "
-            f"Area Factor={area_factor:.2f} | "
-            f"Brightness={brightness_factor:.2f} | "
-            f"Score={score:.2f} | "
-            f"Centroid=({prop.centroid[1]:.1f}, {prop.centroid[0]:.1f})"
+        # CHANGE: Set bg_color to a mid-gray tuple (R, G, B) so it is highly visible
+        overlay = label2rgb(
+            labeled_mask,
+            image=norm_img,
+            bg_label=0,
+            bg_color=(0.95, 0.95, 0.95),
+            alpha=0.3,
         )
+        plt.imshow(overlay, origin="lower")
+        plt.title(f"Detected Regions Overlay for id {id}")
 
-        # Draw bounding boxes (FIXED: Added -0.5 offset for perfect pixel boundary alignment)
-        minr, minc, maxr, maxc = prop.bbox
-        rect = plt.Rectangle(
-            (minc - 0.5, minr - 0.5),   # Shift anchor to the true bottom-left pixel edge
-            maxc - minc,
-            maxr - minr,
-            fill=False,
-            edgecolor="red" if is_winner else "cyan",
-            linewidth=2.5 if is_winner else 1.5,
-        )
-        plt.gca().add_patch(rect)
-        plt.plot(x_cent, y_cent, "xk", ms=7)
-        # Create a clean metadata label string using original layout names
-        label_text = (
-            f"ID:{label_id}\n"
-            f"Sc:{score:.2f}"
-        )
+        print(f"\n--- INSPECTING {len(props)} REGIONS ---")
+        for prop in props:
+            # Cast tracking properties safely
+            label_id = int(round(float(prop.label)))
+            is_winner = best_prop and (label_id == int(round(float(best_prop.label))))
+            status = "[WINNER]" if is_winner else ""
 
-        # Position the text neatly above or to the side of the box
-        plt.text(
-            maxc + 1,
-            minr,
-            label_text,
-            color="yellow",
-            fontsize=9,
-            weight="bold",
-            bbox=dict(facecolor="black", alpha=0.6, boxstyle="round,pad=0.2"),
-        )
+            # Calculate metrics
+            single_cluster_mask = labeled_mask == prop.label
+            solidity = float(prop.custom_solidity)
+            brightness_factor = float(prop.brightness_factor)
+            area_factor = float(prop.area_factor)
+            boxy_score = float(prop.boxy_score)
+            score = float(prop.score)
 
-    plt.tight_layout()
-    plt.show()
+            # Print detailed stats to console including photometry metrics used in decision
+            print(
+                f"Label {label_id:2d}: "
+                f"Solidity={solidity:.2f} | "
+                f"Area Factor={area_factor:.2f} | "
+                f"Boxy Score={boxy_score:.2f} | "
+                f"Brightness={brightness_factor:.2f} | "
+                f"Score={score:.2f} | "
+                f"Centroid=({prop.centroid[1]:.1f}, {prop.centroid[0]:.1f}) {status}"
+            )
 
-def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, debug=False):
+            # Draw bounding boxes (FIXED: Added -0.5 offset for perfect pixel boundary alignment)
+            minr, minc, maxr, maxc = prop.bbox
+            rect = plt.Rectangle(
+                (minc - 0.5, minr - 0.5),   # Shift anchor to the true bottom-left pixel edge
+                maxc - minc,
+                maxr - minr,
+                fill=False,
+                edgecolor="red" if is_winner else "cyan",
+                linewidth=2.5 if is_winner else 1.5,
+            )
+            plt.gca().add_patch(rect)
+            plt.plot(x_cent, y_cent, "xk", ms=7)
+            # Create a clean metadata label string using original layout names
+            label_text = (
+                f"ID:{label_id}\n"
+                f"Sc:{score:.2f}"
+            )
+
+            # Position the text neatly above or to the side of the box
+            plt.text(
+                maxc + 1,
+                minr,
+                label_text,
+                color="yellow",
+                fontsize=9,
+                weight="bold",
+                bbox=dict(facecolor="black", alpha=0.6, boxstyle="round,pad=0.2"),
+            )
+
+        plt.tight_layout()
+        plt.show()
+        pass
+
+def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, threshold=1.5, debug=False, id=None):
     """
     Inspect a region looking for different props, identify the best one and return it's properties.
 
@@ -746,7 +751,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
     img_background = np.nanmedian(np.where(nandata <= 0, np.nan, nandata))
 
     # Calculate a rough noise estimate to find bright stars
-    bright_star_thresh = 1.5 * img_background
+    bright_star_thresh = threshold * img_background
 
     # 1. Isolate and label ONLY the NaN/Infinite cores
     nan_mask = ~np.isfinite(nandata)
@@ -769,22 +774,20 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
 
     # Now props contains completely unmixed regions
     props = regionprops(labeled_mask)
+    # Filter out any props that are smaller than 1 pixels before the loop starts
+    props = [p for p in props if p.area >= 1]
 
     if not props:
         return 0, float(default_cx), float(default_cy), 0, 1
 
     best_prop = None
     best_score = -float('inf')
-
-    # Calculate the target stellar area based on FWHM
-    max_star_area = np.pi * ((1.5 * float(fwhm)) ** 2)
-    # Define the width of the Gaussian scoring envelope
-    area_sigma = max_star_area / 2.0
+    yy, xx = np.indices(nandata.shape)
 
     for prop in props:
         single_cluster_mask = (labeled_mask == prop.label)
 
-        # --- NEW CODE: Extract sub-masks within this specific region ---
+        # --- Extract sub-masks within this specific region ---
         region_nans = single_cluster_mask & (~np.isfinite(nandata))
         region_bright = single_cluster_mask & (nandata > bright_star_thresh)
 
@@ -795,33 +798,57 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
             core_props = regionprops(core_label)
             # Take the largest NaN cluster inside this prop if multiple exist
             solidity_score = max([p.solidity for p in core_props]) if core_props else 0.0
+            dilated = binary_dilation(region_nans, iterations=5)
+            perimeter_mask = dilated & (nandata >= 0)
+            perimeter_data = nandata[perimeter_mask]
+            avg_perimeter_brightness = np.nansum(perimeter_data)#-img_background)
+            brightness_factor = max(0.01, avg_perimeter_brightness)
+            # Saturated core: use the geometric center of the mask
+            x_cent = float(np.mean(xx[core_label.astype(bool)]))
+            y_cent = float(np.mean(yy[core_label.astype(bool)]))
+            rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
+            radius = int(np.ceil(np.max(rr[core_label.astype(bool)])) + int(margin))
+            fwhm_temp = max(fwhm,min(radius,10))
         else:
             # Evaluate solidity ONLY on the bright pixel cluster
             star_label = label(region_bright)
             star_props = regionprops(star_label)
             solidity_score = max([p.solidity for p in star_props]) if star_props else 0.0
-        # ---------------------------------------------------------------
+            perimeter_data = nandata[region_bright]
+            avg_perimeter_brightness = np.nansum(perimeter_data)#-img_background)
+            brightness_factor = max(0.01, avg_perimeter_brightness)
+            fwhm_temp = fwhm
 
-        dilated = binary_dilation(single_cluster_mask, iterations=2)
-        perimeter_mask = dilated & (nandata >= 0)
-        perimeter_data = nandata[perimeter_mask]
+        # # Gaussian scaling function: peaks at 1.0 when prop.area == max_star_area
+        # area_diff = float(prop.area) - max_star_area
+        # area_factor = np.exp(-0.5 * (area_diff / area_sigma) ** 2)
+        # Extract the bounding box dimensions of the region
+        minr, minc, maxr, maxc = prop.bbox
+        dx = float(maxc - minc)
+        dy = float(maxr - minr)
 
-        avg_perimeter_brightness = np.nanmedian(perimeter_data-img_background)
-        brightness_factor = max(0, avg_perimeter_brightness)
+        # Calculate the target stellar area based on FWHM
+        # Target linear dimension (diameter) based on your 1.5x FWHM radius profile
+        target_dim = 3.0 * float(fwhm_temp)
+        dim_sigma = target_dim / 2
+        # Evaluate independent Gaussian profiles for both X and Y dimensions
+        gaussian_dx = np.exp(-0.5 * ((dx - target_dim) / dim_sigma) ** 2)
+        gaussian_dy = np.exp(-0.5 * ((dy - target_dim) / dim_sigma) ** 2)
 
-        # Gaussian scaling function: peaks at 1.0 when prop.area == max_star_area
-        area_diff = float(prop.area) - max_star_area
-        area_factor = np.exp(-0.5 * (area_diff / area_sigma) ** 2)
+        # Combine them into a joint spatial scale factor (peaks at 1.0)
+        area_factor = max(1e-5,gaussian_dx * gaussian_dy)
+
+        #Calculate how close to a square the region is
+        boxy_score = min(dx, dy) / max(dx, dy)
 
         # Total Score now uses the dynamically calculated solidity_score
-        total_score = solidity_score * brightness_factor * area_factor
+        total_score = solidity_score * brightness_factor * area_factor * boxy_score
 
+        prop.custom_solidity = solidity_score
         prop.brightness_factor = brightness_factor
         prop.area_factor = area_factor
+        prop.boxy_score = boxy_score
         prop.score = total_score
-
-        # Override prop.solidity so your inspect_region function prints the correct value
-        prop.custom_solidity = solidity_score
 
         if total_score > best_score:
             best_score = total_score
@@ -830,14 +857,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
     if best_score <= 0.0:
         return 0, float(default_cx), float(default_cy), 0, 1
 
-    # winning_region = (labeled_mask == best_prop.label)
-    # yy, xx = np.indices(nandata.shape)
-    # x_cent = float(np.mean(xx[winning_region]))
-    # y_cent = float(np.mean(yy[winning_region]))
-
     winning_region = (labeled_mask == best_prop.label)
-    yy, xx = np.indices(nandata.shape)
-
     # Check if the winning region corresponds to a saturated NaN core
     if np.any(np.isnan(nandata[winning_region])):
         # Saturated core: use the geometric center of the mask
@@ -854,7 +874,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         radius = 0
 
     if debug:
-        inspect_region(nandata, labeled_mask, props, best_prop, x_cent, y_cent)
+        inspect_region(nandata, labeled_mask, props, best_prop, x_cent, y_cent, id)
 
     return radius, x_cent, y_cent, best_prop.eccentricity, best_prop.custom_solidity
 
@@ -1206,7 +1226,7 @@ class DAO():
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
             _patch = data[_ylo:_yhi, _xlo:_xhi]
-            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm)
+            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm,threshold=self.threshold)
             _c['coresat'] = _sr
             # Extract quick aperture photometry
             positions = np.transpose((_x, _y))
@@ -1364,8 +1384,6 @@ class DAO():
 
             # Find all neighbors within the box_size
             neighbors = tree.query_ball_point(coords[idx], r=self.fov / 2.0, p=np.inf)
-            if idx in [250] :
-                pass
             # Mark the representative and all its neighbors as visited
             visited[neighbors] = True
 
@@ -1422,22 +1440,25 @@ class DAO():
         # candidates['flux'] = 0.0
         for _c in candidates:
             _cx, _cy = float(_c["x"]), float(_c["y"])
-            _xlo = int(_cx) - 31
-            _xhi = int(_cx) + 32
-            _ylo = int(_cy) - 31
-            _yhi = int(_cy) + 32
+            _xlo = int(_cx) - self.fov//2
+            _xhi = int(_cx) + self.fov//2+1
+            _ylo = int(_cy) - self.fov//2
+            _yhi = int(_cy) + self.fov//2+1
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
-            if _c['id'] in [40,44,56,101,181,194,232,283,296,300]:
-                pass
-            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm)
+            # if _c['id'] in [204,206,268]:
+            #     #for debugging purposes
+            #     _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1, fwhm=self.fwhm, threshold=self.threshold,debug=True,id=_c['id'])
+            # else:
+            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm, threshold=self.threshold)
             if _sr > 0:
                 if _ecc <=0.9 and _sol>=0.75 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
                     _c['x'] = _x+_xlo
                     _c['y'] = _y+_ylo
                     _c['eccsat'] = _ecc
                     _c['solsat'] = _sol
-
                 else:
+                    # if _c['id'] in [204,206,268]:
+                    #     pass
                     _keep_mask.append(False)
                     continue
             else:
@@ -1447,6 +1468,8 @@ class DAO():
                     _c['eccsat'] = _ecc
                     _c['solsat'] = _sol
                 else:
+                    # if _c['id'] in [204,206,268]:
+                    #     pass
                     _keep_mask.append(False)
                     continue
             _c['coresat'] = _sr
@@ -1503,7 +1526,7 @@ class DAO():
             yhi = min(ny, int(round(y_fit)) + half + 1)
             cut = data[ylo:yhi, xlo:xhi]
             nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
-            sat_r, _, _, _, _ = inspect_region_for_best_prop(cut, center=(x_fit - xlo, y_fit - ylo), margin=1, fwhm=self.fwhm)
+            sat_r, _, _, _, _ = inspect_region_for_best_prop(cut, center=(x_fit - xlo, y_fit - ylo), margin=1, fwhm=self.fwhm, threshold=self.threshold)
 
             nxpsf, nypsf = psf.shape
             xlo_psf = max(0, int(round(nxpsf//2)) - half)
