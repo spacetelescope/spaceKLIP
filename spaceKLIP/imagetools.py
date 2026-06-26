@@ -3708,11 +3708,11 @@ class ImageTools():
                         if incat_path_temp is None and use_gaia:
                             log.info("Downloading catalog from GAIA")
                             incat_path_temp = region_path.replace(".reg", "_gaia.csv")
-                            result = fetch_catalog_for_image_fov(incat_path_temp,data, head_sci,use_gaia=True,use_allwise=use_allwise,npix=npix)
+                            result = fetch_catalog_for_image_fov(incat_path_temp,data, head_sci,use_gaia=True,use_allwise=use_allwise,npix=npix,fwhm=fwhm)
                         elif incat_path_temp is None and use_simbad:
                             log.info("Downloading catalog from SIMBAD")
                             incat_path_temp = region_path.replace(".reg", "_simbad.csv")
-                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci,use_simbad=True, npix=npix)
+                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci,use_simbad=True, npix=npix,fwhm=fwhm)
                         elif incat_path_temp is not None:
                             log.info(f"Loading input catalog: {incat_path_temp}")
                             result = Table.read(incat_path_temp)
@@ -3759,7 +3759,8 @@ class ImageTools():
                       subdir='tiles',
                       catdir='pretiles',
                       mcmc_for_all=False,
-                      medbkg_method='robust'):
+                      medbkg_method='robust',
+                      fwhm=2.5):
 
         """Extract and write small cutouts (tiles) centered on cataloged sources.
         Note tah this step include the equivalent of nans_back from direct imaging. The final output tile have nans
@@ -3959,7 +3960,8 @@ class ImageTools():
                                                                                   nantile,
                                                                                   oversampling=1,
                                                                                   coresat=coresat,
-                                                                                  showplots=False)
+                                                                                  showplots=False,
+                                                                                  fwhm=fwhm)
 
                             else:
                                 if 'r' not in kwargs:
