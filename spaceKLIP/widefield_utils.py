@@ -776,6 +776,11 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
     best_prop = None
     best_score = -float('inf')
 
+    # Calculate the target stellar area based on FWHM
+    max_star_area = np.pi * ((1.5 * float(fwhm)) ** 2)
+    # Define the width of the Gaussian scoring envelope
+    area_sigma = max_star_area / 2.0
+
     for prop in props:
         single_cluster_mask = (labeled_mask == prop.label)
 
@@ -799,17 +804,14 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
 
         dilated = binary_dilation(single_cluster_mask, iterations=2)
         perimeter_mask = dilated & (nandata >= 0)
-
         perimeter_data = nandata[perimeter_mask]
 
         avg_perimeter_brightness = np.nanmedian(perimeter_data-img_background)
         brightness_factor = max(0, avg_perimeter_brightness)
 
-        # Dynamically calculate the maximum expected star mask area based on the FWHM
-        max_star_area = np.pi * ((1.5 * float(fwhm)) ** 2)
-        # area_factor = np.log10(max(1.0, float(prop.area)))
-        capped_area = min(float(prop.area), max_star_area)
-        area_factor = np.log10(max(1.0, capped_area))
+        # Gaussian scaling function: peaks at 1.0 when prop.area == max_star_area
+        area_diff = float(prop.area) - max_star_area
+        area_factor = np.exp(-0.5 * (area_diff / area_sigma) ** 2)
 
         # Total Score now uses the dynamically calculated solidity_score
         total_score = solidity_score * brightness_factor * area_factor
@@ -1425,9 +1427,9 @@ class DAO():
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
-            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm)
             if _c['id'] in [40,44,56,101,181,194,232,283,296,300]:
                 pass
+            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm)
             if _sr > 0:
                 if _ecc <=0.9 and _sol>=0.75 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
                     _c['x'] = _x+_xlo
