@@ -636,7 +636,7 @@ def fit_psf(
 
     return fitted_x_pos,fitted_y_pos,fitted_flux
 
-def inspect_regions(nandata, labeled_mask, props, best_prop=None, catalog_entry=None):
+def inspect_regions(nandata, labeled_mask, props, best_prop=None):
     """Plots only the colored mask overlay with concise ID, Flux, Roundness, and Solidity metrics."""
     plt.figure(figsize=(8, 8))
 
@@ -657,16 +657,11 @@ def inspect_regions(nandata, labeled_mask, props, best_prop=None, catalog_entry=
         labeled_mask,
         image=norm_img,
         bg_label=0,
-        bg_color=(0.9, 0.9, 0.9),
+        bg_color=(0.95, 0.95, 0.95),
         alpha=0.3,
     )
     plt.imshow(overlay, origin="lower")
     plt.title("Detected Regions Overlay")
-
-    # MINIMAL CHANGE: Extract photometry metrics to display them in the loops
-    star_flux = float(catalog_entry['flux']) if catalog_entry is not None else 0.0
-    star_round = float(catalog_entry['roundness']) if catalog_entry is not None else 0.0
-    star_sharp = float(catalog_entry['sharpness']) if catalog_entry is not None else 0.5
 
     print(f"\n--- INSPECTING {len(props)} REGIONS ---")
     for prop in props:
@@ -677,15 +672,18 @@ def inspect_regions(nandata, labeled_mask, props, best_prop=None, catalog_entry=
 
         # Calculate metrics
         single_cluster_mask = labeled_mask == prop.label
-        solidity = float(prop.solidity)
+        solidity = float(prop.custom_solidity)
+        brightness_factor = float(prop.brightness_factor)
+        area_factor = float(prop.area_factor)
+        score = float(prop.score)
 
         # Print detailed stats to console including photometry metrics used in decision
         print(
             f"Label {label_id:2d} {status}: "
-            f"Flux={star_flux:.2f} | "
-            f"Rnd={star_round:.2f} | "
-            f"Shrp={star_sharp:.2f} | "
             f"Solidity={solidity:.2f} | "
+            f"Area Factor={area_factor:.2f} | "
+            f"Brightness={brightness_factor:.2f} | "
+            f"Score={score:.2f} | "
             f"Centroid=({prop.centroid[1]:.1f}, {prop.centroid[0]:.1f})"
         )
 
@@ -704,10 +702,10 @@ def inspect_regions(nandata, labeled_mask, props, best_prop=None, catalog_entry=
         # Create a clean metadata label string using original layout names
         label_text = (
             f"ID:{label_id}\n"
-            f"F:{star_flux:.2f}\n"
-            f"R:{star_round:.2f}\n"
-            f"S:{star_sharp:.2f}\n"
-            f"Sol:{solidity:.2f}"
+            f"Sol:{solidity:.2f}\n"
+            f"AF:{area_factor:.2f}\n"
+            f"BF:{brightness_factor:.2f}\n"
+            f"Sc:{score:.2f}"
         )
 
         # Position the text neatly above or to the side of the box
@@ -724,13 +722,11 @@ def inspect_regions(nandata, labeled_mask, props, best_prop=None, catalog_entry=
     plt.tight_layout()
     plt.show()
 
-def estimate_nan_core(data, catalog_entry=None, center=None, margin=1, nanmask=None, debug=False):
+def estimate_nan_core(data, center=None, margin=1, nanmask=None, debug=False):
     """
     Estimates the saturated core radius using geometric solidity for mask quality,
     while using true aperture photometry metrics (flux, sharpness, roundness) for star selection.
 
-    Parameters:
-    catalog_entry (dict or Table row): Must contain 'flux', 'sharpness', 'roundness' for the candidate star.
     """
     nandata = np.array(data, dtype=float)
     if nanmask is not None:
@@ -740,7 +736,7 @@ def estimate_nan_core(data, catalog_entry=None, center=None, margin=1, nanmask=N
     default_cx, default_cy = center if center is not None else ((nx - 1) / 2, (ny - 1) / 2)
 
     # Clean background estimation (ignoring negative border pixels)
-    img_background = np.nanmedian(np.where(nandata < 0, np.nan, nandata))
+    img_background = np.nanmedian(np.where(nandata <= 0, np.nan, nandata))
 
     # Calculate a rough noise estimate to find bright stars
     bright_star_thresh = 3 * img_background
@@ -757,37 +753,76 @@ def estimate_nan_core(data, catalog_entry=None, center=None, margin=1, nanmask=N
 
     best_prop = None
     best_score = -float('inf')
-
-    # Get true photometry parameters from the star catalog entry if available
-    # Defaulting to ideal values if no photometry catalog is provided to the function
-    star_flux = float(catalog_entry['flux']) if catalog_entry is not None else 1.0
-    star_sharp = float(catalog_entry['sharpness']) if catalog_entry is not None else 0.5
-    star_round = float(catalog_entry['roundness']) if catalog_entry is not None else 0.0
-
-    # Calculate penalties for the physical star parameters (DAOPhot standard)
-    sharpness_penalty = np.abs(star_sharp - 0.5)
-    roundness_penalty = np.abs(star_round - 0.0)
-
-    # Base star profile quality score
-    star_profile_score = np.log10(max(1.0, star_flux)) - sharpness_penalty - roundness_penalty
+    # for prop in props:
+    #     single_cluster_mask = (labeled_mask == prop.label)
+    #
+    #     dilated = binary_dilation(single_cluster_mask, iterations=2)
+    #     perimeter_mask = dilated & single_cluster_mask & (nandata>=0)
+    #
+    #     # Clean both NaNs and negative borders for the perimeter background check
+    #     # perimeter_data = np.where((np.isnan(nandata)) | (nandata <= 0), img_background, nandata)[perimeter_mask]
+    #     perimeter_data = nandata[perimeter_mask]
+    #
+    #     avg_perimeter_brightness = np.nanmedian(perimeter_data)
+    #     brightness_factor = max(0, avg_perimeter_brightness)
+    #
+    #     # Scale by log10 of the core area to heavily prioritize large star cores over 3-pixel noise
+    #     area_factor = np.log10(max(1.0, float(prop.area)))
+    #
+    #     # 1. Mask Solidity: Geometric quality of the core mask (Closer to 1.0 is a clean box/circle core)
+    #     solidity_score = prop.solidity
+    #
+    #     # 2. Total Score combines mask quality, wing brightness, and the external photometry star quality
+    #     total_score = solidity_score * brightness_factor * area_factor
+    #
+    #     prop.brightness_factor=brightness_factor
+    #     prop.area_factor=area_factor
+    #     prop.score=total_score
+    #
+    #     if total_score > best_score:
+    #         best_score = total_score
+    #         best_prop = prop
 
     for prop in props:
         single_cluster_mask = (labeled_mask == prop.label)
 
+        # --- NEW CODE: Extract sub-masks within this specific region ---
+        region_nans = single_cluster_mask & (~np.isfinite(nandata))
+        region_bright = single_cluster_mask & (nandata > bright_star_thresh)
+
+        # Decide solidity strategy based on presence of NaNs
+        if np.any(region_nans):
+            # Evaluate solidity ONLY on the NaN core cluster
+            core_label = label(region_nans)
+            core_props = regionprops(core_label)
+            # Take the largest NaN cluster inside this prop if multiple exist
+            solidity_score = max([p.solidity for p in core_props]) if core_props else 0.0
+        else:
+            # Evaluate solidity ONLY on the bright pixel cluster
+            star_label = label(region_bright)
+            star_props = regionprops(star_label)
+            solidity_score = max([p.solidity for p in star_props]) if star_props else 0.0
+        # ---------------------------------------------------------------
+
         dilated = binary_dilation(single_cluster_mask, iterations=2)
-        perimeter_mask = dilated & ~single_cluster_mask
+        perimeter_mask = dilated & single_cluster_mask & (nandata >= 0)
 
-        # Clean both NaNs and negative borders for the perimeter background check
-        perimeter_data = np.where((np.isnan(nandata)) | (nandata < 0), img_background, nandata)[perimeter_mask]
+        perimeter_data = nandata[perimeter_mask]
 
-        avg_perimeter_brightness = np.mean(perimeter_data) - img_background
-        brightness_factor = max(1.0, avg_perimeter_brightness)
+        avg_perimeter_brightness = np.nanmedian(perimeter_data)
+        brightness_factor = max(0, avg_perimeter_brightness)
 
-        # 1. Mask Solidity: Geometric quality of the core mask (Closer to 1.0 is a clean box/circle core)
-        solidity_score = prop.solidity
+        area_factor = np.log10(max(1.0, float(prop.area)))
 
-        # 2. Total Score combines mask quality, wing brightness, and the external photometry star quality
-        total_score = solidity_score + brightness_factor + star_profile_score
+        # Total Score now uses the dynamically calculated solidity_score
+        total_score = solidity_score * brightness_factor * area_factor
+
+        prop.brightness_factor = brightness_factor
+        prop.area_factor = area_factor
+        prop.score = total_score
+
+        # Override prop.solidity so your inspect_regions function prints the correct value
+        prop.custom_solidity = solidity_score
 
         if total_score > best_score:
             best_score = total_score
@@ -807,7 +842,7 @@ def estimate_nan_core(data, catalog_entry=None, center=None, margin=1, nanmask=N
     rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
     radius = int(np.ceil(np.max(rr[winning_region])) + int(margin))
 
-    return radius, x_cent, y_cent, best_prop.eccentricity, best_prop.solidity
+    return radius, x_cent, y_cent, best_prop.eccentricity, best_prop.custom_solidity
 
 
 def stars_extractor(data,
@@ -1378,7 +1413,7 @@ class DAO():
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
-            if np.isin(_c['id'], [250]):
+            if np.isin(_c['id'], [22,32,68,99,125,250,344]):
                 pass
             _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
             if _sr > 0:
@@ -1565,7 +1600,7 @@ class DAO():
 
         bkg, rms = estimate_bkg_and_rms(data,mask=dilated_mask)
         data_subtracted = data - bkg
-
+        data_subtracted[data_subtracted<0]=0
         #Candidate detection via DAOStarFinder, or StarFinder
         if dao:
             dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
@@ -1587,7 +1622,7 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        selected_candidates = self._clean_catalog(all_candidates, data_subtracted,)
+        selected_candidates = self._clean_catalog(all_candidates, data_subtracted)
         # selected_candidates = all_candidates
 
         return selected_candidates
