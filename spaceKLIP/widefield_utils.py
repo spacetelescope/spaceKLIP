@@ -41,7 +41,8 @@ def fetch_catalog_for_image_fov(path2table,
                                 use_simbad=False,
                                 border=3,
                                 npix=0,
-                                use_mocadb: bool = False
+                                use_mocadb: bool = False,
+                                fwhm: float = 2.5
                                 ):
                             """Estimate image FOV from WCS and query Gaia over that footprint.
 
@@ -341,7 +342,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 _ylo = int(_cy) - 31
                                 _yhi = int(_cy) + 32
                                 _patch = data[_ylo:_yhi, _xlo:_xhi]
-                                _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1)
+                                _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=fwhm)
                                 _c['coresat'] = _sr
                                 # Extract quick aperture photometry
                                 positions = np.transpose((_x, _y))
@@ -431,7 +432,8 @@ def fit_psf(
     two_pass=True,
     showplots=False,
     cmap='Greys_r',
-    stretch='linear'
+    stretch='linear',
+    fwhm=2.5
 ):
     """Fit a (possibly oversampled) PSF model to an image cutout.
 
@@ -523,7 +525,7 @@ def fit_psf(
         core_mask_x = (nx - 1) / 2
         core_mask_y = (ny - 1) / 2
     else:
-        coresat, core_mask_x, core_mask_y, eccentricity, solidity = inspect_region_for_best_prop(data, margin=0)
+        coresat, core_mask_x, core_mask_y, eccentricity, solidity = inspect_region_for_best_prop(data, fwhm=fwhm, margin=0)
 
     # Reasonable initial guesses matter a lot for position fitting.
     x_center = (nx - 1) / 2
@@ -719,7 +721,7 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
     plt.tight_layout()
     plt.show()
 
-def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, debug=False):
+def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, debug=False):
     """
     Inspect a region looking for different props, identify the best one and return it's properties.
 
@@ -800,10 +802,14 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, debu
 
         perimeter_data = nandata[perimeter_mask]
 
-        avg_perimeter_brightness = np.nanmedian(perimeter_data)
+        avg_perimeter_brightness = np.nanmedian(perimeter_data-img_background)
         brightness_factor = max(0, avg_perimeter_brightness)
 
-        area_factor = np.log10(max(1.0, float(prop.area)))
+        # Dynamically calculate the maximum expected star mask area based on the FWHM
+        max_star_area = np.pi * ((1.5 * float(fwhm)) ** 2)
+        # area_factor = np.log10(max(1.0, float(prop.area)))
+        capped_area = min(float(prop.area), max_star_area)
+        area_factor = np.log10(max(1.0, capped_area))
 
         # Total Score now uses the dynamically calculated solidity_score
         total_score = solidity_score * brightness_factor * area_factor
@@ -1198,7 +1204,7 @@ class DAO():
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
             _patch = data[_ylo:_yhi, _xlo:_xhi]
-            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1)
+            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm)
             _c['coresat'] = _sr
             # Extract quick aperture photometry
             positions = np.transpose((_x, _y))
@@ -1419,9 +1425,9 @@ class DAO():
             _ylo = int(_cy) - 31
             _yhi = int(_cy) + 32
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
-            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1)
-            # if _c['id'] in [279,326,345]:
-            #     pass
+            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm)
+            if _c['id'] in [40,44,56,101,181,194,232,283,296,300]:
+                pass
             if _sr > 0:
                 if _ecc <=0.9 and _sol>=0.75 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
                     _c['x'] = _x+_xlo
@@ -1495,7 +1501,7 @@ class DAO():
             yhi = min(ny, int(round(y_fit)) + half + 1)
             cut = data[ylo:yhi, xlo:xhi]
             nanmaskcut = nanmask[ylo:yhi, xlo:xhi]
-            sat_r, _, _, _, _ = inspect_region_for_best_prop(cut, center=(x_fit - xlo, y_fit - ylo), margin=1)
+            sat_r, _, _, _, _ = inspect_region_for_best_prop(cut, center=(x_fit - xlo, y_fit - ylo), margin=1, fwhm=self.fwhm)
 
             nxpsf, nypsf = psf.shape
             xlo_psf = max(0, int(round(nxpsf//2)) - half)
@@ -1521,6 +1527,7 @@ class DAO():
                     bkg_subtract=False,
                     two_pass=self.two_pass,
                     showplots=self.showplots,
+                    fwhm=self.fwhm,
                 )
                 x_fit = float(fx + xlo)
                 y_fit = float(fy + ylo)
