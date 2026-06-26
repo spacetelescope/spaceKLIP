@@ -736,7 +736,7 @@ def estimate_nan_core(data, center=None, margin=1, nanmask=None, debug=False):
     img_background = np.nanmedian(np.where(nandata <= 0, np.nan, nandata))
 
     # Calculate a rough noise estimate to find bright stars
-    bright_star_thresh = 3 * img_background
+    bright_star_thresh = 1.5 * img_background
 
     # 1. Isolate and label ONLY the NaN/Infinite cores
     nan_mask = ~np.isfinite(nandata)
@@ -823,8 +823,10 @@ def estimate_nan_core(data, center=None, margin=1, nanmask=None, debug=False):
     y_cent = float(np.mean(yy[winning_region]))
 
     rr = np.sqrt((xx - x_cent) ** 2 + (yy - y_cent) ** 2)
-    radius = int(np.ceil(np.max(rr[winning_region])) + int(margin))
-
+    if len(rr[winning_region&np.isnan(nandata)])>0:
+        radius = int(np.ceil(np.max(rr[winning_region&np.isnan(nandata)])) + int(margin))
+    else:
+        radius = 0
     return radius, x_cent, y_cent, best_prop.eccentricity, best_prop.custom_solidity
 
 
@@ -1397,8 +1399,10 @@ class DAO():
             _yhi = int(_cy) + 32
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
             _sr, _x, _y, _ecc, _sol = estimate_nan_core(_patch, margin=1)
+            # if _c['id'] in [279,326,345]:
+            #     pass
             if _sr > 0:
-                if _ecc <=0.8 and _sol>=0.8 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
+                if _ecc <=0.9 and _sol>=0.75 and np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent):
                     _c['x'] = _x+_xlo
                     _c['y'] = _y+_ylo
                     _c['eccsat'] = _ecc
@@ -1408,8 +1412,14 @@ class DAO():
                     _keep_mask.append(False)
                     continue
             else:
-                _c['eccsat'] = 0
-                _c['solsat'] = 1
+                if _ecc <=0.9 and _sol>=0.4:
+                    _c['x'] = _x+_xlo
+                    _c['y'] = _y+_ylo
+                    _c['eccsat'] = _ecc
+                    _c['solsat'] = _sol
+                else:
+                    _keep_mask.append(False)
+                    continue
             _c['coresat'] = _sr
             # Extract quick aperture photometry
             positions = np.transpose((_x, _y))
@@ -1603,7 +1613,7 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        # selected_candidates = self._clean_catalog(all_candidates, data_subtracted)
-        selected_candidates = all_candidates
+        selected_candidates = self._clean_catalog(all_candidates, data_subtracted)
+        # selected_candidates = all_candidates
 
         return selected_candidates
