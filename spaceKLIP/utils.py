@@ -1364,6 +1364,15 @@ def pop_pxar_kw(filepaths):
 
     pass
 
+def _get_stpipe_log_module():
+    if hasattr(stpipe, "log"):
+        return stpipe.log
+    if hasattr(stpipe, "_log"):
+        return stpipe._log
+    raise AttributeError(
+        "Unsupported stpipe logging API: expected stpipe.log or stpipe._log."
+    )
+
 
 def config_stpipe_log(level='WARNING', suppress=False):
     """
@@ -1394,6 +1403,8 @@ def config_stpipe_log(level='WARNING', suppress=False):
     log_stpipe.setLevel(log_level)
     log_stpipe.propagate = False
 
+    stpipe_log = _get_stpipe_log_module()
+
     if suppress:
         # Suppress the log output from the 'stpipe'.
         suppress_log_configuration = f"""
@@ -1401,10 +1412,10 @@ def config_stpipe_log(level='WARNING', suppress=False):
         handler = append:pipeline.log
         level = {level.upper()}
         """
-        stpipe.log.load_configuration(io.BytesIO(suppress_log_configuration.encode()))
+        stpipe_log.load_configuration(io.BytesIO(suppress_log_configuration.encode()))
     else:
         # Restore the default logging configuration.
-        stpipe.log.load_configuration(stpipe.log._find_logging_config_file())
+        stpipe_log.load_configuration(stpipe_log._find_logging_config_file())
 
 
 def get_visitid(visitstr):
