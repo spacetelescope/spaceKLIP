@@ -727,7 +727,7 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
         plt.show()
         pass
 
-def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, threshold=1.5, peak_fraction=0.5,
+def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, threshold=1.5, peak_fraction=0.33,
                                  debug=False, id=None):
     """
     Inspect a region looking for different props, identify the best one and return it's properties.
@@ -809,7 +809,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
             eccentricity_score = float(prop.eccentricity)  # Saturated cores use full region bounds
 
             dilated = binary_dilation(region_nans, iterations=5)
-            perimeter_mask = dilated & (nandata >= 0)
+            perimeter_mask = dilated & (nandata > 0)
             perimeter_data = nandata[perimeter_mask]
             avg_perimeter_brightness = np.nansum(perimeter_data - img_background)
             brightness_factor = max(0.01, avg_perimeter_brightness)
@@ -825,8 +825,8 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
             region_intensities = nandata[region_bright]
 
             # Find peak intensity and local cloud median background
-            peak_flux = np.nanmax(region_intensities) if len(region_intensities) > 0 else bright_star_thresh
-            cloud_median = np.nanmedian(region_intensities) if len(region_intensities) > 0 else bright_star_thresh
+            peak_flux = np.nanmax(region_intensities[region_intensities>0]) if len(region_intensities) > 0 else bright_star_thresh
+            cloud_median = np.nanmedian(region_intensities[region_intensities>0]) if len(region_intensities) > 0 else bright_star_thresh
 
             # Dynamically slice based on the configurable peak_fraction parameter
             dynamic_thresh = cloud_median + peak_fraction * (peak_flux - cloud_median)
