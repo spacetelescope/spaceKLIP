@@ -1295,11 +1295,11 @@ class ImageTools():
 
             - shift_x : list of int, optional
                 Pixels in x-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             - shift_y : list of int, optional
                 Pixels in y-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             - diagonal_only : bool, optional
                 Only compare to diagonal neighbors? The default is False.
@@ -1604,10 +1604,10 @@ class ImageTools():
                 Sigma clipping threshold. The default is 5.
             - shift_x : list of int, optional
                 Pixels in x-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             The default is {}.
         custom_kwargs : dict, optional
@@ -1626,10 +1626,10 @@ class ImageTools():
 
             - shift_x : list of int, optional
                 Pixels in x-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             The default is {}.
         medfilt_kwargs : dict, optional
@@ -1784,10 +1784,10 @@ class ImageTools():
 
             - shift_x : list of int, optional
                 Pixels in x-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             The default is {}.
         medfilt_kwargs : dict, optional
@@ -1991,10 +1991,10 @@ class ImageTools():
                 Sigma clipping threshold for negative outliers. The default is 1.
             - shift_x : list of int, optional
                 Pixels in x-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - diagonal_only : bool, optional
                 Only compare to diagonal neighbors? The default is False.
             -threshold_metric : str, optional
@@ -2032,9 +2032,9 @@ class ImageTools():
         if 'neg_sigma' not in sigclip_kwargs.keys():
             sigclip_kwargs['neg_sigma'] = 1.
         if 'shift_x' not in sigclip_kwargs.keys():
-            sigclip_kwargs['shift_x'] = [-1, 0, 1]
+            sigclip_kwargs['shift_x'] = [-2, -1, 0, 1, 2]
         if 'shift_y' not in sigclip_kwargs.keys():
-            sigclip_kwargs['shift_y'] = [-1, 0, 1]
+            sigclip_kwargs['shift_y'] = [-2, -1, 0, 1, 2]
         if 0 not in sigclip_kwargs['shift_x']:
             sigclip_kwargs['shift_x'] += [0]
         if 0 not in sigclip_kwargs['shift_y']:
@@ -2580,7 +2580,7 @@ class ImageTools():
         else:
             custom_kwargs = custom_kwargs.copy()
 
-        # Find bad pixels using median of neighbors.
+        # Find bad pixels using custom mask.
         pxdq_orig = pxdq.copy()
         # pxdq_custom = custom_kwargs[key] != 0
         # if pxdq_custom.ndim == pxdq.ndim - 1:  # Enable 3D bad pixel map to flag individual frames
@@ -2588,11 +2588,14 @@ class ImageTools():
         # pxdq[pxdq_custom] = 1
         # log.info('  --> Method custom: flagged %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
         if key in custom_kwargs.keys():
-            if np.array(custom_kwargs[key]).shape == pxdq_orig.shape:
-                pxdq_custom = custom_kwargs[key] != 0
+            custom = np.array(custom_kwargs[key])
+            if custom.shape == pxdq_orig.shape:
+                pxdq_custom = custom != 0
+            elif custom.shape == pxdq_orig.shape[1:]:
+                pxdq_custom = custom != 0
             else:
                 pxqd_temp = np.zeros(pxdq.shape)
-                coordinates = np.array(custom_kwargs[key])
+                coordinates = custom
 
                 if coordinates.shape[-1] == 2:
                     pxqd_temp[:, coordinates[:, 1], coordinates[:, 0]] = 1
@@ -2679,10 +2682,10 @@ class ImageTools():
 
             - shift_x : list of int, optional
                 Pixels in x-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             The default is {}.
 
@@ -2699,9 +2702,9 @@ class ImageTools():
 
         # Check input.
         if 'shift_x' not in localmed_kwargs.keys():
-            localmed_kwargs['shift_x'] = [-1, 0, 1]
+            localmed_kwargs['shift_x'] = [-2, -1, 0, 1, 2]
         if 'shift_y' not in localmed_kwargs.keys():
-            localmed_kwargs['shift_y'] = [-1, 0, 1]
+            localmed_kwargs['shift_y'] = [-2, -1, 0, 1, 2]
         if 0 not in localmed_kwargs['shift_x']:
             localmed_kwargs['shift_x'] += [0]
         if 0 not in localmed_kwargs['shift_y']:
