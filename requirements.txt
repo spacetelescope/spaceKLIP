@@ -15,5 +15,4 @@ lmfit>1.2.2
 plotly>=6.7.0
 scikit-learn>=1.7.2
 tqdm
-mocapy @ git+https://github.com/jgagneastro/mocapy.git
 astrofix @ git+https://github.com/HengyueZ/astrofix.git
