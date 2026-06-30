@@ -12,6 +12,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gs
 import matplotlib.patheffects as patheffects
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib import font_manager
 import scipy.ndimage as ndi
@@ -258,7 +259,7 @@ def compare_clean_methods(files,
         # Build annotation.
         text = []
         if kwargs_list:
-            method = kwargs_list[i].get("method", f"Run {i+1}")
+            method = kwargs_list[i].get("method", f"Run {i}")
             text.append(f"method = {method}")
             if method != "custom":
                 flat = []
@@ -430,7 +431,7 @@ def compare_find_methods(files,
         # Create DO_NOT_USE mask.
         mask = (np.asarray(dq, dtype=np.int32) & 1) != 0
         y, x = np.where(mask)
-        text = [r"DO_NOT_USE = " + f"{mask.sum():,}"]
+        text = [r"DO_NOT_USE (bad pixels) = " + f"{mask.sum():,}"]
 
         # Annotate the kwargs for each run.
         if kwargs_list and kwargs_list[i].get("method") != "custom":
@@ -442,7 +443,10 @@ def compare_find_methods(files,
                     flat.append(f"{k} = {v}")
             text.extend(", ".join(flat[j:j+2]) for j in range(0, len(flat), 2))
 
-        runs.append(dict(x=x, y=y, txt="\n".join(text), html="<br>".join(text)))
+            html = "<br>".join(text)
+            html = html.replace("DO_NOT_USE", '<span style="color:red;">×</span> DO_NOT_USE')
+
+        runs.append(dict(x=x, y=y, txt="\n".join(text), html=html))
 
     # STATIC PLOT
     if not interactive:
@@ -511,7 +515,7 @@ def compare_find_methods(files,
                                        marker=dict(symbol="x", size=5, color="red")),
                                        row=1, col=1)
 
-        # Anootation.
+        # Anotation.
         fig.add_trace(go.Scatter(x=[0.5], y=[0.5], text=[runs[0]["html"]],
                                  mode="text", showlegend=False),
                                  row=2, col=1)
@@ -532,7 +536,7 @@ def compare_find_methods(files,
 
                 buttons=[dict(
 
-                    label=f"Run {i+1}",
+                    label=f"Run {i}",
                     method="restyle",
 
                     args=[{
