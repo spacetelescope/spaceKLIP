@@ -443,8 +443,8 @@ def compare_find_methods(files,
                     flat.append(f"{k} = {v}")
             text.extend(", ".join(flat[j:j+2]) for j in range(0, len(flat), 2))
 
-            html = "<br>".join(text)
-            html = html.replace("DO_NOT_USE", '<span style="color:red;">×</span> DO_NOT_USE')
+        html = "<br>".join(text)
+        html = html.replace("DO_NOT_USE", '<span style="color:red;">×</span> DO_NOT_USE')
 
         runs.append(dict(x=x, y=y, txt="\n".join(text), html=html))
 
