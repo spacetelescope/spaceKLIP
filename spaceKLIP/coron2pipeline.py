@@ -188,6 +188,10 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
     # Print all info message if verbose, otherwise only errors or critical.
     from .logging_tools import all_logging_disabled
     log_level = logging.INFO if verbose else logging.ERROR
+    logging.basicConfig(level=log_level,
+                        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                        force=True)
+    log.setLevel(log_level)
 
     # Create output directory if it doesn't exist.
     if not os.path.exists(output_dir):
