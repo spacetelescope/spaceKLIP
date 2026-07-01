@@ -15,6 +15,7 @@ import json
 import types
 import copy
 import lmfit
+import astrofix
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
@@ -29,11 +30,13 @@ from astropy.io import fits
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from skimage.registration import phase_cross_correlation
+from sklearn.cluster import KMeans
 
 # scipy imports
 import scipy.ndimage
 from scipy.ndimage import gaussian_filter, median_filter
 from scipy.ndimage import shift as spline_shift
+from scipy.ndimage import label, convolve, binary_dilation
 from scipy.optimize import leastsq, minimize
 from scipy.interpolate import griddata
 
@@ -1234,20 +1237,21 @@ class ImageTools():
 
         pass
 
+    
     def find_bad_pixels(self,
                         method='dqarr',
                         set_dq_zero=True,
-                        dqarr_kwargs={},
-                        sigclip_kwargs={},
-                        custom_kwargs={},
-                        timeints_kwargs={},
-                        gradient_kwargs={},
+                        dqarr_kwargs=None,
+                        sigclip_kwargs=None,
+                        custom_kwargs=None,
+                        timeints_kwargs=None,
+                        gradient_kwargs=None,
                         types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                         subdir='bpfound',
                         restrict_to=None,
                         min_nancluster = None):
         """
-        Identify bad pixels for cleaning
+        Identify bad pixels for cleaning.
 
         Parameters
         ----------
@@ -1256,32 +1260,70 @@ class ImageTools():
             Different methods must be joined by a '+' sign without
             whitespace. Available methods are:
 
-            - dqarr: uses DQ array to identify bad pixels
+            - dqarr: Uses DQ array to identify bad pixels.
+            
+            - timeints: To identify bad pixels in time.
 
-            - sigclip: use sigma clipping to identify additional bad pixels.
+            - sigclip: Uses sigma clipping to identify additional bad pixels.
 
-            - custom: use a custom bad pixel map
+            - custom: Uses a custom bad pixel map.
 
             The default is 'dqarr'.
         set_dq_zero : bool, optional
             Toggle to start a new empty DQ array, or built upon the existing array.
-
-            The default is True
+            The default is True.
         dqarr_kwargs : dict, optional
             Keyword arguments for the 'dqarr' identification method. Available keywords are:
 
+            - flag_neighbors : bool, optional
+                If True, the 4-connected neighbors (up, down, left, right) of each DO_NOT_USE pixel
+                are evaluated and flagged if they are elevated relative to the local background, which
+                is estimated from the surrounding diagonal pixels.
+
+            - sigma : int, optional
+                Flag neighboring pixels with values greater than diag_med + sigma * diag_std.
+            
             The default is {}.
         sigclip_kwargs : dict, optional
             Keyword arguments for the 'sigclip' identification methods. Available keywords are:
-
-            - sigma: float, optional
+                
+            - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
+
+            - neg_sigma : float, optional
+                Sigma clipping threshold for negative outliers. The default is 1.
+
             - shift_x : list of int, optional
                 Pixels in x-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
+
             - shift_y : list of int, optional
                 Pixels in y-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
+
+            - diagonal_only : bool, optional
+                Only compare to diagonal neighbors? The default is False.
+
+            - threshold_metric : str, optional
+                Whether to use standard deviation or MAD.
+
+            - max_cluster_size : int, optional
+                Maximum size of bad pixel clusters to be flagged. If None, no limit is applied.
+
+            - cluster_dilate_radius : int, optional
+                Radius for dilating bad pixels before checking clustering. The default is 6 pixels.
+                
+            - mode : str, optional
+                Sigma-clipping strategy used to identify bad pixels. Available options are:
+                    'local' : Flags pixels that deviate from the median of their neighboring pixels. 
+                              Large negative outliers are also identified by comparing to background estimate.
+                    'local_weighted' : Same as 'local', but includes the pixel uncertainty when computing the clipping threshold.
+
+            - mask_psf : bool, optional
+                Restrict bad pixel flagging inside the PSF?
+
+            - crpix1/crpix2: float/float, optional
+                The center of the PSF.
 
             The default is {}.
         custom_kwargs : dict, optional
@@ -1289,6 +1331,22 @@ class ImageTools():
             match the keys of the observations database and the dictionary
             content must be binary bad pixel maps (1 = bad, 0 = good) with the
             same shape as the corresponding data. The default is {}.
+
+            The default is {}.
+        timeints_kwargs : dict, optional
+            - sigma : float, optional
+                Sigma clipping threshold. The default is 5.
+
+            - mode : str, optional
+                Mode for detecting bad pixels. The default is 'per_pixel'.
+                    'per_pixel' : Computes the variation across integrations independently for each pixel.
+                    'group_pixels' : Groups pixels by similar flux, computes the variation across integrations for each pixel, and compares each pixel’s variation to that of its corresponding flux group.
+
+            - n_groups : int, optional
+                The number of groups if mode == 'group_pixels'. The default is 25.
+
+            - diagnostic_plots : bool, optional
+                Plot diagnostics?
 
             The default is {}.
         types : list of str, optional
@@ -1304,8 +1362,7 @@ class ImageTools():
 
         Returns
         -------
-        None
-
+        None.
         """
         def nan_clusters_mask(image, min_nancluster):
             """
@@ -1342,6 +1399,28 @@ class ImageTools():
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
+        # Protect against mutability of default arguments
+        if dqarr_kwargs is None:
+            dqarr_kwargs = {}
+        else:
+            dqarr_kwargs = dqarr_kwargs.copy()
+        if sigclip_kwargs is None:
+            sigclip_kwargs = {}
+        else:
+            sigclip_kwargs = sigclip_kwargs.copy()
+        if custom_kwargs is None:
+            custom_kwargs = {}
+        else:
+            custom_kwargs = custom_kwargs.copy()
+        if timeints_kwargs is None:
+            timeints_kwargs = {}
+        else:
+            timeints_kwargs = timeints_kwargs.copy()
+        if gradient_kwargs is None:
+            gradient_kwargs = {}
+        else:
+            gradient_kwargs = gradient_kwargs.copy()
+
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
             # if we limit to only processing some concatenations,
@@ -1367,33 +1446,93 @@ class ImageTools():
                     nanmask = ut.read_msk(nanmaskfile)
                 pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
 
-                if set_dq_zero:  # set_dq_zero
-                    # Make copy of DQ array filled with zeros, i.e. all good pixels
-                    pxdq_temp = np.zeros_like(pxdq)
-                else:
-                    # Make copy of DQ array
-                    pxdq_temp = pxdq.copy()
+                # Make copy of DQ array filled with zeros, i.e. all good pixels or copy original.
+                pxdq_temp = np.zeros_like(pxdq) if set_dq_zero else pxdq.copy()
+                
+                # NON SCIENCE and DO_NOT_USE pixels.
+                pxmask_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
+                pxmask_donotuse = ut.get_dqmask(pxdq_temp, 'DO_NOT_USE', return_bool=True)
 
                 # Skip file types that are not in the list of types.
                 if self.database.obs[key]['TYPE'][j] in types:
+
                     # Call bad pixel identification routines.
                     method_split = method.split('+')
                     if method_split[0] != 'dqarr' and not set_dq_zero:
                         # If the first methond is not dqarr and you are not using a boolean mask for pxdq_temp,
                         # convert pxdq_temp to a boolean mask or some of the next steps won't work.
-                        # This is just a place holder. We need to think about how this mask will look like
+                        # This is just a place holder. We need to think about how this mask will look like.
                         pxdq_temp = (pxdq_temp > 0)
-
+                        
                     for k in range(len(method_split)):
                         head, tail = os.path.split(fitsfile)
                         if method_split[k] == 'dqarr':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
-                            # Flag any pixels marked as DO_NOT_USE that aren't NON_SCIENCE
-                            temp_donotuse = ut.get_dqmask(pxdq_temp, 'DO_NOT_USE', return_bool=True)
-                            temp_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
-                            pxdq_temp = (np.isnan(data) | temp_donotuse) & (~temp_nonsci)
+                            
+                            total_added = 0
+
+                            # Loop through each integration.
+                            for i in range(data.shape[0]):
+                            
+                                temp_nonsci = pxmask_nonsci[i].copy()
+                                temp_donotuse = np.isnan(data[i])
+
+                                if dqarr_kwargs.get('flag_neighbors', False):
+                                    added_count = 0  # Track flagged neighbors.
+                                    
+                                    # Loop through DO_NOT_USE pixels.
+                                    ys, xs = np.where(temp_donotuse)
+                                    for y, x in zip(ys, xs):
+                                        
+                                        # Collect diagonal pixels.
+                                        diag_vals = []
+                                        for dy, dx in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                                            ny, nx = y + dy, x + dx
+                                            # Make sure neighbor is within image bounds.
+                                            if 0 <= ny < data[i].shape[0] and 0 <= nx < data[i].shape[1]:
+                                                val = data[i, ny, nx]
+                                                if not np.isnan(val):# and val > 0:
+                                                    diag_vals.append(val)
+                                                                    
+                                        if len(diag_vals) == 0:
+                                            continue  # Skip if no valid diagonal neighbors.
+
+                                        # Compute median and std of diagonal neighbors.
+                                        diag_med = np.nanmedian(diag_vals)
+                                        diag_std = robust.medabsdev(np.array(diag_vals))
+                                        diag_std = np.nanstd(diag_vals)
+
+                                        # Threshold for marking neighbors as bad.
+                                        thresh = diag_med + dqarr_kwargs.get('sigma', 5) * diag_std
+
+                                        # Check the 4-connected neighbors.
+                                        for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                                            ny, nx = y + dy, x + dx
+                                            # Make sure neighbor is within image bounds.
+                                            if 0 <= ny < data[i].shape[0] and 0 <= nx < data[i].shape[1]:
+                                                val = data[i, ny, nx]
+                                                # Skip NaNs, non-science pixels, or already flagged pixels.
+                                                if np.isnan(val) or temp_nonsci[ny, nx] or temp_donotuse[ny, nx]:
+                                                    continue
+                                                # Flag neighbor if above threshold.
+                                                if val > thresh:
+                                                    temp_donotuse[ny, nx] = True
+                                                    added_count += 1
+
+                                    # Combine original DO_NOT_USE with newly flagged neighbors.
+                                    #log.info(f"    Integration {i + 1}: neighbors flagged = {added_count}")
+                                    total_added += added_count
+                                pxdq[i] = (np.isnan(data[i]) | temp_donotuse) & (~temp_nonsci)
+
+                            if dqarr_kwargs.get('flag_neighbors', False):
+                                log.info(f"  --> Total neighbor pixels flagged: {total_added}")
+
                         elif method_split[k] == 'sigclip':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
+                            sigclip_kwargs['crpix1'] = self.database.obs[key]['CRPIX1'][j] - 1
+                            sigclip_kwargs['crpix2'] = self.database.obs[key]['CRPIX2'][j] - 1
+                            if self.database.obs[key]['EXP_TYPE'][j] in ['MIR_4QPM', 'MIR_LYOT']:
+                                sigclip_kwargs['mask_psf'] = False
                             self.find_bad_pixels_sigclip(data, erro, pxdq_temp, pxmask_nonsci, sigclip_kwargs)
                         elif method_split[k] == 'custom':
                             log.info('  --> Method ' + method_split[k] + ': ' + tail)
@@ -1402,6 +1541,7 @@ class ImageTools():
                             else:
                                 log.info('  --> Method ' + method_split[k] + ': skipped because TA file')
                         elif method_split[k] == 'timeints':
+                            log.info('  --> Method ' + method_split[k] + ': ' + tail)
                             self.find_bad_pixels_timeints(data, erro, pxdq_temp, key, timeints_kwargs)
                         elif method_split[k] == 'gradient':
                             self.find_bad_pixels_gradient(data, erro, pxdq_temp, key, gradient_kwargs)
@@ -1464,10 +1604,10 @@ class ImageTools():
                 Sigma clipping threshold. The default is 5.
             - shift_x : list of int, optional
                 Pixels in x-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             The default is {}.
         custom_kwargs : dict, optional
@@ -1486,10 +1626,10 @@ class ImageTools():
 
             - shift_x : list of int, optional
                 Pixels in x-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             The default is {}.
         medfilt_kwargs : dict, optional
@@ -1601,14 +1741,15 @@ class ImageTools():
 
     def clean_bad_pixels(self,
                          method='timemed+localmed+medfilt',
-                         timemed_kwargs={},
-                         localmed_kwargs={},
-                         medfilt_kwargs={},
-                         interp2d_kwargs={},
+                         timemed_kwargs=None,
+                         localmed_kwargs=None,
+                         medfilt_kwargs=None,
+                         interp2d_kwargs=None,
+                         astrofix_kwargs=None,
                          types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                          subdir='bpcleaned',
                          restrict_to=None,
-                         plot=True):
+                         plot=False):
         """
         Clean bad pixels.
 
@@ -1628,6 +1769,8 @@ class ImageTools():
             - medfilt: replace bad pixels with an image plane median filter.
 
             - interp2d: replace bad pixels with an interpolation of neighbouring pixels.
+            
+            - astrofix: is an astronomical image correction algorithm based on Gaussian Process Regression.
 
             The default is 'timemed+localmed+medfilt'.
         timemed_kwargs : dict, optional
@@ -1641,10 +1784,10 @@ class ImageTools():
 
             - shift_x : list of int, optional
                 Pixels in x-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             The default is {}.
         medfilt_kwargs : dict, optional
@@ -1661,7 +1804,10 @@ class ImageTools():
                 Kernel size of the median filter to be used. The default is 4.
 
             The default is {}.
+        astrofix_kwargs: dict, optional
+            Keyword arguments for the 'astrofix' method. Available keywords are:
 
+            The default is {}.
         types : list of str, optional
             List of data types for which bad pixels shall be identified and
             fixed. The default is ['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA',
@@ -1679,6 +1825,28 @@ class ImageTools():
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+
+        # Protect against mutability of default arguments
+        if timemed_kwargs is None:
+            timemed_kwargs = {}
+        else:
+            timemed_kwargs = timemed_kwargs.copy()
+        if localmed_kwargs is None:
+            localmed_kwargs = {}
+        else:
+            localmed_kwargs = localmed_kwargs.copy()
+        if medfilt_kwargs is None:
+            medfilt_kwargs = {}
+        else:
+            medfilt_kwargs = medfilt_kwargs.copy()
+        if interp2d_kwargs is None:
+            interp2d_kwargs = {}
+        else:
+            interp2d_kwargs = interp2d_kwargs.copy()
+        if astrofix_kwargs is None:
+            astrofix_kwargs = {}
+        else:
+            astrofix_kwargs = astrofix_kwargs.copy()
 
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
@@ -1724,7 +1892,7 @@ class ImageTools():
                 if self.database.obs[key]['TYPE'][j] in types:
                     method_split = method.split('+')
 
-                    spatial = ['localmed', 'medfilt', 'interp2d']
+                    spatial = ['localmed', 'medfilt', 'interp2d', 'astofix']
                     # If localmed and medfilt in cleaning, can't run both
                     if len(set(method_split) & set(spatial)) > 1:
                         log.info('  --> WARNING: Multiple spatial cleaning routines detected!')
@@ -1734,7 +1902,7 @@ class ImageTools():
                         log.info('  --> localmed is partially redundant with other methods')
                         log.info('      --> if run first, large clusters of bad pixels may not be fully cleaned.')
 
-                    # Loop over methods
+                    # Loop over methods.
                     for k in range(len(method_split)):
                         head, tail = os.path.split(fitsfile)
                         log.info('  --> Method ' + method_split[k] + ': ' + tail)
@@ -1746,6 +1914,8 @@ class ImageTools():
                             self.fix_bad_pixels_medfilt(data, erro, pxdq_temp, medfilt_kwargs)
                         elif method_split[k] == 'interp2d':
                             self.fix_bad_pixels_interp2d(data, erro, pxdq_temp, interp2d_kwargs)
+                        elif method_split[k] == 'astrofix':
+                            self.fix_bad_pixels_astrofix(data, erro, pxdq_temp, astrofix_kwargs, plot=plot)
                         else:
                             log.info('  --> Unknown method ' + method_split[k] + ': skipped')
 
@@ -1788,17 +1958,18 @@ class ImageTools():
                 self.database.update_obs(key, j, fitsfile, maskfile, nanmaskfile=nanmaskfile)
 
         pass
+        
 
     def find_bad_pixels_sigclip(self,
                                 data,
                                 erro,
                                 pxdq,
                                 NON_SCIENCE,
-                                sigclip_kwargs={}):
+                                sigclip_kwargs=None):
         """
         Use an iterative sigma clipping algorithm to identify additional bad
         pixels in the data.
-
+        
         Parameters
         ----------
         data : 3D-array
@@ -1820,31 +1991,78 @@ class ImageTools():
                 Sigma clipping threshold for negative outliers. The default is 1.
             - shift_x : list of int, optional
                 Pixels in x-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction to which each pixel shall be compared to.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
+            - diagonal_only : bool, optional
+                Only compare to diagonal neighbors? The default is False.
+            -threshold_metric : str, optional
+                Whether to use standard deviation or MAD
+            - max_cluster_size : int, optional
+                Maximum size of bad pixel clusters to be flagged. If None, no limit is applied.
+            - cluster_dilate_radius : int, optional
+                Radius for dilating bad pixels before checking clustering. The default is 6 pixels.
+            - mode : str, optional
+                Sigma-clipping strategy used to identify bad pixels. Available options are:
+                    'local' : Flags pixels that deviate from the median of their neighboring pixels. 
+                              Large negative outliers are also identified by comparing to background estimate.
+                    'local_weighted' : Same as 'local', but includes the pixel uncertainty when computing the clipping threshold. 
+            - mask_psf : bool, optional
+                Restrict bad pixel flagging inside the PSF?
+            - crpix1/crpix2: float/float, optional
+                The center of the PSF.
 
             The default is {}.
-
+        
         Returns
         -------
         None.
         """
 
-        # Check input.
+        # Protection for mutability
+        if sigclip_kwargs is None:
+            sigclip_kwargs = {}
+        else:
+            sigclip_kwargs = sigclip_kwargs.copy()
+
+        # Check inputs.
         if 'sigma' not in sigclip_kwargs.keys():
             sigclip_kwargs['sigma'] = 5.
         if 'neg_sigma' not in sigclip_kwargs.keys():
             sigclip_kwargs['neg_sigma'] = 1.
         if 'shift_x' not in sigclip_kwargs.keys():
-            sigclip_kwargs['shift_x'] = [-1, 0, 1]
+            sigclip_kwargs['shift_x'] = [-2, -1, 0, 1, 2]
         if 'shift_y' not in sigclip_kwargs.keys():
-            sigclip_kwargs['shift_y'] = [-1, 0, 1]
+            sigclip_kwargs['shift_y'] = [-2, -1, 0, 1, 2]
         if 0 not in sigclip_kwargs['shift_x']:
             sigclip_kwargs['shift_x'] += [0]
         if 0 not in sigclip_kwargs['shift_y']:
             sigclip_kwargs['shift_y'] += [0]
+        if 'mode' not in sigclip_kwargs.keys():
+            sigclip_kwargs['mode'] = 'local'
+        if 'diagonal_only' not in sigclip_kwargs.keys():
+            sigclip_kwargs['diagonal_only'] = False
+        if 'threshold_metric' not in sigclip_kwargs.keys():
+            sigclip_kwargs['threshold_metric'] = 'std'
+        if 'max_cluster_size' not in sigclip_kwargs.keys():
+            sigclip_kwargs['max_cluster_size'] = None
+        if 'cluster_dilate_radius' not in sigclip_kwargs.keys():
+            sigclip_kwargs['cluster_dilate_radius'] = 6
+        if 'mask_psf' not in sigclip_kwargs.keys():
+            sigclip_kwargs['mask_psf'] = False
+        if 'crpix1' not in sigclip_kwargs.keys():
+            sigclip_kwargs['crpix1'] = None
+        if 'crpix2' not in sigclip_kwargs.keys():
+            sigclip_kwargs['crpix2'] = None
+
+        # Build optional PSF mask.
+        psf_mask = None
+        if sigclip_kwargs['mask_psf'] and sigclip_kwargs['crpix1']  is not None and sigclip_kwargs['crpix2']  is not None:
+            ny, nx = data.shape[1:]
+            Y, X = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
+            psf_radius = 50  # Just setting to a general value for radius.
+            psf_mask = ((X - sigclip_kwargs['crpix1'] )**2 + (Y - sigclip_kwargs['crpix2'] )**2) < psf_radius**2
 
         # Pad data.
         pad_left = np.abs(np.min(sigclip_kwargs['shift_x']))
@@ -1863,72 +2081,117 @@ class ImageTools():
 
         # Find bad pixels using median of neighbors.
         pxdq_orig = pxdq.copy()
-        ww = pxdq != 0
+        ww = (pxdq != 0)
         data_temp = data.copy()
         data_temp[ww] = np.nan
         erro_temp = erro.copy()
         erro_temp[ww] = np.nan
         for i in range(ww.shape[0]):
 
-            # Get median background and standard deviation.
-            bg_med = np.nanmedian(data_temp[i])
-            bg_std = robust.medabsdev(data_temp[i])
-            bg_ind = data[i] < (bg_med + 10. * bg_std)  # clip bright PSFs for final calculation
-            bg_med = np.nanmedian(data_temp[i][bg_ind])
-            bg_std = robust.medabsdev(data_temp[i][bg_ind])
-
             # Create initial mask of large negative values.
-            ww[i] = ww[i] | (data[i] < bg_med - sigclip_kwargs['neg_sigma'] * bg_std)
+            if sigclip_kwargs['mode'] == 'local':
+                # Get median background and standard deviation.
+                bg_med = np.nanmedian(data_temp[i])
+                bg_std = robust.medabsdev(data_temp[i])
+                bg_ind = data[i] < (bg_med + 10. * bg_std)  # clip bright PSFs for final calculation
+                bg_med = np.nanmedian(data_temp[i][bg_ind])
+                bg_std = robust.medabsdev(data_temp[i][bg_ind])
+                #ww[i] = ww[i] | (data[i] < bg_med - sigclip_kwargs['neg_sigma'] * bg_std)
+                threshold_neg = bg_med - sigclip_kwargs['neg_sigma'] * bg_std
+                mask_neg = data[i] < threshold_neg
+            
             ww[i][NON_SCIENCE[i]] = 0
+
+            # Restrict flagging in the PSF center.
+            if psf_mask is not None:
+                ww[i][psf_mask] = 0
 
             # Loop through max 10 iterations.
             for it in range(10):
                 data_temp[i][ww[i]] = np.nan
                 erro_temp[i][ww[i]] = np.nan
 
-                # Shift data and calculate median and standard deviation of neighbours
+                # Shift data and calculate median and standard deviation of neighbours.
                 pad_data = np.pad(data_temp[i], pad_vals, mode='edge')
                 pad_erro = np.pad(erro_temp[i], pad_vals, mode='edge')
-                data_arr = []
-                erro_arr = []
+                data_arr_med, data_arr_std = [], []
+                erro_arr_med, erro_arr_std = [], []
                 for ix in sigclip_kwargs['shift_x']:
                     for iy in sigclip_kwargs['shift_y']:
-                        if ix != 0 or iy != 0:
-                            data_arr += [np.roll(pad_data, (iy, ix), axis=(0, 1))]
-                            erro_arr += [np.roll(pad_erro, (iy, ix), axis=(0, 1))]
-                data_arr = np.array(data_arr)
-                data_arr_trim = data_arr[:, pad_bottom:top, pad_left:right]
-                data_med = np.nanmedian(data_arr_trim, axis=0)
+                        if ix==0 and iy==0:
+                            # Don't want pixel itself
+                            continue
+                        data_arr_std += [np.roll(pad_data, (iy, ix), axis=(0, 1))]
+                        erro_arr_std += [np.roll(pad_erro, (iy, ix), axis=(0, 1))]
+
+                        if sigclip_kwargs['diagonal_only'] and abs(ix) != abs(iy):
+                            # If diagonal_only is True, only want to include diagonal neighbors in median estimate
+                            continue
+                        data_arr_med += [np.roll(pad_data, (iy, ix), axis=(0, 1))]
+                        erro_arr_med += [np.roll(pad_erro, (iy, ix), axis=(0, 1))]
+                data_arr_med = np.array(data_arr_med)
+                data_arr_med_trim = data_arr_med[:, pad_bottom:top, pad_left:right]
+                data_med = np.nanmedian(data_arr_med_trim, axis=0)
                 diff = data[i] - data_med
 
-                data_std = np.nanstd(data_arr_trim, axis=0)
+                data_arr_std = np.array(data_arr_std)
+                data_arr_std_trim = data_arr_std[:, pad_bottom:top, pad_left:right]
+                if sigclip_kwargs['threshold_metric'] == 'std':
+                    data_std = np.nanstd(data_arr_std_trim, axis=0)
+                elif sigclip_kwargs['threshold_metric'] == 'mad':
+                    data_std = robust.medabsdev(data_arr_std_trim)
+                data_std_weighted = np.sqrt(data_std**2 + erro[i]**2)
 
-                # # Do the same for the diff array we just made
-                # pad_diff = np.pad(diff, pad_vals, mode='edge')
-                # diff_arr = []
-                # for ix in sigclip_kwargs['shift_x']:
-                #     for iy in sigclip_kwargs['shift_y']:
-                #         if ix != 0 or iy != 0:
-                #             diff_arr += [np.roll(pad_diff, (iy, ix), axis=(0, 1))]
-                # diff_arr = np.array(diff_arr)
-                # diff_arr = diff_arr[:, pad_bottom:top, pad_left:right]
-                # diff_med = np.nanmedian(diff_arr, axis=0)
-                # doublediff = data[i] - data_med - diff_med
-                # diff_std = np.nanstd(diff_arr, axis=0)
+                if sigclip_kwargs['mode'] == 'local':
+                    # Find values N standard deviations above the mean of neighbors.
+                    threshold = sigclip_kwargs['sigma'] * data_std
+                    mask_pos = diff > threshold
+                elif sigclip_kwargs['mode'] == 'local_weighted':
+                    threshold = sigclip_kwargs['sigma'] * data_std_weighted
+                    threshold_neg = -sigclip_kwargs['neg_sigma'] * data_std_weighted
+                    mask_pos = diff > threshold
+                    mask_neg = diff < threshold_neg
+                else:
+                    mask_neg = np.zeros_like(ww[i]) # Default empty mask
+                    mask_pos = np.zeros_like(ww[i]) # Default empty mask
 
-                # Find values N standard deviations above the mean of neighbors
-                threshold = sigclip_kwargs['sigma'] * data_std
-                mask_new = diff > threshold
+                # Restrict to specific cluster size if specified
+                if sigclip_kwargs['max_cluster_size'] is not None and sigclip_kwargs['cluster_dilate_radius'] is not None:
+                    structure = np.ones((2*sigclip_kwargs['cluster_dilate_radius']+1,
+                                                2*sigclip_kwargs['cluster_dilate_radius']+1), dtype=bool)
 
-                data_temp[i][mask_new] = np.nan
+                    def filter_clusters(mask, max_size):
+                        # Dilate mask to merge nearby features
+                        dilated = binary_dilation(mask, structure=structure)
+                        labeled, num_features = label(dilated)
 
-                # fig, ax = plt.subplots(1, 2)
-                # ax[0].imshow(data_temp[i])
-                # ax[1].imshow(data_std)
-                # plt.show()
+                        # Prepare final mask (only original pixels)
+                        final_mask = np.zeros_like(mask, dtype=bool)
 
-                nmask_new = np.sum(mask_new & np.logical_not(ww[i]))
-                # print('Iteration %.0f: %.0f bad pixels identified, %.0f are new' % (it + 1, np.sum(mask_new), nmask_new))
+                        for feature in range(1, num_features + 1):
+                            # Only count original masked pixels in this feature
+                            original_cluster = (labeled == feature) & mask
+                            cluster_size = np.sum(original_cluster)
+
+                            if cluster_size <= max_size:
+                                # keep original pixels
+                                final_mask[original_cluster] = True
+
+                        return final_mask
+
+                    # Apply to positive outliers
+                    mask_pos = filter_clusters(mask_pos, sigclip_kwargs['max_cluster_size'])
+                    # Apply to negative outliers
+                    mask_neg = filter_clusters(mask_neg, sigclip_kwargs['max_cluster_size'])
+
+                # Apply PSF mask.
+                if psf_mask is not None:
+                    mask_pos[psf_mask] = False
+                    mask_neg[psf_mask] = False
+
+                # Calculate how many NEW bad pixels were found.
+                mask_new = mask_pos | mask_neg
+                nmask_new = np.sum(mask_new & ~ww[i])
                 sys.stdout.write('\rFrame %.0f/%.0f, iteration %.0f' % (i + 1, ww.shape[0], it + 1))
                 sys.stdout.flush()
                 if it > 0 and nmask_new == 0:
@@ -1946,7 +2209,7 @@ class ImageTools():
                                  erro,
                                  pxdq,
                                  NON_SCIENCE,
-                                 timeints_kwargs={}):
+                                 timeints_kwargs=None):
         """
         Identify bad pixels from temporal variations across integrations.
 
@@ -1968,6 +2231,17 @@ class ImageTools():
             - sigma : float, optional
                 Sigma clipping threshold. The default is 5.
 
+            - mode : str, optional
+                Mode for detecting bad pixels. The default is 'per_pixel'.
+                    'per_pixel' : Computes the variation across integrations independently for each pixel.
+                    'group_pixels' : Groups pixels by similar flux, computes the variation across integrations for each pixel, and compares each pixel’s variation to that of its corresponding flux group.
+
+            - n_groups : int, optional
+                The number of groups if mode == 'group_pixels'. The default is 25.
+
+            - diagnostic_plots : bool, optional
+                Plot diagnostics?
+
             The default is {}.
 
         Returns
@@ -1975,50 +2249,223 @@ class ImageTools():
         None.
         """
 
-        # Check input.
+        # Protection for mutability
+        if timeints_kwargs is None:
+            timeints_kwargs = {}
+        else:
+            timeints_kwargs = timeints_kwargs.copy()
+
+        # Check inputs.
         if 'sigma' not in timeints_kwargs.keys():
             timeints_kwargs['sigma'] = 10.
+        if 'mode' not in timeints_kwargs.keys():
+            timeints_kwargs['mode'] = "per_pixel"
+        if timeints_kwargs['mode'] not in ("group_pixels", "per_pixel"):
+            raise ValueError(f"Unknown timeints method: {method!r}")
+        if 'n_groups' not in timeints_kwargs.keys():
+            timeints_kwargs['n_groups'] = 25  # Number of pixel groups.
+        if 'plot_diagnostics' not in timeints_kwargs.keys():
+            timeints_kwargs['plot_diagnostics'] = False
 
+        # Mask existing bad pixels.
         pxdq_orig = pxdq.copy()
         ww = pxdq != 0
         data_temp = data.copy()
         data_temp[ww] = np.nan
 
-        # Find bad pixels across the cube
+        # Find bad pixels across the cube.
+
+        # Compute per-pixel statistics.
         med_ints = np.nanmedian(data_temp, axis=0)
-        std_ints = np.nanstd(data_temp, axis=0)
+        mad_ints = robust.medabsdev(data_temp, axis=0)
+        absdiff = np.abs((data_temp - med_ints))
+        if timeints_kwargs['mode'] == "group_pixels":
+            # Low flux / negative pixels can be overflagged.
+            # Compute some floor.
+            bg_data = data_temp[data_temp < np.nanpercentile(data_temp, 50)]
+            bg_med = np.nanmedian(bg_data)
+            bg_mad = robust.medabsdev(bg_data)
+            #print(f"[timeints] MADINTS={np.nanmedian(mad_ints)}, BGMAD={bg_mad:.4g}")
+            dev_pixel = absdiff / np.maximum(mad_ints, bg_mad)
+        else:
+            dev_pixel = absdiff / mad_ints
 
-        std2_ints = robust.medabsdev(data_temp, axis=0)
+        # Compute group statistics.
+        groupID_map = None
+        group_bounds = None
+        group_stats = []
+        if timeints_kwargs['mode'] == "group_pixels":
+            # Positive, finite median values for clustering.
+            finite_mask = np.isfinite(med_ints)
+            pos_mask = finite_mask & (med_ints > 0)
+            pos_mask = finite_mask & (med_ints > 0)
+            med_ints_flat = med_ints[pos_mask].flatten()
+            if med_ints_flat.size < timeints_kwargs['n_groups']:
+                print(f"[timeints] Only {med_ints_flat.size} positive pixels; "
+                      f"cannot form {timeints_kwargs['n_groups']} groups. "
+                      "Falling back to per-pixel temporal outlier detection.")
+                timeints_kwargs['mode'] = "per_pixel"
+            else:
+                # Define flux groups in log-space.
+                X = np.log10(med_ints_flat).reshape(-1, 1)
+                km = KMeans(n_clusters=timeints_kwargs['n_groups'], n_init="auto", random_state=0).fit(X)
 
-        diff = np.abs((data_temp - med_ints)) / std2_ints
+                # Define group boundaries.
+                centers = np.sort(10.0 ** km.cluster_centers_.ravel())  # log to linear.
+                edges = np.concatenate((
+                    [med_ints_flat.min()],
+                    0.5 * (centers[:-1] + centers[1:]),
+                    [med_ints_flat.max()],
+                ))
+                group_bounds = list(zip(edges[:-1], edges[1:]))
 
-        mask_new = diff > timeints_kwargs['sigma']
+                # Assign each pixel to a flux group.
+                groupID_map = np.zeros_like(med_ints, dtype=int)
+                for gid, (lo, hi) in enumerate(group_bounds, start=1):
+                    mask = (med_ints >= lo) & (med_ints <= hi)
+                    groupID_map[mask] = gid
 
-        # data_temp[mask_new] = 9999
-        # plt.imshow(data_temp[1])
-        # plt.show()
-        # plt.hist(diff.flatten(),
-        #         bins=int(np.sqrt(len(diff.flatten()))),
-        #         histtype='step',
-        #         label='Pre Cleaning')
-        # plt.yscale('log')
-        # plt.show()
+                # Any remaining pixels are ungrouped. Mostly negative.
+                unassigned = (groupID_map == 0)
+                if np.any(unassigned):
+                    # Just some checks of the unassigned pixels.
+                    n_total = groupID_map.size
+                    n_nan = np.sum(np.isnan(med_ints) & unassigned)
+                    n_neg = np.sum((med_ints <= 0) & unassigned)
+                    n_pos = np.sum((med_ints > 0) & unassigned)
+                    #print(
+                    #    f"[timeints] Unassigned pixels: {np.sum(unassigned)} ({100*(np.sum(unassigned)/n_total):.2f}%) | "
+                    #    f"NaN: {n_nan} | "
+                    #    f"Negative Unassigned Pixels: {n_neg} | "
+                    #    f"Positive Unassigned Pixels: {n_pos} | using per-pixel method instead."
+                    #)
+                    groupID_map[unassigned] = timeints_kwargs['n_groups'] + 1
 
-        ww = ww | mask_new
+                # Calculate group statistics.
+                group_stats = []
+                max_gid = int(np.nanmax(groupID_map))
+                for gid in range(1, timeints_kwargs['n_groups'] + 1):
+                    mask = (groupID_map == gid)
+                    if not np.any(mask):
+                        continue
+
+                    group_vals = data_temp[:, mask].flatten()
+                    group_stats.append({
+                        "group_id": gid,
+                        "range": group_bounds[gid - 1],
+                        "median": np.nanmedian(group_vals),
+                        "mad": robust.medabsdev(group_vals),
+                        })
+
+        # Find bad pixels.
+        bad_pixels = np.zeros_like(data_temp, dtype=bool)
+        if timeints_kwargs['mode'] == "group_pixels":
+            # Compare each pixel to its associated group statistics.
+            for g in group_stats:
+                gid  = g["group_id"]
+                gmad = g["mad"]
+                mask = (groupID_map == gid)
+                ys, xs = np.where(mask)
+                #print(f"[timeints] Group {gid}: {len(ys)} pixels, MAD={gmad:.4g}")
+
+                dev_group = np.abs(data_temp[:, mask] - med_ints[mask]) / gmad
+                bad_pixels[:, mask] = dev_group > timeints_kwargs['sigma']
+
+                # Ungrouped pixels are compared to itself over time.
+                ungrouped_id = int(np.nanmax(groupID_map))
+                ungrouped_mask = (groupID_map == ungrouped_id)
+                if np.any(ungrouped_mask):
+                    ys, xs = np.where(ungrouped_mask)
+                    bad_pixels[:, ungrouped_mask] = dev_pixel[:, ungrouped_mask] > timeints_kwargs['sigma']
+        else:
+            # Compare each pixel to itself over time.
+            bad_pixels= dev_pixel > timeints_kwargs['sigma']
+
+        # Print/save results.
+        ww = ww | bad_pixels
         pxdq[ww] = 1
+        log.info(f'  --> Method timeints: identified %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
         print('')
-        log.info('  --> Method timeints: identified %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
+
+        if timeints_kwargs['plot_diagnostics'] == True:
+            ############################################
+            # DIAGNOSTIC PLOTS
+            ############################################
+            n_int, ny, nx = data_temp.shape
+
+            # Plot grouping diagnostics.
+            if timeints_kwargs['mode'] == "group_pixels":
+
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(17, 6))
+
+                # GroupID map.
+                max_gid = int(np.nanmax(groupID_map))
+                cmap = plt.get_cmap("tab20", max_gid)
+                im = ax1.imshow(groupID_map, origin="lower", cmap=cmap, vmin=1, vmax=max_gid)
+                ax1.set(title="Group IDs", xlabel="X", ylabel="Y")
+                cbar = fig.colorbar(im, ax=ax1)
+                ticks = np.arange(1, max_gid + 1)
+                labels = [f"G{i}" for i in range(1, max_gid)] + ["Ungrouped"]
+                cbar.set_ticks(ticks)
+                cbar.set_ticklabels(labels)
+                cbar.set_label("Group ID")
+
+                # Histogram of positive median values + groups.
+                bins = np.logspace(np.log10(med_ints_flat.min()), np.log10(med_ints_flat.max()), 200)
+                ax2.hist(med_ints_flat, bins=bins, color="gray", alpha=0.6)
+                ymin, ymax = ax2.get_ylim()
+                for i, (lo, hi) in enumerate(group_bounds, start=1):
+                    color = cmap((i - 1) / max_gid)
+                    ax2.axvline(lo, linestyle="--", linewidth=0.8, color="black")
+                    ax2.axvline(hi, linestyle="--", linewidth=0.8, color="black")
+                    ax2.text(np.sqrt(lo * hi), ymax * 0.07, f"G{i}", color=color,
+                             ha="center", va="bottom", rotation=90, fontsize=9)
+                ax2.set(xscale="log", yscale="log", xlabel="DN/s [log scale]", ylabel="Counts [log scale]")
+
+                fig.tight_layout()
+                plt.show(block=False)
+                plt.pause(0.001)
+
+            # Plot bad pixels found.
+            n_ints = data_temp.shape[-2]
+            ncols = min(5, n_int)
+            nrows = -(-n_int // ncols)
+            fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 5 * nrows), sharey=True)
+            axes = np.asarray(axes).ravel()
+            for i, ax in enumerate(axes):
+                if i >= n_int:
+                    ax.axis("off")
+                    continue
+                vmin, vmax = np.nanpercentile(data_temp, (1, 99))
+                ax.imshow(data_temp[i], origin="lower", vmin=vmin, vmax=vmax, cmap="gray")
+                yb, xb = np.where(bad_pixels[i])
+                if xb.size:
+                    ax.plot(xb, yb, "rx", ms=3)
+                ax.set_title(f"Integration {i+1}")
+                ax.set_xlabel("X")
+                if i == 0:
+                    ax.set_ylabel("Y")
+            fig.tight_layout()
+            plt.show(block=False)
+            plt.pause(0.001)
 
         pass
-
+        
     def find_bad_pixels_gradient(self,
                                  data,
                                  erro,
                                  pxdq,
                                  key,
-                                 gradient_kwargs={}):
+                                 gradient_kwargs=None):
         print('')
         log.info('  --> Warning!: This routine has not been thoroughly tested and requires further development')
+
+        # Protection for mutability
+        if gradient_kwargs is None:
+            gradient_kwargs = {}
+        else:
+            gradient_kwargs = gradient_kwargs.copy()
+
         # Check input.
         if 'sigma' not in gradient_kwargs.keys():
             gradient_kwargs['sigma'] = 0.5
@@ -2098,7 +2545,7 @@ class ImageTools():
                                erro,
                                pxdq,
                                key,
-                               custom_kwargs={}):
+                               custom_kwargs=None):
         """
         Use a custom bad pixel map to flag additional bad pixels in the data.
 
@@ -2127,7 +2574,13 @@ class ImageTools():
         None.
         """
 
-        # Find bad pixels using median of neighbors.
+        # Protection for mutability
+        if custom_kwargs is None:
+            custom_kwargs = {}
+        else:
+            custom_kwargs = custom_kwargs.copy()
+
+        # Find bad pixels using custom mask.
         pxdq_orig = pxdq.copy()
         # pxdq_custom = custom_kwargs[key] != 0
         # if pxdq_custom.ndim == pxdq.ndim - 1:  # Enable 3D bad pixel map to flag individual frames
@@ -2135,11 +2588,14 @@ class ImageTools():
         # pxdq[pxdq_custom] = 1
         # log.info('  --> Method custom: flagged %.0f additional bad pixel(s) -- %.2f%%' % (np.sum(pxdq) - np.sum(pxdq_orig), 100. * (np.sum(pxdq) - np.sum(pxdq_orig)) / np.prod(pxdq.shape)))
         if key in custom_kwargs.keys():
-            if np.array(custom_kwargs[key]).shape == pxdq_orig.shape:
-                pxdq_custom = custom_kwargs[key] != 0
+            custom = np.array(custom_kwargs[key])
+            if custom.shape == pxdq_orig.shape:
+                pxdq_custom = custom != 0
+            elif custom.shape == pxdq_orig.shape[1:]:
+                pxdq_custom = custom != 0
             else:
                 pxqd_temp = np.zeros(pxdq.shape)
-                coordinates = np.array(custom_kwargs[key])
+                coordinates = custom
 
                 if coordinates.shape[-1] == 2:
                     pxqd_temp[:, coordinates[:, 1], coordinates[:, 0]] = 1
@@ -2160,7 +2616,7 @@ class ImageTools():
                                data,
                                erro,
                                pxdq,
-                               timemed_kwargs={}):
+                               timemed_kwargs=None):
         """
         Replace pixels which are only bad in some frames with their median
         value from the good frames.
@@ -2184,6 +2640,12 @@ class ImageTools():
         None.
         """
 
+        # Protection for mutability
+        if timemed_kwargs is None:
+            timemed_kwargs = {}
+        else:
+            timemed_kwargs = timemed_kwargs.copy()
+
         # Fix bad pixels using time median.
         ww = pxdq != 0
         ww_all_bad = np.array([np.sum(ww, axis=0) == ww.shape[0]] * ww.shape[0])
@@ -2201,7 +2663,7 @@ class ImageTools():
                                 data,
                                 erro,
                                 pxdq,
-                                localmed_kwargs={}):
+                                localmed_kwargs=None):
         """
         Replace bad pixels with the median value of their surrounding good
         pixels.
@@ -2220,10 +2682,10 @@ class ImageTools():
 
             - shift_x : list of int, optional
                 Pixels in x-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
             - shift_y : list of int, optional
                 Pixels in y-direction from which the median shall be computed.
-                The default is [-1, 0, 1].
+                The default is [-2, -1, 0, 1, 2].
 
             The default is {}.
 
@@ -2232,11 +2694,17 @@ class ImageTools():
         None.
         """
 
+        # Protection for mutability
+        if localmed_kwargs is None:
+            localmed_kwargs = {}
+        else:
+            localmed_kwargs = localmed_kwargs.copy()
+
         # Check input.
         if 'shift_x' not in localmed_kwargs.keys():
-            localmed_kwargs['shift_x'] = [-1, 0, 1]
+            localmed_kwargs['shift_x'] = [-2, -1, 0, 1, 2]
         if 'shift_y' not in localmed_kwargs.keys():
-            localmed_kwargs['shift_y'] = [-1, 0, 1]
+            localmed_kwargs['shift_y'] = [-2, -1, 0, 1, 2]
         if 0 not in localmed_kwargs['shift_x']:
             localmed_kwargs['shift_x'] += [0]
         if 0 not in localmed_kwargs['shift_y']:
@@ -2290,7 +2758,7 @@ class ImageTools():
                                data,
                                erro,
                                pxdq,
-                               medfilt_kwargs={}):
+                               medfilt_kwargs=None):
         """
         Replace bad pixels with an image plane median filter.
 
@@ -2316,6 +2784,12 @@ class ImageTools():
         None.
         """
 
+        # Protection for mutability
+        if medfilt_kwargs is None:
+            medfilt_kwargs = {}
+        else:
+            medfilt_kwargs = medfilt_kwargs.copy()
+
         # Check input.
         if 'size' not in medfilt_kwargs.keys():
             medfilt_kwargs['size'] = 4
@@ -2334,11 +2808,162 @@ class ImageTools():
 
         pass
 
+    def fix_bad_pixels_astrofix(self,
+                                data,
+                                erro,
+                                pxdq,
+                                astrofix_kwargs=None,
+                                plot=False):
+        """
+        Replace bad pixels with an algorithm based on Gaussian Process Regression.
+        It trains itself to apply the optimal interpolation kernel for each image,
+        performing multiple times better than median replacement and interpolation
+        with a fixed kernel.
+
+        Parameters
+        ----------
+        data : 3D-array
+            Input images.
+        erro : 3D-array
+            Input image uncertainties.
+        pxdq : 3D-array
+            Input binary bad pixel maps (1 = bad, 0 = good). Will be updated by
+            the routine to exclude the fixed bad pixels.
+        astrofix_kwargs : dict, optional
+            Keyword arguments for the 'astrofix' method. Available keywords are:
+
+                - sig_clip : float, optional
+                Pixels that are smaller than median + sig_clip * median absolute deviation
+                of the image will not be used in the training process. Default: 10.
+
+                - max_clip : float, optional
+                Pixels that are greater than max(image)/max_clip will not be used in
+                the training process. Default: 5.
+
+                - sig_data : float, optional
+                Measurement noise, assumed to be uniform. The kernel depends only on the ratio a/sig_data. Default: 1.
+
+                - width : int, optional
+                Size of the window (width × width) used for interpolation. Default: 9.
+
+                - init_guess : array-like, optional
+                Initial guess for the training process. By default, the 0th element gives the initial guess of a and the
+                1st element gives the initial guess of h. If the size of init_guess is 3, the training optimizes h_x and
+                h_y separately instead of using h for all directions. In that case, the 1st element gives the initial 
+                guess of h_x, and the 2nd element gives the initial guess of h_y. Default: [1,1].
+
+            The default is {}.
+        plot : bool, optional
+            Plot diagnostics?
+
+        Returns
+        -------
+        None.
+        """
+        
+        # Protection for mutability.
+        if astrofix_kwargs is None:
+            astrofix_kwargs = {}
+        else:
+            astrofix_kwargs = astrofix_kwargs.copy()
+        
+        # Check inputs. These are astrofix defaults.
+        if 'sig_clip' not in astrofix_kwargs.keys():
+            astrofix_kwargs['sig_clip'] = 10
+        if 'max_clip' not in astrofix_kwargs.keys():
+            astrofix_kwargs['max_clip'] = 5
+        if 'sig_data' not in astrofix_kwargs.keys():
+            astrofix_kwargs['sig_data'] = 1
+        if 'width' not in astrofix_kwargs.keys():
+            astrofix_kwargs['width'] = 9
+        if 'init_guess' not in astrofix_kwargs.keys():
+            astrofix_kwargs['init_guess'] = [1, 1]
+            
+        # Fix bad pixels using astrofix.
+        pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
+        ww = (pxdq != 0) & (~pxmask_nonsci)
+        log.info('  --> Method astrofix: fixing %.0f bad pixel(s) -- %.2f%%' % (np.sum(ww), 100. * np.sum(ww) / np.prod(ww.shape)))
+
+        # NaN pixels to be replaced.
+        data_temp = data.copy()
+        data_temp[np.where(np.isnan(data_temp))] = 0
+        data_temp[ww] = np.nan
+                
+        # Prepare array to hold fixed images
+        fixed_img = np.zeros_like(data_temp)
+
+        # Loop over integrations
+        for i, integration in enumerate(data_temp):
+
+            if i == 0:
+                # First integration: run full Fix_Image to determine parameters
+                fixed_img[i], para, TS = astrofix.Fix_Image(integration, "asnan",
+                                                            sig_clip=astrofix_kwargs['sig_clip'],
+                                                            max_clip=astrofix_kwargs['max_clip'],
+                                                            sig_data=astrofix_kwargs['sig_data'],
+                                                            width=astrofix_kwargs['width'],
+                                                            init_guess=astrofix_kwargs['init_guess']
+                                                            )
+                #print(f"a={para[0]}, h={para[1]}")
+                #print(f"Number of training set pixels: {np.count_nonzero(TS)}")
+            else:
+                # Remaining integrations: interpolate using parameters from first
+                fixed_img[i] = astrofix.Interpolate(para[0], para[1], integration, BP="asnan")
+            
+            # Update the original data using bad pixel mask
+            data[i][ww[i]] = fixed_img[i][ww[i]]
+
+            # Update DQ flag to good
+            pxdq[i][ww[i]] = 0
+        
+        if plot:
+            from mpl_toolkits.axes_grid1 import make_axes_locatable
+            # -----------------------------
+            # Diagnostic plot
+            # -----------------------------
+
+            zoom = None#(100, 200, 100, 200)
+
+            frame = -1
+
+            if zoom is not None:
+                y1, y2, x1, x2 = zoom
+                images = [
+                    data[frame, y1:y2, x1:x2],
+                    fixed_img[frame, y1:y2, x1:x2],
+                ]
+            else:
+                images = [
+                    data[frame],
+                    fixed_img[frame],
+                ]
+            titles = ["Original", "Fixed"]
+
+            fig, ax = plt.subplots(1, 2, figsize=(18, 7))
+
+            for i in range(2):
+
+                im = ax[i].imshow(images[i], vmin=np.nanpercentile(images[i], 10), vmax=np.nanpercentile(images[i], 100))
+
+                divider = make_axes_locatable(ax[i])
+                cax = divider.append_axes("bottom", size="5%", pad=0.2)
+
+                fig.colorbar(im, ax=ax[i], cax=cax, orientation="horizontal")
+
+                ax[i].set_title(titles[i], fontsize=30, pad=15)
+                ax[i].axis("off")
+
+            plt.tight_layout()
+            plt.show()
+        
+        pass
+    
+
     def fix_bad_pixels_interp2d(self,
                                 data,
                                 erro,
                                 pxdq,
-                                interp2d_kwargs={}):
+                                interp2d_kwargs=None):
         """
         Replace bad pixels with an interpolation of neighbouring pixels.
 
@@ -2355,7 +2980,11 @@ class ImageTools():
             Keyword arguments for the 'interp2d' method. Available keywords are:
 
             - size : int, optional
-                Kernel size of the median filter to be used. The default is 4.
+                Kernel size of the median filter to be used. The default is 5.
+
+            - method : str, optional
+                Interpolation method to be used. The default is 'linear'. Available options are 'nearest', 'linear',
+                and 'cubic'.
 
             The default is {}.
 
@@ -2364,9 +2993,17 @@ class ImageTools():
         None.
         """
 
+        # Protection for mutability.
+        if interp2d_kwargs is None:
+            interp2d_kwargs = {}
+        else:
+            interp2d_kwargs = interp2d_kwargs.copy()
+
         # Check input.
         if 'size' not in interp2d_kwargs.keys():
             interp2d_kwargs['size'] = 5
+        if 'method' not in interp2d_kwargs.keys():
+            interp2d_kwargs['method'] = 'linear'
 
         # Fix bad pixels using interpolation of neighbors.
         pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
@@ -2420,7 +3057,7 @@ class ImageTools():
                             data_interp = griddata((x_coords, y_coords),
                                                    box_values,
                                                    (ci, ri),
-                                                   method='linear',
+                                                   method=interp2d_kwargs['method'],
                                                    fill_value=np.nan)
 
                             # Replace data pixel with interpolated value
@@ -2430,13 +3067,15 @@ class ImageTools():
                             err_interp = griddata((ex_coords, ey_coords),
                                                   ebox_values,
                                                   (ci, ri),
-                                                  method='linear',
+                                                  method=interp2d_kwargs['method'],
                                                   fill_value=np.nan)
 
                             # Replace error pixel
                             erro[i][ri, ci] = err_interp
 
-                            pxdq[i][ww[i]] = 0
+                            # Set DQ to good
+                            pxdq[i][ri, ci] = 0
+
 
         pass
 
