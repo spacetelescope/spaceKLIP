@@ -655,7 +655,6 @@ def run_single_file(fitspath, output_dir, steps={}, verbose=False, **kwargs):
     logging.basicConfig(level=log_level,
                         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
                         force=True)
-    log.setLevel(log_level)
 
     # Create output directory if it doesn't exist.
     if not os.path.exists(output_dir):
