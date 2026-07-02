@@ -1641,6 +1641,7 @@ class DAO():
     def dao_source_extractor(self,
         data,
         nanmask,
+        use_dao=True,
         dao=True
     ):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
@@ -1668,6 +1669,8 @@ class DAO():
             science image.
         nanmask: 2D-array (bool)
             Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
+        use_dao : bool, optional
+            Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
         dao : bool, optional
             Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
 
@@ -1694,11 +1697,13 @@ class DAO():
         data_subtracted = data - bkg
         data_subtracted[data_subtracted<0]=0
         #Candidate detection via DAOStarFinder, or StarFinder
-        if dao:
-            dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
+        if use_dao:
+            if dao:
+                dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
+            else:
+                dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))
         else:
-            dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))
-
+            dao_catalog = None
 
         # Catalog candidates are prepended so they have priority inside each group.
         if self.catalog is not None and dao_catalog is not None:
