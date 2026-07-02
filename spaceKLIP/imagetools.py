@@ -18,7 +18,7 @@ import lmfit
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
-from spaceKLIP.widefield_utils import DAO, write_ds9_regions_from_sep_objects,stars_extractor,fit_psf, fetch_catalog_for_image_fov
+from spaceKLIP.widefield_utils import DAO, write_ds9_regions_from_sep_objects,stars_extractor,fit_psf, fetch_catalog_for_image_fov,inspect_region_for_best_prop
 from astropy.table import Table
 
 # astropy imports
@@ -3764,7 +3764,8 @@ class ImageTools():
                       catdir='pretiles',
                       mcmc_for_all=False,
                       medbkg_method='robust',
-                      fwhm=2.5):
+                      fwhm=2.5,
+                      threshold=1.5):
 
         """Extract and write small cutouts (tiles) centered on cataloged sources.
         Note tah this step include the equivalent of nans_back from direct imaging. The final output tile have nans
@@ -3947,19 +3948,18 @@ class ImageTools():
                             x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels,showplots=False)
-                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels,showplots=False)
-
+                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=int(fov_pixels*1.5),showplots=False)
+                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=int(fov_pixels*1.5),showplots=False)
                             if medbkg_method is not None:
-                                pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fov=fov_pixels, showplots=False)
-                                tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
+                                pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fov=int(fov_pixels * 1.5), showplots=False)
+                                tile = subtract_medbkg(tile, pdxtile, tile_fitsfile, nanmask=nantile,method=medbkg_method)
+                            tile_for_coresat = np.copy(tile)
+                            tile_for_coresat[nantile==1] = np.nan
+                            coresat, core_mask_x, core_mask_y, eccsat, solsat = inspect_region_for_best_prop(tile_for_coresat, fwhm=fwhm, threshold=threshold, margin=0)
 
                             method = source['method']
                             roundness = source['roundness']
                             sharpness = source['sharpness']
-                            coresat = source['coresat']
-                            eccsat = source['eccsat']
-                            solsat = source['solsat']
                             log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
                             if coresat ==0 and not mcmc_for_all:
                                 fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(imaging_psf,
@@ -3977,6 +3977,8 @@ class ImageTools():
                                        kwargs['center_masked'] = True
                                    else:
                                        kwargs['center_masked'] = False
+                                kwargs['x_guess'] = core_mask_x
+                                kwargs['y_guess'] = core_mask_y
 
                                 MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs)
                                 if not os.path.exists(output_dir + '/mcmcfit/'):
@@ -4052,11 +4054,11 @@ class ImageTools():
                             head_sci['CRPIX1'] = crpix1
                             head_sci['CRPIX2'] = crpix2
                             head_sci['METHOD'] = method
-                            head_sci['ROUNDNESS'] = roundness
-                            head_sci['SHARPNESS'] = sharpness
-                            head_sci['CORESAT'] = coresat
-                            head_sci['ECCSAT'] = eccsat
-                            head_sci['SOLSAT'] = solsat
+                            head_sci['ROUNDNESS'] = roundness if not isinstance(roundness, np.ma.MaskedArray) else None
+                            head_sci['SHARPNESS'] = sharpness if not isinstance(sharpness, np.ma.MaskedArray) else None
+                            head_sci['CORESAT'] = coresat if not isinstance(coresat, np.ma.MaskedArray) else None
+                            head_sci['ECCSAT'] = eccsat if not isinstance(eccsat, np.ma.MaskedArray) else None
+                            head_sci['SOLSAT'] = solsat if not isinstance(solsat, np.ma.MaskedArray) else None
 
                             # Save fits file.
                             tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,is2d,
