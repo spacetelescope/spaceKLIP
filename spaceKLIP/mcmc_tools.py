@@ -150,14 +150,20 @@ class MCMCTools:
         else:
             self.dy_limits = [- 5, + 5]
         if 'flux_limits' in kwargs:
-            self.flux_limits = [self.flux_guess * 10 ** (-kwargs['flux_limits']),
-                           self.flux_guess * 10 ** (kwargs['flux_limits'])]
+            if len(kwargs['flux_limits']) == 2:
+                self.flux_limits = [kwargs['flux_limits'][0], kwargs['flux_limits'][1]]
+            else:
+                self.flux_limits = [self.flux_guess * 10 ** (-kwargs['flux_limits']),
+                               self.flux_guess * 10 ** (kwargs['flux_limits'])]
         else:
             self.flux_limits = [self.flux_guess * 1e-1, self.flux_guess * 1e1]
         if 'contrast_limits' in kwargs:
-            self.contrast_limits = [kwargs['contrast_limits'][0], kwargs['contrast_limits'][1]]
+            if len(kwargs['contrast_limits']) == 2:
+                self.contrast_limits = [kwargs['contrast_limits'][0], kwargs['contrast_limits'][1]]
+            else:
+                self.contrast_limits = [self.contrast_guess * kwargs['contrast_limits'][0], self.contrast_guess *  kwargs['contrast_limits'][1]]
         else:
-            self.contrast_limits = [self.contrast_guess * 1e-1, self.contrast_guess * 1e1] # if self.contrast_guess * 1e1 <= 1 else 1]
+            self.contrast_limits = [self.contrast_guess * 1e-1, self.contrast_guess * 1e1]
         if 'sep_limits' in kwargs:
             self.sep_limits = kwargs['sep_limits']
         else:
