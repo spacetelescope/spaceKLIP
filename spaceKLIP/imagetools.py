@@ -3947,11 +3947,11 @@ class ImageTools():
                             x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fow=fov_pixels*2,showplots=False)
-                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fow=fov_pixels*2,showplots=False)
+                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels,showplots=False)
+                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels,showplots=False)
 
                             if medbkg_method is not None:
-                                pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fow=fov_pixels*2, showplots=False)
+                                pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fov=fov_pixels, showplots=False)
                                 tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
 
                             method = source['method']
@@ -3977,12 +3977,6 @@ class ImageTools():
                                        kwargs['center_masked'] = True
                                    else:
                                        kwargs['center_masked'] = False
-
-                                kwargs['x_guess'] = tile.shape[1] // 2
-                                kwargs['y_guess'] = tile.shape[0] // 2
-                                kwargs['x_limits'] = coresat*2
-                                kwargs['y_limits'] = coresat*2
-                                kwargs['size'] = int(np.min([kwargs['x_guess']-kwargs['x_limits'],kwargs['y_guess']-kwargs['y_limits']]))
 
                                 MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs)
                                 if not os.path.exists(output_dir + '/mcmcfit/'):
@@ -4014,15 +4008,15 @@ class ImageTools():
                             log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
                             # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                            datatile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
-                            errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
-                            pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fow=fov_pixels, showplots=False)
+                            datatile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fov=fov_pixels, showplots=False)
+                            errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fov=fov_pixels, showplots=False)
+                            pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fov=fov_pixels, showplots=False)
                             datatile = np.array(datatile)
                             errotile = np.array(errotile)
                             pxdqtile = np.array(pxdqtile)
                             fitted_x_pos, fitted_y_pos =datatile.shape[1] // 2 - shifts[0],  datatile.shape[1] // 2 - shifts[1]
                             if nanmask is not None:
-                                nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts=shifts, fow=fov_pixels, kwargs={'mode':'constant'},showplots=False)
+                                nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts=shifts, fov=fov_pixels, kwargs={'mode':'constant'},showplots=False)
                                 nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
                                 nanmasktile[nanmasktile.astype(np.bool)] = 1
                                 nanmasktile = np.array(nanmasktile)
@@ -4065,15 +4059,13 @@ class ImageTools():
                             head_sci['SOLSAT'] = solsat
 
                             # Save fits file.
-                            tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,
-                                                    is2d,
+                            tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,is2d,
                                                     align_shift=align_shift, center_shift=center_shift,
                                                     align_mask=align_mask,
                                                     center_mask=center_mask, maskoffs=maskoffs,new_fitsfile=tile_fitsfile)
                             tile_fitsfile_list.append(tile_fitsfile)
                             maskfile = ut.write_msk(maskfile, mask, tile_fitsfile)
-                            # nanmaskfile = ut.write_msk(nanmaskfile, nanmasktile,tile_fitsfile, '_nanmask.fits')
-                pass
+                            pass
             key_tile_fitsfile_list.extend(tile_fitsfile_list)
 
         # I need to create a new database from scratch since I'm creating snapshots of stars from the original
