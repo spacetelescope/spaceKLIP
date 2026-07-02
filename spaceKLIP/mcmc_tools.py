@@ -570,9 +570,6 @@ class MCMCTools:
                                            flat_and_skip_center=False)
 
         centers = [(data_masked.shape[-1] - 1.) / 2., (data_masked.shape[-1] - 1.) / 2.]
-        # centers = [(data_masked.shape[-1]) // 2., (data_masked.shape[-1]) // 2.]
-
-        # psf_masked = psf.copy()
         # Initialize the MCMC sampler
         # Add a small random offset to the initial guess to initialize walkers
         pos = initial_guess + 1e-4 * np.random.randn(nwalkers, ndim)
