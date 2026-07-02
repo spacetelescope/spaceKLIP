@@ -3588,6 +3588,7 @@ class ImageTools():
                                      threshold=3,
                                      fwhm=2,
                                      cat_ext=None,
+                                     use_dao=True,
                                      use_gaia=False,
                                      use_allwise=False,
                                      use_simbad=True,
@@ -3614,6 +3615,8 @@ class ImageTools():
             bottom, top] of the frames. The default is 1.
         fov_pix : int
             Tile size in detector pixels.
+        use_dao : bool, optional
+            If True, use DAOStarFinder to detect point sources. The default is True.
         use_gaia : bool, optional
             If True, query Gaia EDR3 for sources in the image FOV and include them in the catalog and DS9 region file.
             The default is False.
@@ -3729,7 +3732,8 @@ class ImageTools():
                                     fov=fov_pix)
 
                         objects_tbl_selected = dao.dao_source_extractor(data=data[0],
-                                                                        nanmask=nanmask)
+                                                                        nanmask=nanmask,
+                                                                        use_dao=use_dao)
                         objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
 
                         out = write_ds9_regions_from_sep_objects(objects_tbl_selected,
@@ -3950,9 +3954,12 @@ class ImageTools():
                                 pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fow=fov_pixels*2, showplots=False)
                                 tile=subtract_medbkg(tile,pdxtile,tile_fitsfile,nanmask=nantile,method=medbkg_method)
 
+                            method = source['method']
+                            roundness = source['roundness']
+                            sharpness = source['sharpness']
                             coresat = source['coresat']
-                            eccsat = source['ecc']
-                            solsat = source['sol']
+                            eccsat = source['eccsat']
+                            solsat = source['solsat']
                             log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
                             if coresat ==0 and not mcmc_for_all:
                                 fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(imaging_psf,
@@ -4050,6 +4057,9 @@ class ImageTools():
                             head_sci['NANMASKCENY'] = nanmaskceny
                             head_sci['CRPIX1'] = crpix1
                             head_sci['CRPIX2'] = crpix2
+                            head_sci['METHOD'] = method
+                            head_sci['ROUNDNESS'] = roundness
+                            head_sci['SHARPNESS'] = sharpness
                             head_sci['CORESAT'] = coresat
                             head_sci['ECCSAT'] = eccsat
                             head_sci['SOLSAT'] = solsat
