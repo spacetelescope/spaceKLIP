@@ -3765,7 +3765,8 @@ class ImageTools():
                       mcmc_for_all=False,
                       medbkg_method='robust',
                       fwhm=2.5,
-                      threshold=1.5):
+                      threshold=1.5,
+                      r_max=np.inf):
 
         """Extract and write small cutouts (tiles) centered on cataloged sources.
         Note tah this step include the equivalent of nans_back from direct imaging. The final output tile have nans
@@ -3783,6 +3784,8 @@ class ImageTools():
             If True, use MCMC centering for all targets.
         medbkg_method : str or None
             If not None, subtract a median background from each extracted tile.
+         r_max : float
+            Maximum distance from center to accept a candidate in estimating coresat. Default is np.inf.
 
         Returns
         -------
@@ -3809,6 +3812,7 @@ class ImageTools():
                 If method is 'border', width of the border region used for the estimate in pixels.
             sigma : float
                 If method is 'sigma_clipped', sigma threshold for clipping in the estimate.
+
             Returns
             -------
             data : ndarray
@@ -3941,7 +3945,7 @@ class ImageTools():
                         if np.sum(~np.isfinite(data_filled)) != 0:
                             raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
 
-                        for source in targets_table:
+                        for source in targets_table[60:61]:
                             tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["id"]}_{DETECTOR.lower()}')
                             log.info(f'--> Extracting tile for source: {source["id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
@@ -3953,9 +3957,9 @@ class ImageTools():
                             if medbkg_method is not None:
                                 pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fov=int(fov_pixels * 1.5), showplots=False)
                                 tile = subtract_medbkg(tile, pdxtile, tile_fitsfile, nanmask=nantile,method=medbkg_method)
-                            tile_for_coresat = np.copy(tile)
-                            tile_for_coresat[nantile==1] = np.nan
-                            coresat, core_mask_x, core_mask_y, eccsat, solsat = inspect_region_for_best_prop(tile_for_coresat, fwhm=fwhm, threshold=threshold, margin=0)
+                            tile_with_nans = np.copy(tile)
+                            tile_with_nans[nantile==1] = np.nan
+                            coresat, core_mask_x, core_mask_y, eccsat, solsat = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=r_max)
 
                             method = source['method']
                             roundness = source['roundness']
@@ -3966,9 +3970,8 @@ class ImageTools():
                                                                                   tile,
                                                                                   nantile,
                                                                                   oversampling=1,
-                                                                                  coresat=coresat,
                                                                                   showplots=False,
-                                                                                  fwhm=fwhm)
+                                                                                  fit_radius=r_max)
 
                             else:
                                 if 'r' not in kwargs:
@@ -3980,7 +3983,7 @@ class ImageTools():
                                 kwargs['x_guess'] = core_mask_x
                                 kwargs['y_guess'] = core_mask_y
 
-                                MCMCTools = mcmc_tools.MCMCTools(tile, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs)
+                                MCMCTools = mcmc_tools.MCMCTools(tile, nanmask=nantile, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs)
                                 if not os.path.exists(output_dir + '/mcmcfit/'):
                                     os.makedirs(output_dir + '/mcmcfit/')
 
