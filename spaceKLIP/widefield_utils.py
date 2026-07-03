@@ -795,7 +795,6 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
 
             # Re-mask this region using the localized high-contrast threshold
             clean_star_mask = region_bright & (nandata >= dynamic_thresh)
-
             # Evaluate solidity and geometry on this dynamically isolated peak
             star_label = label(clean_star_mask)
             star_props = regionprops(star_label)
@@ -846,7 +845,9 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         sigma_ny = float(ny) / 5.0
 
         # Extract centroid coordinates (prop.centroid is ordered as (y, x))
-        ry, rx = prop.centroid
+        datamasked = np.copy(nandata)
+        datamasked[~clean_star_mask] = 0
+        ry, rx = np.unravel_index(np.argmax(datamasked), datamasked.shape)
 
         # Evaluate independent 2D Gaussian decay for rectangular geometry
         dx_norm = ((rx - default_cx) / sigma_nx) ** 2
