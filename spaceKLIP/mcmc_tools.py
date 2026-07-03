@@ -1,3 +1,5 @@
+from functools import partial
+
 import matplotlib.pyplot as plt
 import numpy as np
 from spaceKLIP import utils as ut
@@ -322,12 +324,20 @@ class MCMCTools:
         if return_residuals:
             return data - model
 
-
-    def mask_within_radius(self, image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan):
+    def mask_within_radius(self, image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, partial=False):
+        # Calculate exact distance from center to each pixel center coordinate
         distance = np.sqrt((xdat - (x + xcen)) ** 2 + (ydat - (y + ycen)) ** 2)
-        image[np.where(distance <= r)] = c
-        return image
 
+        if partial:
+            # Expand radius by the distance from pixel center to pixel corner (sqrt(0.5))
+            # This ensures any pixel touched by the circle is included
+            effective_radius = r + 0.7071
+        else:
+            # Standard mask based strictly on pixel centers
+            effective_radius = r
+
+        image[distance <= effective_radius] = c
+        return image
 
     def build_model_from_psf(self, params, psf, binarity, rotate, x_guess=0, y_guess=0, offsetpsf_func=None, shifted=True):
         '''
@@ -456,54 +466,54 @@ class MCMCTools:
             if model.shape[0] != model.shape[1]:
                 pass
             ydat, xdat = np.indices(model.shape)
-
             if r > 0:
-                masked_model_psf = self.mask_within_radius(model.copy(), xdat, ydat, centers[0], centers[1], r,
-                                                             c=np.nan)
-                masked_star_image = self.mask_within_radius(star_image.copy(), xdat, ydat, centers[0], centers[1], r,
-                                                            c=np.nan)
+                if r > 2: partial = True
+                else:
+                    partial = False
+                masked_model = self.mask_within_radius(model.copy(), xdat, ydat, centers[0], centers[1], r, c=np.nan, partial=partial)
+                masked_star = self.mask_within_radius(star_image.copy(), xdat, ydat, centers[0], centers[1], r, c=np.nan, partial=partial)
             else:
-                masked_model_psf = model.copy()
-                masked_star_image = star_image.copy()
+                masked_model = model.copy()
+                masked_star = star_image.copy()
 
             #remove negative values that can skew the fit and the median background from the image
-            masked_star_image[(masked_star_image<0)] = 0
-            masked_star_image -= np.nanmedian(masked_star_image)
+            masked_star -= np.nanmedian(masked_star)
+            masked_star[(masked_star<0)] = 0
             # # Scale the PSF by the flux value
 
             # Compute the residual between the star and the shifted, scaled PSF
-            residual = masked_star_image - masked_model_psf
+            residual = masked_star - masked_model
 
             # Assuming Gaussian errors, the log-likelihood is proportional to the chi-squared
-            if nanmask is not None:
-                log_likelihood = -0.5 * np.nansum(residual[~nanmask.astype(bool)] ** 2)
-            else:
-                log_likelihood = -0.5 * np.nansum(residual ** 2)
+            # if nanmask is not None:
+            #     log_likelihood = -0.5 * np.nansum(residual[~nanmask.astype(bool)] ** 2)
+            # else:
+            log_likelihood = -0.5 * np.nansum(residual ** 2)
 
             if show_plots:
                 with plt.style.context('spaceKLIP.sk_style'):
                     if vmin is None:
-                        vmin = np.nanmin(masked_star_image)
+                        vmin = np.nanmin(masked_star)
                     if vmax is None:
-                        vmax = np.nanmax(masked_star_image)
+                        vmax = np.nanmax(masked_star)
                     if vminres is None:
                         vminres = np.nanmin(residual)
                     if vmaxres is None:
                         vmaxres = np.nanmax(residual)
                     fig, ax = plt.subplots(1, 3, figsize=(21, 7))
-                    im0 = ax[0].imshow(masked_star_image, origin='lower', vmin=vmin, vmax=vmax)
+                    im0 = ax[0].imshow(masked_star, origin='lower', vmin=vmin, vmax=vmax)
                     ax[0].set_title('Data')
                     divider0 = make_axes_locatable(ax[0])
                     cax0 = divider0.append_axes('right', size='5%', pad=0.05)
                     fig.colorbar(im0, cax=cax0, orientation='vertical')
 
-                    im1 = ax[1].imshow(masked_model_psf, origin='lower', vmin=vmin, vmax=vmax)
+                    im1 = ax[1].imshow(masked_model, origin='lower', vmin=vmin, vmax=vmax)
                     ax[1].set_title('Model')
                     divider1 = make_axes_locatable(ax[1])
                     cax1 = divider1.append_axes('right', size='5%', pad=0.05)
                     fig.colorbar(im1, cax=cax1, orientation='vertical')
 
-                    im2 = ax[2].imshow(masked_star_image - masked_model_psf, origin='lower', vmin=vminres, vmax=vmaxres)
+                    im2 = ax[2].imshow(masked_star - masked_model, origin='lower', vmin=vminres, vmax=vmaxres)
                     ax[2].set_title('Residual')
                     divider2 = make_axes_locatable(ax[2])
                     cax2 = divider2.append_axes('right', size='5%', pad=0.05)
@@ -584,7 +594,11 @@ class MCMCTools:
             nanmask_masked = self.extract_subarray(self.nanmask, x_guess, y_guess, size=self.size,
                                                 flat_and_skip_center=False)
         else:
-            nanmask_masked = None
+            if r > 0:
+                ydat, xdat = np.indices(data_masked.shape)
+                nanmask_masked = self.mask_within_radius(np.zeros(data_masked.shape), ydat, xdat, data_masked.shape[1]//2, data_masked.shape[0]//2, r, c=1,partial=True)
+            else:
+                nanmask_masked = None
 
         if self.center_masked:
             psf_cenx, psf_cany = [(psf.shape[1]- 1.) / 2., (psf.shape[0]- 1.) / 2.]
