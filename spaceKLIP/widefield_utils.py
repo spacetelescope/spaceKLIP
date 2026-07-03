@@ -844,10 +844,13 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         sigma_nx = float(nx) / 5.0
         sigma_ny = float(ny) / 5.0
 
-        # Extract centroid coordinates (prop.centroid is ordered as (y, x))
-        datamasked = np.copy(nandata)
-        datamasked[~clean_star_mask] = 0
-        ry, rx = np.unravel_index(np.argmax(datamasked), datamasked.shape)
+        # Extract centroid/peak coordinates (prop.centroid is ordered as (y, x))
+        if np.any(region_nans):
+            ry, rx = prop.centroid
+        else:
+            datamasked = np.copy(nandata)
+            datamasked[~clean_star_mask] = 0
+            ry, rx = np.unravel_index(np.argmax(datamasked), datamasked.shape)
 
         # Evaluate independent 2D Gaussian decay for rectangular geometry
         dx_norm = ((rx - default_cx) / sigma_nx) ** 2
