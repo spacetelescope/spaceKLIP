@@ -24,6 +24,7 @@ class MCMCTools:
 
     def __init__(self,
                  data,
+                 nanmask=None,
                  type=None,
                  kwargs={}):
         """
@@ -33,6 +34,8 @@ class MCMCTools:
         ----------
         data: 2D or 3D numpy array
             The input data to be manipulated. If 3D, the median along the first axis will be taken.
+        nanmask: 2D numpy array, optional
+            The nanmask to keep track of nans pixels in the data. If not provided, it will be set to None.
         type: str, optional
             The type of data, e.g., 'SCI' for science data. This can be used to set default parameters based on the data type. Default is None.
         kwargs: dict, optional
@@ -72,7 +75,7 @@ class MCMCTools:
         """
         if len(data.shape) == 3:
             data = np.median(data, axis=0)
-
+        self.nanmask = nanmask
         # Make an internal alias of the spaceKLIP database class.
         # self.database = database
         self.crpix1 = (data.shape[-1] - 1.) / 2. + 1  # (data.shape[-1]) // 2. + 1.  # 1-indexed
@@ -239,6 +242,7 @@ class MCMCTools:
         - center_x: The x-coordinate (row) of the center of the subarray.
         - center_y: The y-coordinate (column) of the center of the subarray.
         - size: The size of the subarray (e.g., 3 for a 3x3 subarray).
+        - flat_and_skip_center: Boolean, whether to flatten the subarray and skip the center value.
 
         Returns:
         - subarray: The extracted subarray.
@@ -246,7 +250,6 @@ class MCMCTools:
         half_size = int(size // 2)
         subarray = data[int(round(center_y)) - half_size:int(round(center_y)) + half_size + 1,
                    int(round(center_x)) - half_size:int(round(center_x)) + half_size + 1]
-
         if flat_and_skip_center:
             # Flatten the subarray and remove the central value
             subarray_flat = subarray.flatten()
@@ -420,7 +423,7 @@ class MCMCTools:
         best_fit_params: best fit parameters for x, y and flux
         '''
 
-        def log_likelihood(params, star_image, psf, centers, binarity, rotate, r, show_plots=False, vmin=None, vmax=None, vminres=None,
+        def log_likelihood(params, star_image, psf, nanmask, centers, binarity, rotate, r, show_plots=False, vmin=None, vmax=None, vminres=None,
                            vmaxres=None, path2fitsfile=None):
             """Log-likelihood function for MCMC.
 
@@ -428,6 +431,17 @@ class MCMCTools:
                 params (list): [x_shift, y_shift, flux]
                 star_image (2D array): Observed image of the star.
                 psf (2D array): Normalized PSF (flux sum is 1).
+                nanmask (2D array): to keep track of bad pixels.
+                centers (list): [x_center, y_center] of the star.
+                binarity (bool): Whether to fit a binary PSF.
+                rotate (bool): Whether to rotate the PSF.
+                r (int): Radius for masking the center of the data and PSF.
+                show_plots (bool): Whether to show plots.
+                vmin (float): Minimum value for plotting.
+                vmax (float): Maximum value for plotting.
+                vminres (float): Minimum value for residual plotting.
+                vmaxres (float): Maximum value for residual plotting.
+                path2fitsfile (str): Path to the fits file.
 
             Returns:
                 float: Log-likelihood value.
@@ -461,7 +475,10 @@ class MCMCTools:
             residual = masked_star_image - masked_model_psf
 
             # Assuming Gaussian errors, the log-likelihood is proportional to the chi-squared
-            log_likelihood = -0.5 * np.nansum(residual ** 2)
+            if nanmask is not None:
+                log_likelihood = -0.5 * np.nansum(residual[~nanmask.astype(bool)] ** 2)
+            else:
+                log_likelihood = -0.5 * np.nansum(residual ** 2)
 
             if show_plots:
                 with plt.style.context('spaceKLIP.sk_style'):
@@ -538,7 +555,7 @@ class MCMCTools:
                     else:
                         return -np.inf
 
-        def log_posterior(params, star_image, psf, limits, centers, binarity, rotate, r, show_plots=False, vmin=None, vmax=None,
+        def log_posterior(params, star_image, psf, nanmask, limits, centers, binarity, rotate, r, show_plots=False, vmin=None, vmax=None,
                           vminres=None, vmaxres=None, path2fitsfile=None):
             """Log-posterior function for MCMC.
 
@@ -546,6 +563,7 @@ class MCMCTools:
                 params (list): [x_shift, y_shift, flux]
                 star_image (2D array): Observed image of the star.
                 psf (2D array): Normalized PSF (flux sum is 1).
+                nanmask (2D array): to keep track of bad pixels.
                 limits (list): limits for [x_shift, y_shift]
 
             Returns:
@@ -555,12 +573,18 @@ class MCMCTools:
             lp = log_prior(params, limits, binarity, rotate)
             if not np.isfinite(lp):
                 return -np.inf
-            return lp + log_likelihood(params, star_image, psf, centers, binarity, rotate, r, show_plots=show_plots, vmin=vmin,
-                                       vmax=vmax, vminres=vminres, vmaxres=vmaxres, path2fitsfile=path2fitsfile)
+            return lp + log_likelihood(params, star_image, psf, nanmask, centers, binarity, rotate, r,
+                                       show_plots=show_plots, vmin=vmin, vmax=vmax, vminres=vminres, vmaxres=vmaxres,
+                                       path2fitsfile=path2fitsfile)
 
         log.info('--> Running MCMC fit')
         data_masked = self.extract_subarray(data.copy(), x_guess, y_guess, size=self.size,
                                             flat_and_skip_center=False)
+        if self.nanmask is not None:
+            nanmask_masked = self.extract_subarray(self.nanmask, x_guess, y_guess, size=self.size,
+                                                flat_and_skip_center=False)
+        else:
+            nanmask_masked = None
 
         if self.center_masked:
             psf_cenx, psf_cany = [(psf.shape[1]- 1.) / 2., (psf.shape[0]- 1.) / 2.]
@@ -575,7 +599,9 @@ class MCMCTools:
         pos = initial_guess + 1e-4 * np.random.randn(nwalkers, ndim)
 
         # Create the MCMC sampler object
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=(data_masked, psf_masked, limits, centers, binarity, rotate, r), moves=self.moves)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior,
+                                        args=(data_masked, psf_masked, nanmask_masked,limits, centers, binarity, rotate, r),
+                                        moves=self.moves)
         # Run the MCMC sampler for a number of steps
 
         sampler.run_mcmc(pos, nsteps+self.burnin if self.burnin is not None else nsteps, progress=verbose)
