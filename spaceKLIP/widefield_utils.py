@@ -3,38 +3,27 @@ from pathlib import Path
 from typing import Literal
 import matplotlib.pylab as plt
 from astropy.visualization import simple_norm
-from photutils.psf import FittableImageModel
-from astropy.modeling import fitting
 import spaceKLIP.utils as ut
 from astropy.table import Table, vstack
 from astropy.wcs import WCS
-from scipy.signal import fftconvolve
 from photutils.detection import DAOStarFinder,StarFinder
 from astropy.stats import SigmaClip
 from photutils.background import Background2D, MedianBackground
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 import requests
-import numpy as np
 from skimage.measure import label, regionprops
 from scipy.ndimage import binary_dilation
 from photutils.aperture import CircularAperture, aperture_photometry
 from scipy.spatial import KDTree
 from skimage.color import label2rgb
-from astropy.visualization import ZScaleInterval
-from scipy.optimize import least_squares
+import numpy as np
+from scipy.optimize import minimize, NonlinearConstraint
 from scipy.ndimage import shift
 
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
-
-
-# def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan):
-#     distance = np.sqrt((xdat - (x + xcen)) ** 2 + (ydat - (y + ycen)) ** 2)
-#     image[np.where(distance <= r)] = c
-#     return image
-
 
 def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, partial=False):
     # Calculate exact distance from center to each pixel center coordinate
@@ -376,7 +365,7 @@ def fetch_catalog_for_image_fov(path2table,
 
 
 def estimate_bkg_and_rms(data,mask,n=15):
-    """Estimate background median and RMS from cutout border pixels.
+    """Estimate spatial background and RMS maps using a 2D background estimator.
 
     Parameters
     ----------
@@ -408,83 +397,126 @@ def estimate_bkg_and_rms(data,mask,n=15):
     )
     return bkg.background, bkg.background_rms
 
-def downsample_psf_to_detector(psf, oversampling):
-    """Downsample an oversampled PSF to detector sampling by summing blocks.
-
-    Parameters
-    ----------
-    psf : 2D-array
-        Oversampled PSF.
-    oversampling : int
-        Oversampling factor (PSF pixels per detector pixel).
-
-    Returns
-    -------
-    2D-array
-        PSF on detector sampling.
-
+def fit_psf(data, psf, r=0, partial=True, min_separation=1, max_separation=5.0, x_limits=(-2,2), y_limits=(-2,2)):
     """
-    if oversampling == 1:
-        return np.asarray(psf, dtype=float)
-
-    psf = np.asarray(psf, dtype=float)
-    ny_os, nx_os = psf.shape
-    if (ny_os % oversampling) != 0 or (nx_os % oversampling) != 0:
-        raise ValueError(
-            f"PSF shape {psf.shape} not divisible by oversampling={oversampling}."
-        )
-    ny = ny_os // oversampling
-    nx = nx_os // oversampling
-    # Sum (not mean) preserves total flux normalization.
-    return psf.reshape(ny, oversampling, nx, oversampling).sum(axis=(1, 3))
-
-def fit_psf(data, psf, r=0, partial=True):
-    def lm_residuals(params, data, psf_template, mask, weights):
-        """Returns the raw array of weighted residuals for Levenberg-Marquardt."""
-        dx, dy, flux, background = params
-
-        # Generate the model
-        model_star = flux * shift(psf_template, [dy, dx], order=3) + background
-
-        # Calculate residuals ONLY for unmasked (wing/valid) pixels
-        # unique to your code: ~mask selects the valid pixels
-        raw_residuals = data[~mask] - model_star[~mask]
-        weighted_residuals = raw_residuals * weights[~mask]
-
-        return weighted_residuals
-
+    Fits a single star and a simultaneous binary star model directly to the data.
+    Uses native trust-region constraints to keep stars separated without breaking gradients.
+    """
+    # 1. SETUP INITIAL MASKS & BACKGROUND
     weights = np.ones_like(data, dtype=float)
     mask = np.zeros_like(data, dtype=bool)
     ydat, xdat = np.indices(mask.shape)
     centers = [mask.shape[1] // 2, mask.shape[0] // 2]
 
     if r > 0:
-        # Star is saturated: mask the core out
         mask = mask_within_radius(mask.copy(), xdat, ydat, centers[0], centers[1], r, c=np.nan, partial=partial)
-        background = np.median(data[~mask])
         initial_flux = np.max(data[~mask]) / np.max(psf)
     else:
-        # Star is NOT saturated: mask remains all False (all pixels valid)
-        # Fix background: use the outer 2 pixels edge of the image to avoid the star peak
-        edge_mask = np.ones_like(data, dtype=bool)
-        edge_mask[2:-2, 2:-2] = False  # True only on the outer border
-        background = np.median(data[edge_mask])
-
-        # Fix flux: use the true peak of the unsaturated star
         initial_flux = np.max(data) / np.max(psf)
 
-    # Initial guesses: [dx, dy, flux, background]
-    initial_guess = [0.0, 0.0, initial_flux, background]
+    initial_flux = max(1e-5, initial_flux)
+    n_pixels = np.sum(~mask)
 
-    # Execute the actual Levenberg-Marquardt optimizer
-    result = least_squares(
-        lm_residuals,
-        initial_guess,
-        args=(data, psf, mask, weights),
-        method='lm'
+    # =========================================================================
+    # MODEL 1: SINGLE STAR FIT
+    # =========================================================================
+    def single_objective(params):
+        dx, dy, flux = params
+        model = flux * shift(psf, [dy, dx], order=3)
+        residuals = (data[~mask] - model[~mask]) * weights[~mask]
+        return np.sum(residuals ** 2)
+
+    single_guess = [0.0, 0.0, initial_flux]
+    single_bounds = [x_limits,y_limits, (initial_flux*1e-1, initial_flux*1e2)]
+
+    res_single = minimize(single_objective, single_guess, bounds=single_bounds, method='L-BFGS-B')
+    s_dx, s_dy, s_flux = res_single.x
+    chi2_single = res_single.fun
+    bic_single = chi2_single + 3 * np.log(n_pixels)
+
+    # =========================================================================
+    # MODEL 2: SIMULTANEOUS BINARY FIT (Parameterised with Contrast)
+    # =========================================================================
+    def binary_objective(params):
+        # params vector now tracks contrast as (flux2 / flux1)
+        dx1, dy1, flux1, dx2, dy2, contrast = params
+
+        # Companion flux is a direct multiplier of primary flux
+        flux2 = flux1 * contrast
+
+        model = (flux1 * shift(psf, [dy1, dx1], order=3) + flux2 * shift(psf, [dy2, dx2], order=3))
+        residuals = (data[~mask] - model[~mask]) * weights[~mask]
+        return np.sum(residuals ** 2)
+
+    def separation_constraint(params):
+        # Must unpack with the new contrast parameter order
+        dx1, dy1, flux1, dx2, dy2, contrast = params
+        return np.sqrt((dx1 - dx2) ** 2 + (dy1 - dy2) ** 2)
+
+    # Enforce that the output of separation_constraint must fall between min and max limits
+    const = NonlinearConstraint(separation_constraint, min_separation, max_separation)
+
+    binary_bounds = [
+        x_limits, y_limits, (initial_flux * 1e-1, initial_flux * 1e2),  # Star 1
+        (-max_separation, max_separation), (-max_separation, max_separation), (0.01, 1.0)
+    ]
+
+    # Initialize companion split on opposite sides
+    offset = max_separation * 0.4
+    initial_contrast_guess = 0.2  # Assumes companion starts at 20% of the primary's flux
+
+    binary_guess = [
+        -offset, -offset, initial_flux * 0.7,
+        offset, offset, initial_contrast_guess,
+    ]
+
+    # Use 'trust-constr' instead of SLSQP for highly stable non-linear geometry handling
+    res_binary = minimize(
+        binary_objective,
+        binary_guess,
+        bounds=binary_bounds,
+        constraints=const,
+        method='trust-constr',
+        options={'xtol': 1e-6, 'gtol': 1e-6}
     )
 
-    return result.x
+    chi2_binary = res_binary.fun
+    bic_binary = chi2_binary + 6 * np.log(n_pixels)
+
+    # Extract final parameters from trust-constr result
+    b_dx1, b_dy1, b_flux1, b_dx2, b_dy2, b_contrast = res_binary.x
+
+    # Calculate companion flux using your direct contrast definition
+    b_flux2 = b_flux1 * b_contrast
+
+    # Calculate final sorted physical separation
+    final_sep = np.sqrt((b_dx1 - b_dx2) ** 2 + (b_dy1 - b_dy2) ** 2)
+
+    if final_sep < min_separation or not res_binary.success:
+        if final_sep < min_separation:
+            log.warning(f"Single Star Detected. (Binary fit rejected: separation {final_sep} < {min_separation:.2f} pix)")
+        if not res_binary.success:
+            log.info(f"Single Star Detected. (Binary fit rejected: optimization failed to converge)")
+        return s_dx, s_dy, s_flux, None, None, None, False
+    else:
+        delta_bic = bic_single - bic_binary
+
+    # Enforce that Star 1 is ALWAYS the brighter "Primary" star
+    if b_flux2 > b_flux1:
+        b_dx1, b_dx2 = b_dx2, b_dx1
+        b_dy1, b_dy2 = b_dy2, b_dy1
+        b_flux1, b_flux2 = b_flux2, b_flux1
+
+    # =========================================================================
+    # 3. STATISTICAL COMPARISON WITH FLUX RATIO THRESHOLD
+    # =========================================================================
+    if delta_bic > 10.0 and b_flux2 > (0.01 * b_flux1):
+        log.info(f"Binary Detected. (ΔBIC = {delta_bic:.1f}, Sep = {final_sep:.2f} pix)")
+        log.info(f"Primary Flux: {b_flux1:.1f} | Companion Flux: {b_flux2:.1f}")
+        return b_dx1, b_dy1, b_flux1, b_dx2, b_dy2, b_flux2, True
+    else:
+        log.info(f"Single Star Detected. (ΔBIC = {delta_bic:.1f})")
+        return s_dx, s_dy, s_flux, None, None, None, False
 
 
 def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_cent=None, id=None):
@@ -822,42 +854,6 @@ def stars_extractor(data,
 
     return tile
 
-def sextractor_flag_short(flag: int) -> str:
-    """Return a short description for a SExtractor/SEP FLAGS bitmask.
-
-    Parameters
-    ----------
-    flag : int
-        SExtractor-style FLAGS value (bitmask).
-
-    Returns
-    -------
-    str
-        One-word summary (e.g. ``'ok'``, ``'saturated'``, ``'badpix'``).
-
-    Notes
-    -----
-    The input is a bitmask; if multiple bits are set, this routine returns the
-    highest-priority label.
-
-    """
-    f = int(flag)
-    if f == 0:
-        return "ok"
-
-    # Priority: saturation and bad pixels often break photometry the most.
-    if f & 4:
-        return "saturated"
-    if f & 16:
-        return "badpix"
-    if f & 1:
-        return "edge"
-    if f & 2:
-        return "blended"
-    if f & 8:
-        return "neighbor"
-    return "flagged"
-
 def write_ds9_regions_from_sep_objects(
     objects_tbl: Table,
     output_path: str | Path,
@@ -941,41 +937,6 @@ def write_ds9_regions_from_sep_objects(
 
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
     return out
-
-
-def extract_image_centers(hdul_list):
-    """Reads headers of all matching FITS files and extracts center coordinates."""
-    ra_centers = []
-    dec_centers = []
-
-    if not file_paths:
-        raise FileNotFoundError(f"No FITS files found in {fits_directory}")
-
-    for hdul in hdul_list:
-        # 1. Parse the World Coordinate System from the primary or image header
-        # Note: spaceKLIP / JWST data might store this in extension 1 ('SCI')
-        header = hdul[0].header if 'NAXIS' in hdul[0].header else hdul[1].header
-        wcs = WCS(header)
-
-        # 2. Find the pixel dimensions of the detector array
-        naxis1 = header.get('NAXIS1', 0)
-        naxis2 = header.get('NAXIS2', 0)
-
-        if naxis1 == 0 or naxis2 == 0:
-            continue  # Skip files without explicit spatial footprints
-
-        # 3. Compute the exact pixel center of this frame
-        center_x = naxis1 / 2.0
-        center_y = naxis2 / 2.0
-
-        # 4. Transform pixel center to world coordinate (SkyCoord)
-        center_sky = wcs.pixel_to_world(center_x, center_y)
-
-        ra_centers.append(center_sky.ra.deg)
-        dec_centers.append(center_sky.dec.deg)
-
-    # 5. Compile everything into a single vectorized SkyCoord Array
-    return SkyCoord(ra=ra_centers, dec=dec_centers, unit=(u.deg, u.deg))
 
 class DAO():
     """
