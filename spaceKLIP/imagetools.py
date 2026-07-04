@@ -18,7 +18,7 @@ import lmfit
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
-from spaceKLIP.widefield_utils import DAO, write_ds9_regions_from_sep_objects,stars_extractor,fit_psf, fetch_catalog_for_image_fov,inspect_region_for_best_prop
+from spaceKLIP.widefield_utils import DAO,write_ds9_regions_from_sep_objects,stars_extractor,fit_psf,fetch_catalog_for_image_fov,inspect_region_for_best_prop
 from astropy.table import Table
 
 # astropy imports
@@ -3925,7 +3925,7 @@ class ImageTools():
                 offsetpsf_func = JWST_PSF(apername,
                                           filt,
                                           date=date,
-                                          fov_pix=fov_pixels + 1 if fov_pixels % 2 == 0 else fov_pixels,
+                                          fov_pix=int(fov_pixels*1.5) + 1 if int(fov_pixels*1.5) % 2 == 0 else int(fov_pixels*1.5),
                                           oversample=2,
                                           sp=None,
                                           use_coeff=False)
@@ -3945,7 +3945,7 @@ class ImageTools():
                         if np.sum(~np.isfinite(data_filled)) != 0:
                             raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
 
-                        for source in targets_table[60:61]:
+                        for source in targets_table:
                             tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["id"]}_{DETECTOR.lower()}')
                             log.info(f'--> Extracting tile for source: {source["id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
@@ -3958,52 +3958,16 @@ class ImageTools():
                                 pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fov=int(fov_pixels * 1.5), showplots=False)
                                 tile = subtract_medbkg(tile, pdxtile, tile_fitsfile, nanmask=nantile,method=medbkg_method)
                             tile_with_nans = np.copy(tile)
-                            tile_with_nans[nantile==1] = np.nan
+                            tile_with_nans[(nantile==1)&(tile>0)] = np.nan
                             coresat, core_mask_x, core_mask_y, eccsat, solsat = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=r_max)
 
                             method = source['method']
                             roundness = source['roundness']
                             sharpness = source['sharpness']
                             log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
-                            if coresat ==0 and not mcmc_for_all:
-                                fitted_x_pos, fitted_y_pos, fitted_flux = fit_psf(imaging_psf,
-                                                                                  tile,
-                                                                                  nantile,
-                                                                                  oversampling=1,
-                                                                                  showplots=False,
-                                                                                  fit_radius=r_max)
-
-                            else:
-                                if 'r' not in kwargs:
-                                   kwargs['r'] = coresat
-                                   if coresat > 0:
-                                       kwargs['center_masked'] = True
-                                   else:
-                                       kwargs['center_masked'] = False
-                                kwargs['x_guess'] = core_mask_x
-                                kwargs['y_guess'] = core_mask_y
-
-                                MCMCTools = mcmc_tools.MCMCTools(tile, nanmask=nantile, type=self.database.obs[key]['TYPE'][j], kwargs=kwargs)
-                                if not os.path.exists(output_dir + '/mcmcfit/'):
-                                    os.makedirs(output_dir + '/mcmcfit/')
-
-                                MCMCTools.run(tile.copy(),
-                                              imaging_psf,
-                                              x_guess=MCMCTools.x_guess,
-                                              y_guess=MCMCTools.y_guess,
-                                              r=MCMCTools.r,
-                                              nsteps=MCMCTools.nsteps,
-                                              ndim=len(MCMCTools.initial_guess),
-                                              nwalkers=MCMCTools.nwalkers,
-                                              initial_guess=MCMCTools.initial_guess,
-                                              limits=MCMCTools.limits,
-                                              verbose=MCMCTools.verbose,
-                                              size=MCMCTools.size,
-                                              binarity=MCMCTools.binarity,
-                                              filename=output_dir + '/mcmcfit/' +tile_fitsfile.split('/')[-1].split('.fits')[0])
-
-                                fitted_x_pos = MCMCTools.best_fit_params[0]
-                                fitted_y_pos = MCMCTools.best_fit_params[1]
+                            result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True)
+                            fitted_x_pos = result[0] + tile.shape[1] // 2
+                            fitted_y_pos = result[1] + tile.shape[0] // 2
 
                             shifts = np.array([-(fitted_x_pos - tile.shape[1]//2), -(fitted_y_pos - tile.shape[0]//2)])
                             log.info(f"--> Estimated shifts: {shifts}")
