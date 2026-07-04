@@ -22,17 +22,34 @@ from photutils.aperture import CircularAperture, aperture_photometry
 from scipy.spatial import KDTree
 from skimage.color import label2rgb
 from astropy.visualization import ZScaleInterval
+from scipy.optimize import least_squares
+from scipy.ndimage import shift
 
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 
-def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan):
-    distance = np.sqrt((xdat - (x + xcen)) ** 2 + (ydat - (y + ycen)) ** 2)
-    image[np.where(distance <= r)] = c
-    return image
+# def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan):
+#     distance = np.sqrt((xdat - (x + xcen)) ** 2 + (ydat - (y + ycen)) ** 2)
+#     image[np.where(distance <= r)] = c
+#     return image
 
+
+def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, partial=False):
+    # Calculate exact distance from center to each pixel center coordinate
+    distance = np.sqrt((xdat - (x + xcen)) ** 2 + (ydat - (y + ycen)) ** 2)
+
+    if partial:
+        # Expand radius by the distance from pixel center to pixel corner (sqrt(0.5))
+        # This ensures any pixel touched by the circle is included
+        effective_radius = r + 0.7071
+    else:
+        # Standard mask based strictly on pixel centers
+        effective_radius = r
+
+    image[distance <= effective_radius] = c
+    return image
 
 def fetch_catalog_for_image_fov(path2table,
                                 image: np.ndarray,
@@ -421,180 +438,54 @@ def downsample_psf_to_detector(psf, oversampling):
     # Sum (not mean) preserves total flux normalization.
     return psf.reshape(ny, oversampling, nx, oversampling).sum(axis=(1, 3))
 
-def fit_psf(
-    psf,
-    data,
-    nanmask,
-    oversampling=1,
-    fit_radius=np.inf,
-    bkg_subtract=True,
-    two_pass=True,
-    showplots=False,
-):
-    """Fit a (possibly oversampled) PSF model to an image cutout.
+def fit_psf(data, psf, r=0, partial=True):
+    def lm_residuals(params, data, psf_template, mask, weights):
+        """Returns the raw array of weighted residuals for Levenberg-Marquardt."""
+        dx, dy, flux, background = params
 
-    Parameters
-    ----------
-    psf : 2D-array
-        PSF model image.
-    data : 2D-array
-        Image cutout to fit.
-    nanmask: list, None, optional
-        nanmask is a boolean array of the same shape as data, where True values indicate pixels to be treated as NaN
-        in the analysis.
-    mask_size : int, optional
-        Reserved/legacy argument (kept for API compatibility).
-    oversampling : int, optional
-        Oversampling factor of the PSF model relative to the data.
-    fit_radius : float, optional
-        Radius (in data pixels) defining the fitting region. If None, fits the
-        full cutout.
-    bkg_subtract : bool, optional
-        If True, subtract a robust background estimate.
-    two_pass : bool, optional
-        If True and ``fit_radius`` is set, do a broad pass followed by a tighter
-        pass.
-    showplots : bool, optional
-        If True, show a diagnostic plot.
+        # Generate the model
+        model_star = flux * shift(psf_template, [dy, dx], order=3) + background
 
-    Returns
-    -------
-    fitted_x_pos, fitted_y_pos, fitted_flux : float
-        Best-fit PSF center and flux in cutout coordinates.
+        # Calculate residuals ONLY for unmasked (wing/valid) pixels
+        # unique to your code: ~mask selects the valid pixels
+        raw_residuals = data[~mask] - model_star[~mask]
+        weighted_residuals = raw_residuals * weights[~mask]
 
-    Notes
-    -----
-    Photutils/Astropy convention: ``x`` is the *column* coordinate and ``y`` is
-    the *row* coordinate.
+        return weighted_residuals
 
-    """
-    def _make_weights(data_fit, rms, center_x, center_y, core_mask_x, core_mask_y, fit_radius, coresat):
-        w = np.zeros_like(data_fit, dtype=float)
-        w[finite] = 1.0 / (np.nanmax(rms[finite])**2 + 1e-30)
+    weights = np.ones_like(data, dtype=float)
+    mask = np.zeros_like(data, dtype=bool)
+    ydat, xdat = np.indices(mask.shape)
+    centers = [mask.shape[1] // 2, mask.shape[0] // 2]
 
-        if fit_radius > 0 :
-            rr2 = (xx - float(center_x)) ** 2 + (yy - float(center_y)) ** 2
-            w[rr2 > float(fit_radius) ** 2] = 0.0
-
-        if coresat > 0:
-            rr2 = (xx - float(core_mask_x)) ** 2 + (yy - float(core_mask_y)) ** 2
-            w[rr2 < float(coresat) ** 2] = 0.0
-        return w
-
-    struct_element = np.ones((3, 3), dtype=bool)
-    dilated_mask = binary_dilation(nanmask.astype(bool), structure=struct_element)
-
-    bkg, rms = estimate_bkg_and_rms(np.copy(data), mask=dilated_mask)
-    if bkg_subtract:
-        data_fit = np.copy(data) - bkg
+    if r > 0:
+        # Star is saturated: mask the core out
+        mask = mask_within_radius(mask.copy(), xdat, ydat, centers[0], centers[1], r, c=np.nan, partial=partial)
+        background = np.median(data[~mask])
+        initial_flux = np.max(data[~mask]) / np.max(psf)
     else:
-        data_fit = np.copy(data)
+        # Star is NOT saturated: mask remains all False (all pixels valid)
+        # Fix background: use the outer 2 pixels edge of the image to avoid the star peak
+        edge_mask = np.ones_like(data, dtype=bool)
+        edge_mask[2:-2, 2:-2] = False  # True only on the outer border
+        background = np.median(data[edge_mask])
 
-    data_fit[nanmask == 1] = np.nan
-    # Use the PSF as the model (with the core optionally masked).
-    psf_model = FittableImageModel(psf, oversampling=oversampling)
+        # Fix flux: use the true peak of the unsaturated star
+        initial_flux = np.max(data) / np.max(psf)
 
-    # Use the LevMarLSQFitter to fit the PSF to the data.
-    fitter = fitting.LevMarLSQFitter()
+    # Initial guesses: [dx, dy, flux, background]
+    initial_guess = [0.0, 0.0, initial_flux, background]
 
-    ny, nx = data_fit.shape
-    yy, xx = np.mgrid[0:ny, 0:nx]
-    center_y, center_x = ny // 2.0, nx // 2.0
-    core_mask_x = (nx - 1) / 2
-    core_mask_y = (ny - 1) / 2
-
-    # Reasonable initial guesses matter a lot for position fitting.
-    finite = np.isfinite(data_fit)
-    if np.any(finite):
-        peak_snr = float(np.nanmax(data_fit[finite]) / (np.nanmax(rms[finite]) + 1e-12))
-    else:
-        peak_snr = 0.0
-
-    # Cross-correlation peak gives a good starting point for faint sources.
-    corr = fftconvolve(
-        np.nan_to_num(data_fit, nan=0.0),
-        psf[::-1, ::-1],
-        mode="same",
+    # Execute the actual Levenberg-Marquardt optimizer
+    result = least_squares(
+        lm_residuals,
+        initial_guess,
+        args=(data, psf, mask, weights),
+        method='lm'
     )
 
-    # Restrict peak search to an area where we expect the source to be.
-    # This greatly reduces catastrophic failures at very low S/N.
-    rr2 = (xx - center_x) ** 2 + (yy - center_y) ** 2
-    corr = corr.copy()
-    corr[(rr2 > float(fit_radius) ** 2)|(nanmask==1)] = -np.inf
+    return result.x
 
-    iy, ix = np.unravel_index(np.nanargmax(corr), corr.shape)
-
-    # Subpixel peak estimate via quadratic interpolation in x and y.
-    def _quad_peak(v_minus, v0, v_plus):
-        denom = (v_minus - 2.0 * v0 + v_plus)
-        if denom == 0:
-            return 0.0
-        return 0.5 * (v_minus - v_plus) / denom
-
-    dx = 0.0
-    dy = 0.0
-    if 1 <= ix < (nx - 1):
-        dx = _quad_peak(corr[iy, ix - 1], corr[iy, ix], corr[iy, ix + 1])
-        dx = float(np.clip(dx, -1.0, 1.0))
-    if 1 <= iy < (ny - 1):
-        dy = _quad_peak(corr[iy - 1, ix], corr[iy, ix], corr[iy + 1, ix])
-        dy = float(np.clip(dy, -1.0, 1.0))
-
-    x0_init, y0_init = float(ix) + dx, float(iy) + dy
-
-    psf_model.x_0.value = x0_init
-    psf_model.y_0.value = y0_init
-
-    # Flux guess: keep it positive; use peak*SOMETHING as crude initial scale.
-    if np.any(finite):
-        psf_model.flux.value = max(float(np.nanmax(data_fit[finite])), 0.0)
-    else:
-        psf_model.flux.value = 0.0
-
-    # Parameter bounds: helps stability.
-    psf_model.x_0.bounds = (0.0, float(nx - 1))
-    psf_model.y_0.bounds = (0.0, float(ny - 1))
-    psf_model.flux.bounds = (0.0, np.inf)
-
-    # Perform the fit.
-    # For low S/N, restricting too aggressively to a small radius around a potentially-wrong
-    # initial guess can lock the optimizer onto the wrong solution. In that case we do a
-    # broader first pass, then a tighter second pass.
-    if fit_radius is not None and two_pass:
-        first_pass_radius = float(fit_radius)
-        if peak_snr < 10:
-            first_pass_radius = float(fit_radius) * 2.0
-
-        if first_pass_radius != float(fit_radius):
-            weights1 = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, first_pass_radius, 0)
-            fit1 = fitter(psf_model, xx, yy, data_fit, weights=weights1, filter_non_finite=True)
-            psf_model.x_0.value = fit1.x_0.value
-            psf_model.y_0.value = fit1.y_0.value
-            psf_model.flux.value = max(float(fit1.flux.value), 0.0)
-
-        weights2 = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, float(fit_radius), 0)
-        fit_result = fitter(psf_model, xx, yy, data_fit, weights=weights2, filter_non_finite=True)
-    else:
-        weights = _make_weights(data_fit, rms, psf_model.x_0.value, psf_model.y_0.value, core_mask_x, core_mask_y, float(fit_radius), 0)
-        fit_result = fitter(psf_model, xx, yy, data_fit, weights=weights, filter_non_finite=True)
-
-    fitted_flux = fit_result.flux.value
-    fitted_x_pos = fit_result.x_0.value
-    fitted_y_pos = fit_result.y_0.value
-
-    if showplots:
-        base_cmap = plt.get_cmap('gray')
-        cmap = base_cmap.with_extremes(bad='red')
-        zscale = ZScaleInterval(contrast=0.25, n_samples=600)
-        vmin, vmax = zscale.get_limits(data_fit)
-        plt.imshow(data_fit, origin='lower', cmap=cmap, vmin=vmin, vmax=vmax)
-        plt.plot(fitted_x_pos, fitted_y_pos, 'xb')
-        plt.colorbar()
-        plt.show()
-        pass
-
-    return fitted_x_pos,fitted_y_pos,fitted_flux
 
 def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_cent=None, id=None):
     with plt.style.context('spaceKLIP.sk_style'):
