@@ -18,7 +18,6 @@ import lmfit
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
-from spaceKLIP.widefield_utils import DAO,write_ds9_regions_from_sep_objects,stars_extractor,fit_psf,fetch_catalog_for_image_fov,inspect_region_for_best_prop
 from astropy.table import Table
 
 # astropy imports
@@ -38,6 +37,7 @@ from scipy.ndimage import gaussian_filter, median_filter
 from scipy.ndimage import shift as spline_shift
 from scipy.optimize import leastsq, minimize
 from scipy.interpolate import griddata
+from scipy.ndimage import binary_dilation
 
 # webbpsf_ext imports
 import webbpsf_ext
@@ -58,6 +58,7 @@ from spaceKLIP import mcmc_tools,database
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.plotting import load_plt_style
+from spaceKLIP.widefield_utils import DAO,write_ds9_regions_from_sep_objects,stars_extractor,fit_psf,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms
 
 # pyklip imports
 import pyklip.fakes as fakes
@@ -3759,14 +3760,12 @@ class ImageTools():
 
     def extract_tiles(self,
                       fov_pixels=101,
-                      kwargs={},
                       subdir='tiles',
                       catdir='pretiles',
-                      mcmc_for_all=False,
-                      medbkg_method='robust',
                       fwhm=2.5,
                       threshold=1.5,
-                      r_max=np.inf):
+                      r_max=np.inf,
+                      max_separation=5):
 
         """Extract and write small cutouts (tiles) centered on cataloged sources.
         Note tah this step include the equivalent of nans_back from direct imaging. The final output tile have nans
@@ -3791,96 +3790,6 @@ class ImageTools():
         -------
         None
         """
-
-
-        def subtract_medbkg(data, pxdq, fitsfile, nanmask=None,method='robust',borderwidth=15, sigma=3.):
-            """Subtract a median background estimate from a tile.
-
-            Parameters
-            ----------
-            data : ndarray
-                2D tile image (or 3D cube) to be background-subtracted.
-            pxdq : ndarray
-                DQ array used to exclude ``DO_NOT_USE`` pixels from the estimate.
-            fitsfile : str
-                Filename used for logging.
-            nanmask : ndarray or None
-                Optional nanmask (1=bad) used to exclude pixels from the estimate.
-            method : str
-                Background estimation method (robust, border, or sigma_clipped).
-            borderwidth : int
-                If method is 'border', width of the border region used for the estimate in pixels.
-            sigma : float
-                If method is 'sigma_clipped', sigma threshold for clipping in the estimate.
-
-            Returns
-            -------
-            data : ndarray
-                Background-subtracted tile(s).
-            """
-            pxmask_donotuse = ut.get_dqmask(pxdq, 'DO_NOT_USE', return_bool=True)
-
-            # from the subtract median.
-            head, tail = os.path.split(fitsfile)
-            log.info('  --> Median subtraction: ' + tail)
-            data_temp = data.copy()
-            if nanmask is not None:
-                data_temp[pxmask_donotuse&(nanmask==1)] = np.nan
-            else:
-                data_temp[pxmask_donotuse] = np.nan
-
-            if method == 'robust':
-                if len(data.shape) == 2:
-                    axis = (0,1)
-                elif len(data.shape) == 3:
-                    axis = (1,2)
-                else:
-                    raise NotImplementedError("data must be 2d or 3d for this method")
-                # Robust median, using a method by Jens
-                bg_med = np.nanmedian(data_temp, axis=axis, keepdims=True)
-                bg_std = robust.medabsdev(data_temp, axis=axis, keepdims=True)
-                bg_ind = data_temp > (bg_med + 5. * bg_std)  # clip bright PSFs for final calculation
-                data_temp[bg_ind] = np.nan
-                bg_median = np.nanmedian(data_temp, axis=axis, keepdims=True)
-            elif method == 'sigma_clipped':
-                # Robust median using astropy.stats.sigma_clipped_stats
-                if len(data.shape) == 2:
-                    mean, median, stddev = astropy.stats.sigma_clipped_stats(data_temp, sigma=sigma)
-                elif len(data.shape) == 3:
-                    bg_median = np.zeros([data.shape[0], 1, 1])
-                    for iint in range(data.shape[0]):
-                        mean_i, median_i, stddev_i = astropy.stats.sigma_clipped_stats(data[iint])
-                        bg_median[iint] = median_i
-                else:
-                    raise NotImplementedError("data must be 2d or 3d for this method")
-            elif method == 'border':
-                # Use only the outer border region of the image, near the edges of the FOV
-                shape = data.shape
-                if len(shape) == 2:
-                    # only one int
-                    y, x = np.indices(shape)
-                    bordermask = (x < borderwidth) | (x > shape[1] - borderwidth) | (y < borderwidth) | (
-                                y > shape[0] - borderwidth)
-                    mean, bg_median, stddev = astropy.stats.sigma_clipped_stats(data[bordermask])
-                elif len(shape) == 3:
-                    # perform robust stats on border region of each int
-                    y, x = np.indices(data.shape[1:])
-                    bordermask = (x < borderwidth) | (x > shape[1] - borderwidth) | (y < borderwidth) | (
-                                y > shape[0] - borderwidth)
-                    bg_median = np.zeros([shape[0], 1, 1])
-                    for iint in range(shape[0]):
-                        mean_i, median_i, stddev_i = astropy.stats.sigma_clipped_stats(data[iint][bordermask])
-                        bg_median[iint] = median_i
-                else:
-                    raise NotImplementedError("data must be 2d or 3d for this method")
-            else:
-                # Plain vanilla median of the image
-                bg_median = np.nanmedian(data_temp, axis=(1, 2), keepdims=True)
-
-            data -= bg_median
-            log.info('  --> Median subtraction: mean of frame median = %.2f' % np.mean(bg_median))
-            return data
-
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
@@ -3925,7 +3834,7 @@ class ImageTools():
                 offsetpsf_func = JWST_PSF(apername,
                                           filt,
                                           date=date,
-                                          fov_pix=int(fov_pixels*1.5) + 1 if int(fov_pixels*1.5) % 2 == 0 else int(fov_pixels*1.5),
+                                          fov_pix=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,
                                           oversample=2,
                                           sp=None,
                                           use_coeff=False)
@@ -3952,11 +3861,11 @@ class ImageTools():
                             x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=int(fov_pixels*1.5),showplots=False)
-                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=int(fov_pixels*1.5),showplots=False)
-                            if medbkg_method is not None:
-                                pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fov=int(fov_pixels * 1.5), showplots=False)
-                                tile = subtract_medbkg(tile, pdxtile, tile_fitsfile, nanmask=nantile,method=medbkg_method)
+                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=False)
+                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=False)
+                            # if medbkg_method is not None:
+                            #     pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation, showplots=False)
+                            #     tile = subtract_medbkg(tile, pdxtile, tile_fitsfile, nanmask=nantile,method=medbkg_method)
                             tile_with_nans = np.copy(tile)
                             tile_with_nans[(nantile==1)&(tile>0)] = np.nan
                             coresat, core_mask_x, core_mask_y, eccsat, solsat = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=r_max)
@@ -3965,11 +3874,22 @@ class ImageTools():
                             roundness = source['roundness']
                             sharpness = source['sharpness']
                             log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
-                            result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True)
-                            fitted_x_pos = result[0] + tile.shape[1] // 2
-                            fitted_y_pos = result[1] + tile.shape[0] // 2
 
-                            shifts = np.array([-(fitted_x_pos - tile.shape[1]//2), -(fitted_y_pos - tile.shape[0]//2)])
+                            struct_element = np.ones((3, 3), dtype=bool)
+                            dilated_mask = binary_dilation(nantile.astype(bool), structure=struct_element)
+                            bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
+                            tile-=bkg
+
+                            result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True,max_separation=max_separation, min_separation=0.5)
+                            fitted_x1_pos = result[0] + tile.shape[1] // 2
+                            fitted_y1_pos = result[1] + tile.shape[0] // 2
+                            fitted_flux1 = result[2]
+                            fitted_x2_pos = result[3] + tile.shape[1] // 2 if result[3] is not None else None
+                            fitted_y2_pos = result[4] + tile.shape[0] // 2 if result[4] is not None else None
+                            fitted_flux2 = result[5]
+                            binarity = result[6]
+
+                            shifts = np.array([-(fitted_x1_pos - tile.shape[1]//2), -(fitted_y1_pos - tile.shape[0]//2)])
                             log.info(f"--> Estimated shifts: {shifts}")
                             # Need to determine largest potential shift for padding purposes
                             max_shift = np.max(np.abs(shifts))
@@ -3995,6 +3915,11 @@ class ImageTools():
                                 nanmaskcenx = round(fitted_x_pos+1,2)
                                 nanmaskceny = round(fitted_y_pos+1,2)
 
+                            struct_element = np.ones((3, 3), dtype=bool)
+                            dilated_mask = binary_dilation(nanmasktile.astype(bool), structure=struct_element)
+                            bkg, rms = estimate_bkg_and_rms(datatile, mask=dilated_mask)
+                            datatile-=bkg
+                            log.info(f"--> Estimated median subtracted bkg: {np.median(bkg)}")
                             # Update star center. 1-index
                             starcenx = round(fitted_x_pos +1,2)
                             starceny = round(fitted_y_pos +1,2)
@@ -4012,6 +3937,10 @@ class ImageTools():
                             # Write FITS file and PSF mask.
                             head_sci['STARCENX'] = starcenx
                             head_sci['STARCENY'] = starceny
+                            head_sci['COMPCENX'] = fitted_x2_pos
+                            head_sci['COMPCENY'] = fitted_y2_pos
+                            head_sci['STARFLUX'] = fitted_flux1
+                            head_sci['COMPFLUX'] = fitted_flux2
                             head_sci['STARFRMX'] = starframex
                             head_sci['STARFRMY'] = starframey
                             head_sci['MASKCENX'] = maskcenx
@@ -4026,6 +3955,7 @@ class ImageTools():
                             head_sci['CORESAT'] = coresat if not isinstance(coresat, np.ma.MaskedArray) else None
                             head_sci['ECCSAT'] = eccsat if not isinstance(eccsat, np.ma.MaskedArray) else None
                             head_sci['SOLSAT'] = solsat if not isinstance(solsat, np.ma.MaskedArray) else None
+                            head_sci['BINARITY'] = str(binarity)
 
                             # Save fits file.
                             tile_fitsfile = ut.write_obs(fitsfile, output_dir, datatile, errotile, pxdqtile, head_pri, head_sci,is2d,
