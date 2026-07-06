@@ -1,4 +1,4 @@
-import logging
+import logging,os
 from pathlib import Path
 from typing import Literal
 import matplotlib.pylab as plt
@@ -20,6 +20,7 @@ from skimage.color import label2rgb
 import numpy as np
 from scipy.optimize import minimize, NonlinearConstraint
 from scipy.ndimage import shift
+import astropy.io.fits as pyfits
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -1053,6 +1054,87 @@ def write_ds9_regions_from_sep_objects(
 
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
     return out
+
+def write_obs(fitsfile,
+              output_dir,
+              data,
+              erro,
+              pxdq,
+              head_pri,
+              head_sci,
+              is2d,
+              new_fitsfile=None):
+    """
+    Write an observation to a FITS file.
+
+    Parameters
+    ----------
+    fitsfile : path
+        Path of input FITS file.
+    output_dir : path
+        Directory where the output FITS file shall be saved.
+    data : 3D-array
+        'SCI' extension data.
+    erro : 3D-array
+        'ERR' extension data.
+    pxdq : 3D-array
+        'DQ' extension data.
+    head_pri : FITS header
+        Primary FITS header.
+    head_sci : FITS header
+        'SCI' extension FITS header.
+    is2d : bool
+        Is the original data 2D?
+    new_fitsfile : path, None
+        If None, path to the new FITS file to save.
+    Returns
+    -------
+    fitsfile : path
+        Path of output FITS file.
+    """
+
+    # Write FITS file.
+    hdul = pyfits.open(fitsfile)
+    for ext_name in [hdu.name for hdu in hdul]:
+        # Check if the name should be dropped
+        if np.all([i not in ext_name for i in ['PRIMARY', 'SCI', 'ERR', 'DQ']]):
+            hdul.pop(ext_name)
+
+    if is2d:
+        hdul['SCI'].data = data[0]
+        hdul['ERR'].data = erro[0]
+        hdul['DQ'].data = pxdq[0]
+    else:
+        hdul['SCI'].data = data
+        hdul['ERR'].data = erro
+        hdul['DQ'].data = pxdq
+    if new_fitsfile is None:
+        fitsfile = os.path.join(output_dir, os.path.split(fitsfile)[1])
+    else:
+        fitsfile = os.path.join(output_dir, os.path.split(new_fitsfile)[1])
+
+    if isinstance(head_pri, (list,np.ndarray)):
+        hdul[0].header = head_pri[0]
+    else:
+        hdul[0].header = head_pri
+    if isinstance(head_sci, (list,np.ndarray)):
+        hdul['SCI'].header = head_sci[0]
+    else:
+        hdul['SCI'].header = head_sci
+
+    if isinstance(head_pri, (list,np.ndarray)):
+        for n,header in enumerate(head_sci):
+            new_pri_hdu = pyfits.ImageHDU(data=np.ones((1, 1), dtype=np.float32), header=header, name=f'PRIMARY_{n}')
+            hdul.append(new_pri_hdu)
+    if isinstance(head_sci, (list,np.ndarray)):
+        for n,header in enumerate(head_sci):
+            new_sci_hdu = pyfits.ImageHDU(data=np.ones((1, 1), dtype=np.float32), header=header, name=f'SCI_{n}')
+            hdul.append(new_sci_hdu)
+
+    hdul.writeto(fitsfile, output_verify='fix', overwrite=True)
+    hdul.close()
+
+    return fitsfile
 
 class DAO():
     """
