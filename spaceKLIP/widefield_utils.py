@@ -26,7 +26,39 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, partial=False):
-    # Calculate exact distance from center to each pixel center coordinate
+    """
+       Mask pixels within a specified radius of a center coordinate.
+
+       Parameters
+       ----------
+       image : numpy.ndarray
+           The input image to be masked.
+       xdat : numpy.ndarray
+           X-coordinate grid for the image.
+       ydat : numpy.ndarray
+           Y-coordinate grid for the image.
+       xcen : float
+           X-coordinate of the center in the local frame.
+       ycen : float
+           Y-coordinate of the center in the local frame.
+       r : float
+           Radius of the mask.
+       x : float, optional
+           X-offset for the center. Default is 0.
+       y : float, optional
+           Y-offset for the center. Default is 0.
+       c : float, optional
+           The value to fill the masked area with. Default is np.nan.
+       partial : bool, optional
+           If True, increases the effective radius to include any pixel touched by the circle.
+           Default is False.
+
+       Returns
+       -------
+       numpy.ndarray
+           The masked image.
+    """
+
     distance = np.sqrt((xdat - (x + xcen)) ** 2 + (ydat - (y + ycen)) ** 2)
 
     if partial:
@@ -244,6 +276,20 @@ def fetch_catalog_for_image_fov(path2table,
                                             simbad_table.write(path2table, format="csv", overwrite=True)
 
                             def query_mocadb(table):
+                                """
+                                   Query the MOCADB database for additional stellar metadata.
+
+                                   Parameters
+                                   ----------
+                                   table : astropy.table.Table
+                                       Input table containing source names in the 'MAIN_ID' column.
+
+                                   Returns
+                                   -------
+                                   astropy.table.Table
+                                       Input table updated with 'MSUN', 'SPT', 'J', 'K', 'E(B-V)', and 'MEMBERSHIP' data.
+                               """
+
                                 from mocapy import MocaEngine
                                 # Create a moca engine object
                                 moca = MocaEngine()
@@ -400,7 +446,45 @@ def estimate_bkg_and_rms(data,mask,n=15):
 def fit_psf(data, psf, r=0, partial=True, min_separation=1, max_separation=5.0, x_limits=(-2,2), y_limits=(-2,2)):
     """
     Fits a single star and a simultaneous binary star model directly to the data.
+
     Uses native trust-region constraints to keep stars separated without breaking gradients.
+    Decides between single and binary models based on the Bayesian Information Criterion (BIC).
+
+    Parameters
+    ----------
+    data : numpy.ndarray
+        2D image cutout containing the source(s) to be fitted.
+    psf : numpy.ndarray
+        2D PSF model image.
+    r : float, optional
+        Radius for masking the core if saturated. Default is 0.
+    partial : bool, optional
+        Whether to use partial pixel masking. Default is True.
+    min_separation : float, optional
+        Minimum separation between binary components in pixels. Default is 1.
+    max_separation : float, optional
+        Maximum separation between binary components in pixels. Default is 5.0.
+    x_limits : tuple of float, optional
+        Search limits for x-position. Default is (-2, 2).
+    y_limits : tuple of float, optional
+        Search limits for y-position. Default is (-2, 2).
+
+    Returns
+    -------
+    dx1 : float
+        X-offset of the primary star.
+    dy1 : float
+        Y-offset of the primary star.
+    flux1 : float
+        Flux of the primary star.
+    dx2 : float or None
+        X-offset of the companion (if binary).
+    dy2 : float or None
+        Y-offset of the companion (if binary).
+    flux2 : float or None
+        Flux of the companion (if binary).
+    is_binary : bool
+        True if the binary model was preferred.
     """
     # 1. SETUP INITIAL MASKS & BACKGROUND
     weights = np.ones_like(data, dtype=float)
@@ -835,6 +919,37 @@ def stars_extractor(data,
                     stretch='linear',
                     kwargs={}
 ):
+    """
+       Extract a sub-image (tile) centered on specific coordinates, optionally applying a sub-pixel shift.
+
+       Parameters
+       ----------
+       data : numpy.ndarray
+           The full image from which the tile is extracted.
+       coords : tuple or list
+           (x, y) coordinates of the center.
+       fov : int, optional
+           Size of the field of view in pixels. Default is 101.
+       pad_amount : int, optional
+           Padding added before shifting to avoid edge artifacts. Default is 0.
+       shifts : list of float, optional
+           (dx, dy) sub-pixel shifts to apply. Default is None.
+       method : str, optional
+           Interpolation method for shifting ('fourier' or 'spline'). Default is 'fourier'.
+       showplots : bool, optional
+           If True, displays the extracted tile. Default is False.
+       cmap : str, optional
+           Matplotlib color map for plotting. Default is 'Greys_r'.
+       stretch : str, optional
+           Normalization stretch for plotting. Default is 'linear'.
+       kwargs : dict, optional
+           Additional keyword arguments for the shift function.
+
+       Returns
+       -------
+       numpy.ndarray
+           The extracted and potentially shifted tile.
+   """
     if shifts is None:
         #Just extract the tile at coordinates without shifts
         tile = data[int(round(coords[1]))-fov//2:int(round(coords[1]))+fov//2+1, int(round(coords[0]))-fov//2:int(round(coords[0]))+fov//2+1]
