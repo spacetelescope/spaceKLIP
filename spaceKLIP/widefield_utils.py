@@ -911,62 +911,85 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
 
 def stars_extractor(data,
                     coords,
-                    fov = 101,
+                    fov=101,
                     pad_amount=0,
-                    shifts = None,
+                    shifts=None,
                     method='fourier',
                     showplots=False,
                     cmap='Greys_r',
                     stretch='linear',
                     kwargs={}
-):
+                    ):
     """
-       Extract a sub-image (tile) centered on specific coordinates, optionally applying a sub-pixel shift.
+    Extract a sub-image (tile) centered on specific coordinates, optionally applying a sub-pixel shift.
 
-       Parameters
-       ----------
-       data : numpy.ndarray
-           The full image from which the tile is extracted.
-       coords : tuple or list
-           (x, y) coordinates of the center.
-       fov : int, optional
-           Size of the field of view in pixels. Default is 101.
-       pad_amount : int, optional
-           Padding added before shifting to avoid edge artifacts. Default is 0.
-       shifts : list of float, optional
-           (dx, dy) sub-pixel shifts to apply. Default is None.
-       method : str, optional
-           Interpolation method for shifting ('fourier' or 'spline'). Default is 'fourier'.
-       showplots : bool, optional
-           If True, displays the extracted tile. Default is False.
-       cmap : str, optional
-           Matplotlib color map for plotting. Default is 'Greys_r'.
-       stretch : str, optional
-           Normalization stretch for plotting. Default is 'linear'.
-       kwargs : dict, optional
-           Additional keyword arguments for the shift function.
+    If no shifts are provided, it automatically calculates the sub-pixel shift required to
+    bring the floating-point 'coords' to the exact center of the tile.
+    If the shift is zero, it avoids interpolation to prevent artifacts.
+    """
 
-       Returns
-       -------
-       numpy.ndarray
-           The extracted and potentially shifted tile.
-   """
+    # 1. Determine the integer pixel center for the crop
+    x_f, y_f = float(coords[0]), float(coords[1])
+    x_i, y_i = int(round(x_f)), int(round(y_f))
+
+    # 2. Determine the sub-pixel shift
     if shifts is None:
-        #Just extract the tile at coordinates without shifts
-        tile = data[int(round(coords[1]))-fov//2:int(round(coords[1]))+fov//2+1, int(round(coords[0]))-fov//2:int(round(coords[0]))+fov//2+1]
+        # Calculate shift required to move the star from its float position
+        # to the center of the integer-pixel crop.
+        # Example: star at 100.2, crop at 100. Shift needed: 100 - 100.2 = -0.2
+        dx = x_i - x_f
+        dy = y_i - y_f
     else:
-        #Create a bigger tile to shift, so we don't have to shift the entire image to minimize weird artifacts
-        preshifttile = data[int(round(coords[1]))-(fov//2+pad_amount):int(round(coords[1]))+(fov//2+pad_amount+1),
-                            int(round(coords[0]))-(fov//2+pad_amount):int(round(coords[0]))+(fov//2+pad_amount+1)]
-        shifteddata = ut.imshift(preshifttile, [shifts[0], shifts[1]], pad_amount=0, method=method, kwargs=kwargs)
-        #Crop the shifted tile to the desired dimension
-        tile = shifteddata[int(round(shifteddata.shape[1]//2))-fov//2:int(round(shifteddata.shape[1]//2))+fov//2+1, int(round(shifteddata.shape[0]//2))-fov//2:int(round(shifteddata.shape[0]//2))+fov//2+1]
+        dx, dy = shifts[0], shifts[1]
+
+    # 3. Check if the shift is effectively zero
+    is_zero_shift = (abs(dx) < 1e-6) and (abs(dy) < 1e-6)
+
+    if is_zero_shift:
+        # NO SHIFT: Perform a direct crop to avoid interpolation artifacts
+        y_start, y_end = y_i - fov // 2, y_i + fov // 2 + 1
+        x_start, x_end = x_i - fov // 2, x_i + fov // 2 + 1
+
+        # Guard against edge of frame indexing
+        tile = data[max(0, y_start):y_end, max(0, x_start):x_end]
+
+        # If we hit an edge, we might need to pad with NaNs to maintain FOV size
+        if tile.shape != (fov, fov):
+            tile = np.pad(tile,
+                          ((max(0, -y_start), max(0, y_end - data.shape[0])),
+                           (max(0, -x_start), max(0, x_end - data.shape[1]))),
+                          mode='constant', constant_values=np.nan)
+    else:
+        # SHIFT REQUIRED: Pad, shift, and then crop
+        # Extract a slightly larger tile to accommodate padding for shifting
+        total_pad = fov // 2 + pad_amount
+        y_low, y_high = y_i - total_pad, y_i + total_pad + 1
+        x_low, x_high = x_i - total_pad, x_i + total_pad + 1
+
+        preshifttile = data[max(0, y_low):y_high, max(0, x_low):x_high]
+
+        # Apply padding if crop was near the detector edge
+        preshifttile = np.pad(preshifttile,
+                              ((max(0, -y_low), max(0, y_high - data.shape[0])),
+                               (max(0, -x_low), max(0, x_high - data.shape[1]))),
+                              mode='reflect')
+
+        # Apply the sub-pixel shift using spaceKLIP utility
+        # Note: ut.imshift takes [dx, dy]
+        shifteddata = ut.imshift(preshifttile, [dx, dy], pad_amount=0, method=method, kwargs=kwargs)
+
+        # Crop the shifted tile back to the desired FOV
+        # The star is now centered in shifteddata
+        c_y, c_x = shifteddata.shape[0] // 2, shifteddata.shape[1] // 2
+        tile = shifteddata[c_y - fov // 2: c_y + fov // 2 + 1,
+        c_x - fov // 2: c_x + fov // 2 + 1]
+
     if showplots:
         norm = simple_norm(tile, stretch)
-        plt.imshow(tile, origin='lower', norm=norm,cmap=cmap)
-        plt.plot(tile.shape[1]//2,tile.shape[0]//2,'xr')
+        plt.imshow(tile, origin='lower', norm=norm, cmap=cmap)
+        plt.plot(tile.shape[1] // 2, tile.shape[0] // 2, 'xr', label='Target Center')
         plt.colorbar()
-        plt.title(f'Extracted Star')
+        plt.title(f'Extracted Star (Shift: {dx:.3f}, {dy:.3f})')
         plt.show()
 
     return tile
