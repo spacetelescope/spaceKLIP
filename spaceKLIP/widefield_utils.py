@@ -494,7 +494,7 @@ def fit_psf(data, psf, r=0, partial=True, min_separation=1, max_separation=5.0, 
 
     if final_sep < min_separation or not res_binary.success:
         if final_sep < min_separation:
-            log.warning(f"Single Star Detected. (Binary fit rejected: separation {final_sep} < {min_separation:.2f} pix)")
+            log.error(f"Binary fit collapsed: separation {final_sep} < {min_separation:.2f} pix)")
         if not res_binary.success:
             log.info(f"Single Star Detected. (Binary fit rejected: optimization failed to converge)")
         return s_dx, s_dy, s_flux, None, None, None, False
@@ -848,6 +848,7 @@ def stars_extractor(data,
     if showplots:
         norm = simple_norm(tile, stretch)
         plt.imshow(tile, origin='lower', norm=norm,cmap=cmap)
+        plt.plot(tile.shape[1]//2,tile.shape[0]//2,'xr')
         plt.colorbar()
         plt.title(f'Extracted Star')
         plt.show()
