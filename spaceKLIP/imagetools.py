@@ -18,13 +18,16 @@ import lmfit
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import trange
-from astropy.table import Table
 
 # astropy imports
 import pysiaf
 import astropy.stats
 import astropy.io.fits as pyfits
 from astropy.io import fits
+from astropy.wcs import WCS
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+from astropy.table import Table, vstack
 
 # plotting imports
 import matplotlib.pyplot as plt
@@ -3765,7 +3768,8 @@ class ImageTools():
                       fwhm=2.5,
                       threshold=1.5,
                       r_max=np.inf,
-                      max_separation=5):
+                      max_separation=5,
+                      showplots=False):
 
         """Extract and write small cutouts (tiles) centered on cataloged sources.
         Note tah this step include the equivalent of nans_back from direct imaging. The final output tile have nans
@@ -3796,45 +3800,112 @@ class ImageTools():
             os.makedirs(output_dir)
 
         key_tile_fitsfile_list=[]
-        # Loop through concatenations.
+        table_list=[]
+        log.info('--> Building common detections catalog for all concatenations')
         for i, key in enumerate(self.database.obs.keys()):
-            log.info('--> Concatenation ' + key)
+            log.info('--> Reading catalog from concatenation ' + key)
 
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
 
             # Loop through FITS files.
             for j in ww_sci:
-
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
+                table=Table.read(fitsfile.replace('.fits', '.csv'))
+                table['key'] = key
+                table['detector'] = self.database.obs[key]['DETECTOR'][j]
+                table['apername'] = self.database.obs[key]['APERNAME'][j]
+                table['filter'] = self.database.obs[key]['FILTER'][j]
+                table['fitsfile'] = fitsfile
+                table['nanmaskfile'] = self.database.obs[key]['NANMASKFILE'][j]
+                # 1. Load your WCS from a FITS header
+                with fits.open(fitsfile) as hdu:
+                    wcs = WCS(hdu[1].header, naxis=[1, 2])
+
+                # 2. Convert pixel arrays or single values (0-based pixel indexing)
+                x_pixels = np.array(table['x'])+1
+                y_pixels = np.array(table['y'])+1
+
+                sky_coords = wcs.pixel_to_world(x_pixels, y_pixels)
+
+                # 3. Extract RA and Dec in degrees
+                table['ra'] = sky_coords.ra.degree
+                table['dec'] = sky_coords.dec.degree
+                table_list.append(table)
+        catalog = vstack(table_list)
+        # catalog.rename_columns(['id'], ['id_frm'])
+
+        # 1. Generate the coordinate object for your entire catalog
+        catalog_coords = SkyCoord(ra=catalog['ra'] * u.deg, dec=catalog['dec'] * u.deg)
+
+        # 2. Set your matching radius tolerance (e.g., 1.5 arcseconds)
+        max_sep = 1.5 * u.arcsec
+
+        # 3. Match the catalog against itself to find all nearby pairs
+        idx1, idx2, d2d, d3d = catalog_coords.search_around_sky(catalog_coords, max_sep)
+
+        # 4. Filter out self-matches (where a row matches itself at 0 distance)
+        # and prevent duplicate pairs (e.g., matching row A to B, and B to A)
+        unique_pairs_mask = idx1 < idx2
+
+        match_indices_1 = idx1[unique_pairs_mask]
+        match_indices_2 = idx2[unique_pairs_mask]
+        matching_distances = d2d[unique_pairs_mask]
+
+        # === REPLACES THE GRAPH ROUTINES: Pure index-linking logic ===
+        catalog['group_id'] = -1
+        current_id = 0
+
+        # Direct, fast indexing loop without building complex dictionaries or graphs
+        for i1, i2 in zip(match_indices_1, match_indices_2):
+            id1 = catalog['group_id'][i1]
+            id2 = catalog['group_id'][i2]
+
+            if id1 == -1 and id2 == -1:
+                catalog['group_id'][i1] = current_id
+                catalog['group_id'][i2] = current_id
+                current_id += 1
+            elif id1 != -1 and id2 == -1:
+                catalog['group_id'][i2] = id1
+            elif id1 == -1 and id2 != -1:
+                catalog['group_id'][i1] = id2
+            elif id1 != id2:
+                # Merge the two different group IDs if a star bridges them together
+                mask_to_merge = catalog['group_id'] == id2
+                catalog['group_id'][mask_to_merge] = id1
+
+        # Handle isolated sources (sources with 0 neighbors)
+        unmatched_mask = catalog['group_id'] == -1
+        num_unmatched = np.sum(unmatched_mask)
+        if num_unmatched > 0:
+            isolated_ids = np.arange(current_id, current_id + num_unmatched)
+            catalog['group_id'][unmatched_mask] = isolated_ids
+        catalog = catalog.group_by('group_id')
+
+        tile_fitsfile_list = []
+        for group_i in np.unique(catalog['group_id']):
+            group=catalog[catalog['group_id']==group_i]
+            for fitsfile in np.unique(group['fitsfile']):
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
-                maskfile = self.database.obs[key]['MASKFILE'][j]
-                mask = ut.read_msk(maskfile)
-                nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
+                nanmaskfile = group[group['fitsfile']==fitsfile]['nanmaskfile'][0]
                 nanmask = ut.read_msk(nanmaskfile)
 
-                maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1 indexed
-                maskceny = self.database.obs[key]['MASKCENY'][j]  # 1 indexed
-                nanmaskcenx = self.database.obs[key]['NANMASKCENX'][j]  # 1 indexed
-                nanmaskceny = self.database.obs[key]['NANMASKCENY'][j]  # 1 indexed
-
-                DETECTOR = self.database.obs[key]['DETECTOR'][j]
-                filt = self.database.obs[key]['FILTER'][j]
+                DETECTOR = group[group['fitsfile']==fitsfile]['detector'][0]
+                filt = group[group['fitsfile']==fitsfile]['filter'][0]
 
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
                 log.info('--> Extracting tiles from: ' + tail)
-                tile_fitsfile_list=[]
-                targets_table = Table.read(os.path.join(self.database.output_dir,catdir,tail.replace('.fits','.csv')), format="csv")  # explicit
+                # targets_table = Table.read(os.path.join(self.database.output_dir,catdir,tail.replace('.fits','.csv')), format="csv")  # explicit
 
                 # Generate the PSF using stpsf
-                apername = self.database.obs[key]['APERNAME'][j]
-                date = fits.getheader(self.database.obs[key]['FITSFILE'][ww_sci[0]], 0)['DATE-BEG']
+                apername = group[group['fitsfile']==fitsfile]['apername'][0]
+                date = fits.getheader(group[group['fitsfile']==fitsfile]['fitsfile'][0], 0)['DATE-BEG']
                 offsetpsf_func = JWST_PSF(apername,
                                           filt,
                                           date=date,
-                                          fov_pix=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,
+                                          fov_pix=fov_pixels + max_separation + 1 if (fov_pixels + max_separation) % 2 == 0 else fov_pixels + max_separation,
                                           oversample=2,
                                           sp=None,
                                           use_coeff=False)
@@ -3847,27 +3918,28 @@ class ImageTools():
                 # preserved separately for downstream masking.
                 data_filled = data.copy()
 
-                for k in range(data.shape[0]):
-                    if k == 0:
-                        if nanmask is not None:
-                            data_filled[k] = fill_bad_pixels_from_nanmask(data[k], nanmask)
-                        if np.sum(~np.isfinite(data_filled)) != 0:
-                            raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
+                for source in group[group['fitsfile']==fitsfile]:
+                    for k in range(data.shape[0]):
+                        if k == 0:
+                            if nanmask is not None:
+                                data_filled[k] = fill_bad_pixels_from_nanmask(data[k], nanmask)
+                            if np.sum(~np.isfinite(data_filled)) != 0:
+                                raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
 
-                        for source in targets_table:
+                            # for source in targets_table:
                             tile_fitsfile = fitsfile.replace(f'{DETECTOR.lower()}',f'{source["id"]}_{DETECTOR.lower()}')
                             log.info(f'--> Extracting tile for source: {source["id"]}, into {tile_fitsfile.split("/")[-1]}')
                             # Assume we know the coordinates of the source (x_extract, y_extract)
                             x_extract, y_extract = source['x'], source['y']
 
                             # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=False)
-                            nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=False)
-                            # if medbkg_method is not None:
-                            #     pdxtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation, showplots=False)
-                            #     tile = subtract_medbkg(tile, pdxtile, tile_fitsfile, nanmask=nantile,method=medbkg_method)
-                            tile_with_nans = np.copy(tile)
-                            tile_with_nans[(nantile==1)&(tile>0)] = np.nan
+                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
+                            if nanmask is not None:
+                                nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
+                                tile_with_nans = np.copy(tile)
+                                tile_with_nans[(nantile==1)&(tile>0)] = np.nan
+                            else:
+                                tile_with_nans = np.copy(tile)
                             coresat, core_mask_x, core_mask_y, eccsat, solsat = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=r_max)
 
                             method = source['method']
@@ -3880,40 +3952,44 @@ class ImageTools():
                             bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
                             tile-=bkg
 
-                            result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True,max_separation=max_separation, min_separation=0.5)
-                            fitted_x1_pos = result[0] + tile.shape[1] // 2
-                            fitted_y1_pos = result[1] + tile.shape[0] // 2
+                            result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True,max_separation=max_separation, min_separation=1.5)
+                            shifts1 = np.array([-result[0], -result[1]])
                             fitted_flux1 = result[2]
-                            fitted_x2_pos = result[3] + tile.shape[1] // 2 if result[3] is not None else None
-                            fitted_y2_pos = result[4] + tile.shape[0] // 2 if result[4] is not None else None
+                            if ~np.all([s is None for s in result[3:5]]):
+                                shifts2 = np.array([-result[3], -result[4]])
+                            else:
+                                shifts2 = np.array([None,None])
                             fitted_flux2 = result[5]
                             binarity = result[6]
-
-                            shifts = np.array([-(fitted_x1_pos - tile.shape[1]//2), -(fitted_y1_pos - tile.shape[0]//2)])
-                            log.info(f"--> Estimated shifts: {shifts}")
+                            log.info(f"--> Estimated shifts: {shifts1}")
                             # Need to determine largest potential shift for padding purposes
-                            max_shift = np.max(np.abs(shifts))
+                            max_shift = np.max(np.abs(shifts1))
                             shiftpad = int(np.ceil(max_shift))
                             log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
+                            #Create star frame coordinates to keep track of position on the original frame. 1-index
+                            starframex = round(x_extract - shifts1[0]+1,2)
+                            starframey = round(y_extract - shifts1[1]+1,2)
+
                             # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                            datatile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fov=fov_pixels, showplots=False)
-                            errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fov=fov_pixels, showplots=False)
-                            pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts, fov=fov_pixels, showplots=False)
+                            datatile = stars_extractor(data_filled[k].copy(), [starframex-1, starframey-1], pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=showplots)
+                            errotile = stars_extractor(erro[k].copy(), [starframex-1, starframey-1], pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
+                            pxdqtile = stars_extractor(pxdq[k].copy(), [starframex-1, starframey-1], pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
                             datatile = np.array(datatile)
                             errotile = np.array(errotile)
                             pxdqtile = np.array(pxdqtile)
-                            fitted_x_pos, fitted_y_pos =datatile.shape[1] // 2 - shifts[0],  datatile.shape[1] // 2 - shifts[1]
+                            fitted_x1_pos, fitted_y1_pos =datatile.shape[1] // 2 - shifts1[0],  datatile.shape[1] // 2 - shifts1[1]
+                            if ~np.all([s is None for s in shifts2]):
+                                fitted_x2_pos, fitted_y2_pos =datatile.shape[1] // 2 - shifts2[0],  datatile.shape[1] // 2 - shifts2[1]
+                            else:
+                                fitted_x2_pos, fitted_y2_pos = None, None
+
                             if nanmask is not None:
-                                nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract], pad_amount = shiftpad, shifts=shifts, fov=fov_pixels, kwargs={'mode':'constant'},showplots=False)
+                                nanmasktile = stars_extractor(nanmask.copy(), [starframex-1, starframey-1], pad_amount = shiftpad, shifts=shifts1, fov=fov_pixels, kwargs={'mode':'constant'},showplots=showplots)
                                 nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
                                 nanmasktile[nanmasktile.astype(np.bool)] = 1
                                 nanmasktile = np.array(nanmasktile)
                                 datatile[nanmasktile.astype(np.bool)] = np.nan
-
-                                # Update nanmask center. 1-index
-                                nanmaskcenx = round(fitted_x_pos+1,2)
-                                nanmaskceny = round(fitted_y_pos+1,2)
 
                             struct_element = np.ones((3, 3), dtype=bool)
                             dilated_mask = binary_dilation(nanmasktile.astype(bool), structure=struct_element)
@@ -3921,18 +3997,14 @@ class ImageTools():
                             datatile-=bkg
                             log.info(f"--> Estimated median subtracted bkg: {np.median(bkg)}")
                             # Update star center. 1-index
-                            starcenx = round(fitted_x_pos +1,2)
-                            starceny = round(fitted_y_pos +1,2)
-
-                            #Create star frame coordinates to keep track of position on the original frame. 1-index
-                            starframex = round(x_extract - shifts[0] +1,2)
-                            starframey = round(y_extract - shifts[1] +1,2)
+                            starcenx = round(fitted_x1_pos +1,2)
+                            starceny = round(fitted_y1_pos +1,2)
 
                             # Update CRPIX values.
-                            x_start = int(starframex) - fov_pixels // 2 -1
-                            y_start = int(starframey) - fov_pixels // 2 -1
+                            x_start = int(starframex) - fov_pixels // 2
+                            y_start = int(starframey) - fov_pixels // 2
                             crpix1 = head_sci['CRPIX1'] - x_start
-                            crpix2 = head_sci['CRPIX1'] - y_start
+                            crpix2 = head_sci['CRPIX2'] - y_start
 
                             # Write FITS file and PSF mask.
                             head_sci['STARCENX'] = starcenx
@@ -3943,10 +4015,6 @@ class ImageTools():
                             head_sci['COMPFLUX'] = fitted_flux2
                             head_sci['STARFRMX'] = starframex
                             head_sci['STARFRMY'] = starframey
-                            head_sci['MASKCENX'] = maskcenx
-                            head_sci['MASKCENY'] = maskceny
-                            head_sci['NANMASKCENX'] = nanmaskcenx
-                            head_sci['NANMASKCENY'] = nanmaskceny
                             head_sci['CRPIX1'] = crpix1
                             head_sci['CRPIX2'] = crpix2
                             head_sci['METHOD'] = method
@@ -3963,8 +4031,8 @@ class ImageTools():
                                                     align_mask=align_mask,
                                                     center_mask=center_mask, maskoffs=maskoffs,new_fitsfile=tile_fitsfile)
                             tile_fitsfile_list.append(tile_fitsfile)
-                            maskfile = ut.write_msk(maskfile, mask, tile_fitsfile)
                             pass
+            pass
             key_tile_fitsfile_list.extend(tile_fitsfile_list)
 
         # I need to create a new database from scratch since I'm creating snapshots of stars from the original
