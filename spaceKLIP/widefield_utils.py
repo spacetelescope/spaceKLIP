@@ -275,59 +275,59 @@ def fetch_catalog_for_image_fov(path2table,
                                                 simbad_table = query_mocadb(simbad_table)
                                             simbad_table.write(path2table, format="csv", overwrite=True)
 
-                            def query_mocadb(table):
-                                """
-                                   Query the MOCADB database for additional stellar metadata.
-
-                                   Parameters
-                                   ----------
-                                   table : astropy.table.Table
-                                       Input table containing source names in the 'MAIN_ID' column.
-
-                                   Returns
-                                   -------
-                                   astropy.table.Table
-                                       Input table updated with 'MSUN', 'SPT', 'J', 'K', 'E(B-V)', and 'MEMBERSHIP' data.
-                               """
-
-                                from mocapy import MocaEngine
-                                # Create a moca engine object
-                                moca = MocaEngine()
-
-                                ### Change this for a list of all target names
-                                simbadids = table['MAIN_ID'].tolist()
-
-                                table['MSUN'] = np.full(len(table), '', dtype=object)
-                                table['SPT'] = np.full(len(table), '', dtype=object)
-                                table['J'] = np.full(len(table), '', dtype=object)
-                                table['K'] = np.full(len(table), '', dtype=object)
-                                table['E(B-V)'] = np.full(len(table), '', dtype=object)
-                                table['E(B-V)_unc'] = np.full(len(table), '', dtype=object)
-                                table['MEMBERSHIP'] = np.full(len(table), '', dtype=object)
-
-                                for simbadid in simbadids:
-                                    df2 = Table.from_pandas(moca.query(
-                                        f"SELECT mechanics_all_designations.designation, summary_all_objects.moca_oid, cat_2mass.j_m, cat_2mass.k_m, summary_all_objects.spectral_type, summary_all_objects.spt_ref, data_extinction.e_bv, data_extinction.e_bv_unc, data_masses.mass_msun, calc_banyan_sigma.best_ya "
-                                        f"FROM mechanics_all_designations "
-                                        f"JOIN summary_all_objects ON mechanics_all_designations.moca_oid = summary_all_objects.moca_oid "
-                                        f"JOIN cat_2mass ON mechanics_all_designations.moca_oid = cat_2mass.moca_oid "
-                                        f"JOIN data_extinction ON mechanics_all_designations.moca_oid = data_extinction.moca_oid "
-                                        f"JOIN data_masses ON mechanics_all_designations.moca_oid = data_masses.moca_oid "
-                                        f"JOIN calc_banyan_sigma ON mechanics_all_designations.moca_oid = calc_banyan_sigma.moca_oid "
-                                        f"WHERE mechanics_all_designations.designation = '{simbadid}'"
-                                        f"LIMIT 20"
-                                    ))
-
-                                    if len(df2) > 0:
-                                        table['MSUN'][table['MAIN_ID'] == simbadid] = df2['mass_msun'][0]
-                                        table['SPT'][table['MAIN_ID'] == simbadid] = df2['spectral_type'][0]
-                                        table['J'][table['MAIN_ID'] == simbadid] = df2['j_m'][0]
-                                        table['K'][table['MAIN_ID'] == simbadid] = df2['k_m'][0]
-                                        table['E(B-V)'][table['MAIN_ID'] == simbadid] = df2['e_bv'][0]
-                                        table['E(B-V)_unc'][table['MAIN_ID'] == simbadid] = df2['e_bv_unc'][0]
-                                        table['MEMBERSHIP'][table['MAIN_ID'] == simbadid] = df2['best_ya'][0]
-
-                                return table
+                            # def query_mocadb(table):
+                            #     """
+                            #        Query the MOCADB database for additional stellar metadata.
+                            #
+                            #        Parameters
+                            #        ----------
+                            #        table : astropy.table.Table
+                            #            Input table containing source names in the 'MAIN_ID' column.
+                            #
+                            #        Returns
+                            #        -------
+                            #        astropy.table.Table
+                            #            Input table updated with 'MSUN', 'SPT', 'J', 'K', 'E(B-V)', and 'MEMBERSHIP' data.
+                            #    """
+                            #
+                            #     from mocapy import MocaEngine
+                            #     # Create a moca engine object
+                            #     moca = MocaEngine()
+                            #
+                            #     ### Change this for a list of all target names
+                            #     simbadids = table['MAIN_ID'].tolist()
+                            #
+                            #     table['MSUN'] = np.full(len(table), '', dtype=object)
+                            #     table['SPT'] = np.full(len(table), '', dtype=object)
+                            #     table['J'] = np.full(len(table), '', dtype=object)
+                            #     table['K'] = np.full(len(table), '', dtype=object)
+                            #     table['E(B-V)'] = np.full(len(table), '', dtype=object)
+                            #     table['E(B-V)_unc'] = np.full(len(table), '', dtype=object)
+                            #     table['MEMBERSHIP'] = np.full(len(table), '', dtype=object)
+                            #
+                            #     for simbadid in simbadids:
+                            #         df2 = Table.from_pandas(moca.query(
+                            #             f"SELECT mechanics_all_designations.designation, summary_all_objects.moca_oid, cat_2mass.j_m, cat_2mass.k_m, summary_all_objects.spectral_type, summary_all_objects.spt_ref, data_extinction.e_bv, data_extinction.e_bv_unc, data_masses.mass_msun, calc_banyan_sigma.best_ya "
+                            #             f"FROM mechanics_all_designations "
+                            #             f"JOIN summary_all_objects ON mechanics_all_designations.moca_oid = summary_all_objects.moca_oid "
+                            #             f"JOIN cat_2mass ON mechanics_all_designations.moca_oid = cat_2mass.moca_oid "
+                            #             f"JOIN data_extinction ON mechanics_all_designations.moca_oid = data_extinction.moca_oid "
+                            #             f"JOIN data_masses ON mechanics_all_designations.moca_oid = data_masses.moca_oid "
+                            #             f"JOIN calc_banyan_sigma ON mechanics_all_designations.moca_oid = calc_banyan_sigma.moca_oid "
+                            #             f"WHERE mechanics_all_designations.designation = '{simbadid}'"
+                            #             f"LIMIT 20"
+                            #         ))
+                            #
+                            #         if len(df2) > 0:
+                            #             table['MSUN'][table['MAIN_ID'] == simbadid] = df2['mass_msun'][0]
+                            #             table['SPT'][table['MAIN_ID'] == simbadid] = df2['spectral_type'][0]
+                            #             table['J'][table['MAIN_ID'] == simbadid] = df2['j_m'][0]
+                            #             table['K'][table['MAIN_ID'] == simbadid] = df2['k_m'][0]
+                            #             table['E(B-V)'][table['MAIN_ID'] == simbadid] = df2['e_bv'][0]
+                            #             table['E(B-V)_unc'][table['MAIN_ID'] == simbadid] = df2['e_bv_unc'][0]
+                            #             table['MEMBERSHIP'][table['MAIN_ID'] == simbadid] = df2['best_ya'][0]
+                            #
+                            #     return table
 
                             if isinstance(npix, int):
                                 npix = [npix, npix, npix, npix]  # left, right, bottom, top
