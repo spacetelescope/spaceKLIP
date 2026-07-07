@@ -3914,7 +3914,7 @@ class ImageTools():
         catalog = catalog.group_by('group_id')
 
         for group_i in np.unique(catalog['group_id']):
-            for key in np.unique(catalog['key']):
+            for key in np.unique(catalog[(catalog['group_id']==group_i)]['key']):
                 log.info(f'Working on median star: ID {group_i}, key {key}')
                 ii=0
                 template_wcs = None
