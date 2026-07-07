@@ -3810,12 +3810,13 @@ class ImageTools():
         key_tile_fitsfile_list=[]
         table_list=[]
         log.info('--> Building common detections catalog for all concatenations')
+        psf_dict={}
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Reading catalog from concatenation ' + key)
 
             # Find science and reference files.
             ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
-
+            # psf_dict[key]={}
             # Loop through FITS files.
             for j in ww_sci:
                 # Read FITS file and PSF mask.
@@ -3827,6 +3828,27 @@ class ImageTools():
                 table['filter'] = self.database.obs[key]['FILTER'][j]
                 table['fitsfile'] = fitsfile
                 table['nanmaskfile'] = self.database.obs[key]['NANMASKFILE'][j]
+                table['key'] = key
+
+                # #Create One unique PSF for each fitsfile to use it later
+                # if fitsfile not in psf_dict[key].keys():
+                #     log.info(f'Generating PSF for the first time for {key}: {fitsfile}')
+                #     # Generate the PSF using stpsf
+                #     apername = self.database.obs[key]['APERNAME'][j]
+                #     date = fits.getheader(fitsfile, 0)['DATE-BEG']
+                #     filt =  self.database.obs[key]['FILTER'][0]
+                #     offsetpsf_func = JWST_PSF(apername,
+                #                               filt,
+                #                               date=date,
+                #                               fov_pix=fov_pixels + max_separation + 1 if (fov_pixels + max_separation) % 2 == 0 else fov_pixels + max_separation,
+                #                               oversample=2,
+                #                               sp=None,
+                #                               use_coeff=False)
+                #     psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
+                #     psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
+                #     imaging_psf = psf_no_coronmsk.copy()
+                #     psf_dict[key][fitsfile] = imaging_psf
+
                 #Load your WCS from a FITS header
                 with fits.open(fitsfile) as hdu:
                     wcs = WCS(hdu[1].header, naxis=2)
@@ -3892,257 +3914,259 @@ class ImageTools():
         catalog = catalog.group_by('group_id')
 
         for group_i in np.unique(catalog['group_id']):
-            log.info(f'Working on median star ID: {group_i}')
-            ii=0
-            template_wcs = None
-            pri_hdus_list = []
-            sci_hdus_list = []
-            all_shifts = []
-            all_cat_offsets = []
-            group=catalog[catalog['group_id']==group_i]
-            all_star_sky_coords = []
-            for fitsfile in np.unique(group['fitsfile']):
-                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
-                if template_wcs is None:
-                    template_wcs = WCS(head_sci, naxis=2)
-                nanmaskfile = group[group['fitsfile']==fitsfile]['nanmaskfile'][0]
-                nanmask = ut.read_msk(nanmaskfile)
+            for key in np.unique(catalog['key']):
+                log.info(f'Working on median star: ID {group_i}, key {key}')
+                ii=0
+                template_wcs = None
+                pri_hdus_list = []
+                sci_hdus_list = []
+                all_shifts = []
+                all_cat_offsets = []
+                group=catalog[(catalog['group_id']==group_i)&(catalog['key']==key)]
+                all_star_sky_coords = []
+                for fitsfile in np.unique(group['fitsfile']):
+                    data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                    if template_wcs is None:
+                        template_wcs = WCS(head_sci, naxis=2)
+                    nanmaskfile = group[group['fitsfile']==fitsfile]['nanmaskfile'][0]
+                    nanmask = ut.read_msk(nanmaskfile)
 
-                # DETECTOR = group[group['fitsfile']==fitsfile]['detector'][0]
-                filt = group[group['fitsfile']==fitsfile]['filter'][0]
+                    # Recenter frames. Use different algorithms based on data type.
+                    head, tail = os.path.split(fitsfile)
+                    log.info('--> Extracting tiles from: ' + tail)
 
-                # Recenter frames. Use different algorithms based on data type.
-                head, tail = os.path.split(fitsfile)
-                log.info('--> Extracting tiles from: ' + tail)
-                # targets_table = Table.read(os.path.join(self.database.output_dir,catdir,tail.replace('.fits','.csv')), format="csv")  # explicit
+                    #TODO:Right now the PSF is one for each fitsfile. I need to investigate if it would be better to create
+                    # a PSF for each star, at the coordinates of the star in the fits file, and how.
 
-                # Generate the PSF using stpsf
-                apername = group[group['fitsfile']==fitsfile]['apername'][0]
-                date = fits.getheader(group[group['fitsfile']==fitsfile]['fitsfile'][0], 0)['DATE-BEG']
-                offsetpsf_func = JWST_PSF(apername,
-                                          filt,
-                                          date=date,
-                                          fov_pix=fov_pixels + max_separation + 1 if (fov_pixels + max_separation) % 2 == 0 else fov_pixels + max_separation,
-                                          oversample=2,
-                                          sp=None,
-                                          use_coeff=False)
-                psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
-                psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
-                imaging_psf = psf_no_coronmsk.copy()
+                    # Generate a PSF using stpsf for each star (at the center of the tile, not at the postion of the star in the fitsfile)
+                    apername = group[group['fitsfile']==fitsfile]['apername'][0]
+                    filt = group[group['fitsfile']==fitsfile]['filter'][0]
+                    date = fits.getheader(group[group['fitsfile']==fitsfile]['fitsfile'][0], 0)['DATE-BEG']
+                    offsetpsf_func = JWST_PSF(apername,
+                                              filt,
+                                              date=date,
+                                              fov_pix=fov_pixels + max_separation + 1 if (fov_pixels + max_separation) % 2 == 0 else fov_pixels + max_separation,
+                                              oversample=2,
+                                              sp=None,
+                                              use_coeff=False)
+                    psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
+                    psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
+                    imaging_psf = psf_no_coronmsk.copy()
+                    # imaging_psf = psf_dict[key][fitsfile].copy()
 
-                # Fill pixels flagged by the nanmask to avoid NaNs/holes creating
-                # interpolation/Fourier artifacts during shifting. The nanmask is
-                # preserved separately for downstream masking.
-                data_filled = data.copy()
-                tile_list = []
-                err_list = []
-                dq_list = []
-                for source in group[group['fitsfile']==fitsfile]:
-                    for k in range(data.shape[0]):
-                        if k == 0:
-                            if nanmask is not None:
-                                data_filled[k] = fill_bad_pixels_from_nanmask(data[k], nanmask)
-                            if np.sum(~np.isfinite(data_filled)) != 0:
-                                raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
+                    # Fill pixels flagged by the nanmask to avoid NaNs/holes creating
+                    # interpolation/Fourier artifacts during shifting. The nanmask is
+                    # preserved separately for downstream masking.
+                    data_filled = data.copy()
+                    tile_list = []
+                    err_list = []
+                    dq_list = []
+                    for source in group[group['fitsfile']==fitsfile]:
+                        for k in range(data.shape[0]):
+                            if k == 0:
+                                if nanmask is not None:
+                                    data_filled[k] = fill_bad_pixels_from_nanmask(data[k], nanmask)
+                                if np.sum(~np.isfinite(data_filled)) != 0:
+                                    raise UserWarning('Please replace non-finite pixels before attempting to recenter frames')
 
-                            # for source in targets_table:
-                            log.info(f'--> Extracting tile for source: {source["id"]}')
-                            # Assume we know the coordinates of the source (x_extract, y_extract)
-                            x_extract, y_extract = source['x'], source['y']
+                                # for source in targets_table:
+                                log.info(f'--> Extracting tile for source: {source["id"]}')
+                                # Assume we know the coordinates of the source (x_extract, y_extract)
+                                x_extract, y_extract = source['x'], source['y']
 
-                            # Extract tiles around the coordinate of the stars
-                            tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
-                            if nanmask is not None:
-                                nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
-                                nantile[np.isnan(nantile)] = 1
-                                nantile = (nantile >= 0.5).astype(np.float32)
-                                tile_with_nans = np.copy(tile)
-                                tile_with_nans[(nantile==1)&(tile>0)] = np.nan
-                            else:
-                                tile_with_nans = np.copy(tile)
-                            coresat, core_mask_x, core_mask_y, eccsat, solsat = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=r_max)
+                                # Extract tiles around the coordinate of the stars
+                                tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
+                                if nanmask is not None:
+                                    nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
+                                    nantile[np.isnan(nantile)] = 1
+                                    nantile = (nantile >= 0.5).astype(np.float32)
+                                    tile_with_nans = np.copy(tile)
+                                    tile_with_nans[(nantile==1)&(tile>0)] = np.nan
+                                else:
+                                    tile_with_nans = np.copy(tile)
+                                coresat, core_mask_x, core_mask_y, ecccore, solcore = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=r_max)
 
-                            det_method = source['method']
-                            roundness = source['roundness']
-                            sharpness = source['sharpness']
-                            log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
+                                det_method = source['method']
+                                roundness = source['roundness']
+                                sharpness = source['sharpness']
+                                log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
 
-                            struct_element = np.ones((3, 3), dtype=bool)
-                            dilated_mask = binary_dilation(nantile.astype(bool), structure=struct_element)
-                            bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
-                            tile-=bkg
-
-                            result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True,max_separation=max_separation, min_separation=1.5)
-                            shifts1 = np.array([-result[0], -result[1]])
-                            fitted_flux1 = result[2]
-                            if ~np.all([s is None for s in result[3:5]]):
-                                shifts2 = np.array([-result[3], -result[4]])
-                            else:
-                                shifts2 = np.array([None,None])
-                            fitted_flux2 = result[5]
-                            binarity = result[6]
-                            log.info(f"--> Estimated shifts: {shifts1}")
-                            # Need to determine largest potential shift for padding purposes
-                            max_shift = np.max(np.abs(shifts1))
-                            shiftpad = int(np.ceil(max_shift))
-                            log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
-
-                            #Create star frame coordinates to keep track of position on the original frame. 1-index
-                            star_pos_raw_x = round(x_extract) - shifts1[0]
-                            star_pos_raw_y = round(y_extract) - shifts1[1]
-                            # The fit was performed on pixels centered at round(x_extract).
-                            # star_peak = center_pixel - shift
-                            starframex = round(x_extract) - shifts1[0] + 1
-                            starframey = round(y_extract) - shifts1[1] + 1
-                            # Save the sub-pixel offset between the CATALOG guess and the REAL star peak
-                            # We need this to correctly anchor the master RA/Dec later
-                            # Catalog position is x_extract,y_extract. Star peak is star_pos_raw_x,star_pos_raw_y.
-                            catalog_offset_x = x_extract - star_pos_raw_x
-                            catalog_offset_y = y_extract - star_pos_raw_y
-                            all_cat_offsets.append([catalog_offset_x, catalog_offset_y])
-
-                            # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                            datatile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=showplots)
-                            errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
-                            pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],method='fourier', pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
-                            datatile = np.array(datatile)
-                            err_list.append(errotile)
-                            dq_list.append(pxdqtile)
-                            if ~np.all([s is None for s in shifts2]):
-                                fitted_x2_pos, fitted_y2_pos =datatile.shape[1] // 2 - shifts2[0],  datatile.shape[1] // 2 - shifts2[1]
-                            else:
-                                fitted_x2_pos, fitted_y2_pos = None, None
-
-                            if nanmask is not None:
-                                nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts=shifts1, fov=fov_pixels, kwargs={'mode':'constant'},showplots=showplots)
-                                nanmasktile[np.isnan(nanmasktile)] = 1
-                                nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
-                                nanmasktile = np.array(nanmasktile)
-                                datatile[nanmasktile.astype(np.bool)] = np.nan
-
-                            if subtract_bkg:
                                 struct_element = np.ones((3, 3), dtype=bool)
-                                dilated_mask = binary_dilation(nanmasktile.astype(bool), structure=struct_element)
-                                bkg, rms = estimate_bkg_and_rms(datatile, mask=dilated_mask)
-                                log.info(f"--> Estimated median subtracted bkg: {np.median(bkg)}")
-                                datatile-=bkg
+                                dilated_mask = binary_dilation(nantile.astype(bool), structure=struct_element)
+                                bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
+                                tile-=bkg
 
-                            # Write FITS file and update header.
-                            tile_list.append(datatile)
-                            tile_center = fov_pixels / 2 + 0.5
-                            head_sci['CRPIX1'] -= (starframex - tile_center)
-                            head_sci['CRPIX2'] -= (starframey - tile_center)
-                            head_sci['STARFRMX'] = round(starframex, 4)
-                            head_sci['STARFRMY'] = round(starframey, 4)
-                            head_sci['STARCENX'] = tile_center
-                            head_sci['STARCENY'] = tile_center
-                            head_sci['STARFLUX'] = fitted_flux1
-                            head_sci['COMPCENX'] = fitted_x2_pos
-                            head_sci['COMPCENY'] = fitted_y2_pos
-                            head_sci['COMPFLUX'] = fitted_flux2
-                            head_sci['METHOD'] = det_method
-                            head_sci['ROUNDNESS'] = roundness if not isinstance(roundness, np.ma.MaskedArray) else None
-                            head_sci['SHARPNESS'] = sharpness if not isinstance(sharpness, np.ma.MaskedArray) else None
-                            head_sci['CORESAT'] = coresat if not isinstance(coresat, np.ma.MaskedArray) else None
-                            head_sci['ECCSAT'] = eccsat if not isinstance(eccsat, np.ma.MaskedArray) else None
-                            head_sci['SOLSAT'] = solsat if not isinstance(solsat, np.ma.MaskedArray) else None
-                            head_sci['BINARITY'] = str(binarity)
+                                result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True,max_separation=max_separation, min_separation=1.5)
+                                shifts1 = np.array([-result[0], -result[1]])
+                                fitted_flux1 = result[2]
+                                if ~np.all([s is None for s in result[3:5]]):
+                                    shifts2 = np.array([-result[3], -result[4]])
+                                else:
+                                    shifts2 = np.array([None,None])
+                                fitted_flux2 = result[5]
+                                binarity = result[6]
+                                log.info(f"--> Estimated shifts: {shifts1}")
+                                # Need to determine largest potential shift for padding purposes
+                                max_shift = np.max(np.abs(shifts1))
+                                shiftpad = int(np.ceil(max_shift))
+                                log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
-                            pri_hdus_list.append(head_pri)
-                            sci_hdus_list.append(head_sci)
-                            all_shifts.append(shifts1)
-                            all_shifts.append(shifts1)
-                            with fits.open(fitsfile) as h:
-                                f_wcs = WCS(h[1].header, naxis=2)
-                            star_sky = f_wcs.pixel_to_world(starframex - 1, starframey - 1)
-                            all_star_sky_coords.append([star_sky.ra.degree, star_sky.dec.degree])
-                            ii+=1
+                                #Create star frame coordinates to keep track of position on the original frame. 1-index
+                                star_pos_raw_x = round(x_extract) - shifts1[0]
+                                star_pos_raw_y = round(y_extract) - shifts1[1]
+                                # The fit was performed on pixels centered at round(x_extract).
+                                # star_peak = center_pixel - shift
+                                starframex = round(x_extract) - shifts1[0] + 1
+                                starframey = round(y_extract) - shifts1[1] + 1
+                                # Save the sub-pixel offset between the CATALOG guess and the REAL star peak
+                                # We need this to correctly anchor the master RA/Dec later
+                                # Catalog position is x_extract,y_extract. Star peak is star_pos_raw_x,star_pos_raw_y.
+                                catalog_offset_x = x_extract - star_pos_raw_x
+                                catalog_offset_y = y_extract - star_pos_raw_y
+                                all_cat_offsets.append([catalog_offset_x, catalog_offset_y])
 
-            sci_hdr = fits.Header()
-            orig_wcs = template_wcs.deepcopy()
-            #Reuse the table values to get the average sky position of the source
-            median_ra = np.nanmedian([c[0] for c in all_star_sky_coords])
-            median_dec = np.nanmedian([c[1] for c in all_star_sky_coords])
-            tile_center = fov_pixels / 2 + 0.5
-            orig_wcs.wcs.crval = [median_ra, median_dec]
-            orig_wcs.wcs.crpix = [tile_center, tile_center]
-            sci_hdr.update(orig_wcs.to_header(relax=True))
+                                # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
+                                datatile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=showplots)
+                                errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
+                                pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],method='fourier', pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
+                                datatile = np.array(datatile)
+                                err_list.append(errotile)
+                                dq_list.append(pxdqtile)
+                                if ~np.all([s is None for s in shifts2]):
+                                    fitted_x2_pos, fitted_y2_pos =datatile.shape[1] // 2 - shifts2[0],  datatile.shape[1] // 2 - shifts2[1]
+                                else:
+                                    fitted_x2_pos, fitted_y2_pos = None, None
 
-            sci_hdr['EXTNAME'] = 'SCI'
-            sci_hdr['STARCENX'] = np.nanmedian([hdul['STARCENX'] for hdul in sci_hdus_list])
-            sci_hdr['STARCENY'] = np.nanmedian([hdul['STARCENY'] for hdul in sci_hdus_list])
-            sci_hdr['STARFLUX'] = np.nanmedian([hdul['STARFLUX'] for hdul in sci_hdus_list])
-            sci_hdr['COMPCENX'] = np.nanmedian([hdul['COMPCENX'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPCENX'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-            sci_hdr['COMPCENY'] = np.nanmedian([hdul['COMPCENY'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPCENY'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-            sci_hdr['COMPFLUX'] = np.nanmedian([hdul['COMPFLUX'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPFLUX'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-            sci_hdr['ROUNDNESS'] = np.nanmedian([hdul['ROUNDNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ROUNDNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-            sci_hdr['SHARPNESS'] = np.nanmedian([hdul['SHARPNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SHARPNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-            sci_hdr['CORESAT'] = np.nanmedian([hdul['CORESAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['CORESAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-            sci_hdr['ECCSAT'] = np.nanmedian([hdul['ECCSAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ECCSAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-            sci_hdr['SOLSAT'] = np.nanmedian([hdul['SOLSAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SOLSAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                                if nanmask is not None:
+                                    nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts=shifts1, fov=fov_pixels, kwargs={'mode':'constant'},showplots=showplots)
+                                    nanmasktile[np.isnan(nanmasktile)] = 1
+                                    nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
+                                    nanmasktile = np.array(nanmasktile)
+                                    datatile[nanmasktile.astype(np.bool)] = np.nan
 
-            log.info("Verifying WCS alignment for child images...")
-            tile_wcs = WCS(sci_hdr)
-            individual_offsets_x = []
-            individual_offsets_y = []
+                                if subtract_bkg:
+                                    struct_element = np.ones((3, 3), dtype=bool)
+                                    dilated_mask = binary_dilation(nanmasktile.astype(bool), structure=struct_element)
+                                    bkg, rms = estimate_bkg_and_rms(datatile, mask=dilated_mask)
+                                    log.info(f"--> Estimated median subtracted bkg: {np.median(bkg)}")
+                                    datatile-=bkg
 
-            for idx, sky_c in enumerate(all_star_sky_coords):
-                # Project the sky coordinate of this frame's fitted peak back into the stack's WCS
-                res_x, res_y = tile_wcs.world_to_pixel(SkyCoord(ra=sky_c[0], dec=sky_c[1], unit='deg'))
+                                # Write FITS file and update header.
+                                tile_list.append(datatile)
+                                tile_center = fov_pixels / 2 + 0.5
+                                head_sci['CRPIX1'] -= (starframex - tile_center)
+                                head_sci['CRPIX2'] -= (starframey - tile_center)
+                                head_sci['STARFRMX'] = round(starframex, 4)
+                                head_sci['STARFRMY'] = round(starframey, 4)
+                                head_sci['STARCENX'] = tile_center
+                                head_sci['STARCENY'] = tile_center
+                                head_sci['STARFLUX'] = fitted_flux1
+                                head_sci['COMPCENX'] = fitted_x2_pos
+                                head_sci['COMPCENY'] = fitted_y2_pos
+                                head_sci['COMPFLUX'] = fitted_flux2
+                                head_sci['METHOD'] = det_method
+                                head_sci['ROUNDNESS'] = roundness if not isinstance(roundness, np.ma.MaskedArray) else None
+                                head_sci['SHARPNESS'] = sharpness if not isinstance(sharpness, np.ma.MaskedArray) else None
+                                head_sci['CORESAT'] = coresat if not isinstance(coresat, np.ma.MaskedArray) else None
+                                head_sci['ECCCORE'] = ecccore if not isinstance(ecccore, np.ma.MaskedArray) else None
+                                head_sci['SOLCORE'] = solcore if not isinstance(solcore, np.ma.MaskedArray) else None
+                                head_sci['BINARITY'] = str(binarity)
 
-                # We expect these to be exactly 'tile_center' (e.g., 51.0)
-                # The discrepancy tells us exactly how much DS9 "Match WCS" will be off
-                off_x = res_x + 1 - tile_center  # +1 because world_to_pixel is 0-indexed
-                off_y = res_y + 1 - tile_center
+                                pri_hdus_list.append(head_pri)
+                                sci_hdus_list.append(head_sci)
+                                all_shifts.append(shifts1)
+                                all_shifts.append(shifts1)
+                                with fits.open(fitsfile) as h:
+                                    f_wcs = WCS(h[1].header, naxis=2)
+                                star_sky = f_wcs.pixel_to_world(starframex - 1, starframey - 1)
+                                all_star_sky_coords.append([star_sky.ra.degree, star_sky.dec.degree])
+                                ii+=1
 
-                individual_offsets_x.append(off_x)
-                individual_offsets_y.append(off_y)
+                sci_hdr = fits.Header()
+                orig_wcs = template_wcs.deepcopy()
+                #Reuse the table values to get the average sky position of the source
+                median_ra = np.nanmedian([c[0] for c in all_star_sky_coords])
+                median_dec = np.nanmedian([c[1] for c in all_star_sky_coords])
+                tile_center = fov_pixels / 2 + 0.5
+                orig_wcs.wcs.crval = [median_ra, median_dec]
+                orig_wcs.wcs.crpix = [tile_center, tile_center]
+                sci_hdr.update(orig_wcs.to_header(relax=True))
 
-            avg_off_x = np.nanmean(individual_offsets_x)
-            avg_off_y = np.nanmean(individual_offsets_y)
-            std_off_x = np.nanstd(individual_offsets_x)
-            std_off_y = np.nanstd(individual_offsets_y)
+                sci_hdr['EXTNAME'] = 'SCI'
+                sci_hdr['STARCENX'] = np.nanmedian([hdul['STARCENX'] for hdul in sci_hdus_list])
+                sci_hdr['STARCENY'] = np.nanmedian([hdul['STARCENY'] for hdul in sci_hdus_list])
+                sci_hdr['STARFLUX'] = np.nanmedian([hdul['STARFLUX'] for hdul in sci_hdus_list])
+                sci_hdr['COMPCENX'] = np.nanmedian([hdul['COMPCENX'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPCENX'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['COMPCENY'] = np.nanmedian([hdul['COMPCENY'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPCENY'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['COMPFLUX'] = np.nanmedian([hdul['COMPFLUX'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPFLUX'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['ROUNDNESS'] = np.nanmedian([hdul['ROUNDNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ROUNDNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['SHARPNESS'] = np.nanmedian([hdul['SHARPNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SHARPNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['CORESAT'] = np.nanmedian([hdul['CORESAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['CORESAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['ECCCORE'] = np.nanmedian([hdul['ECCCORE'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ECCCORE'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['SOLCORE'] = np.nanmedian([hdul['SOLCORE'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SOLCORE'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
 
-            log.info(f"Mean offset relative to tile center: X={avg_off_x:.4f}, Y={avg_off_y:.4f} pixels")
-            log.info(f"Jitter (std dev): X={std_off_x:.4f}, Y={std_off_y:.4f} pixels")
+                log.info("Verifying WCS alignment for child images...")
+                tile_wcs = WCS(sci_hdr)
+                individual_offsets_x = []
+                individual_offsets_y = []
 
-            if np.abs(avg_off_x) > std_off_x or np.abs(avg_off_y) > std_off_y:
-                log.warning(f"SYSTEMATIC OFFSET DETECTED. avg_off_x: {avg_off_x:.4f} > std_off_x: {std_off_x:.4f}, avg_off_y: {avg_off_y:.4f} > std_off_y: {std_off_y:.4f}")
-                sci_hdr['WCSCHECK'] = False
-            else:
-                log.info(f"Passed systematic offset check. avg_off_x: {avg_off_x:.4f} =< std_off_x: {std_off_x:.4f}, avg_off_y: {avg_off_y:.4f} =< std_off_y: {std_off_y:.4f}")
-                sci_hdr['WCSCHECK'] = True
+                for idx, sky_c in enumerate(all_star_sky_coords):
+                    # Project the sky coordinate of this frame's fitted peak back into the stack's WCS
+                    res_x, res_y = tile_wcs.world_to_pixel(SkyCoord(ra=sky_c[0], dec=sky_c[1], unit='deg'))
 
-            file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
-            for index, hdul in enumerate(sci_hdus_list):
-                sci_hdr[f'FILE_{index}'] = file_paths[index]
-                sci_hdr[f'STARFRMX_{index}'] = hdul['STARFRMX']
-                sci_hdr[f'STARFRMY_{index}'] = hdul['STARFRMY']
-                sci_hdr[f'COMPCENX_{index}'] = hdul['COMPCENX']
-                sci_hdr[f'COMPCENY_{index}'] = hdul['COMPCENY']
-                sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
-                sci_hdr[f'ROUNDNESS_{index}'] = hdul['ROUNDNESS']
-                sci_hdr[f'SHARPNESS_{index}'] = hdul['SHARPNESS']
-                sci_hdr[f'CORESAT_{index}'] = hdul['CORESAT']
-                sci_hdr[f'ECCSAT_{index}'] = hdul['ECCSAT']
-                sci_hdr[f'SOLSAT_{index}'] = hdul['SOLSAT']
-            pri_hdus_list.insert(0, pri_hdus_list[0])
-            sci_hdus_list.insert(0, sci_hdr)
+                    # We expect these to be exactly 'tile_center' (e.g., 51.0)
+                    # The discrepancy tells us exactly how much DS9 "Match WCS" will be off
+                    off_x = res_x + 1 - tile_center  # +1 because world_to_pixel is 0-indexed
+                    off_y = res_y + 1 - tile_center
 
-            tile_fitsfile = f'jwtile_{group_i}_calints.fits'
-            tile_list=np.array(tile_list)
-            err_list=np.array(err_list)
-            dq_list=np.array(dq_list)
+                    individual_offsets_x.append(off_x)
+                    individual_offsets_y.append(off_y)
 
-            median_tile= np.median(tile_list, axis=0)
-            nsample = np.sum(np.logical_not(np.isnan(err_list)), axis=0)
-            erro = np.true_divide(np.sqrt(np.nansum(err_list ** 2, axis=0)), nsample)
-            pxdq = dq_list[0]
+                avg_off_x = np.nanmean(individual_offsets_x)
+                avg_off_y = np.nanmean(individual_offsets_y)
+                std_off_x = np.nanstd(individual_offsets_x)
+                std_off_y = np.nanstd(individual_offsets_y)
 
-            # Save fits file.
-            tile_fitsfile = widefield_utils.write_obs(fitsfile, output_dir, median_tile, erro, pxdq, pri_hdus_list, sci_hdus_list, is2d, new_fitsfile=tile_fitsfile)
-            key_tile_fitsfile_list.append(tile_fitsfile)
-            pass
+                log.info(f"Mean offset relative to tile center: X={avg_off_x:.4f}, Y={avg_off_y:.4f} pixels")
+                log.info(f"Jitter (std dev): X={std_off_x:.4f}, Y={std_off_y:.4f} pixels")
+
+                if np.abs(avg_off_x) > std_off_x or np.abs(avg_off_y) > std_off_y:
+                    log.warning(f"SYSTEMATIC OFFSET DETECTED. avg_off_x: {avg_off_x:.4f} > std_off_x: {std_off_x:.4f}, avg_off_y: {avg_off_y:.4f} > std_off_y: {std_off_y:.4f}")
+                    sci_hdr['WCSCHECK'] = False
+                else:
+                    log.info(f"Passed systematic offset check. avg_off_x: {avg_off_x:.4f} =< std_off_x: {std_off_x:.4f}, avg_off_y: {avg_off_y:.4f} =< std_off_y: {std_off_y:.4f}")
+                    sci_hdr['WCSCHECK'] = True
+
+                file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
+                for index, hdul in enumerate(sci_hdus_list):
+                    sci_hdr[f'FILE_{index}'] = file_paths[index]
+                    sci_hdr[f'STARFRMX_{index}'] = hdul['STARFRMX']
+                    sci_hdr[f'STARFRMY_{index}'] = hdul['STARFRMY']
+                    sci_hdr[f'COMPCENX_{index}'] = hdul['COMPCENX']
+                    sci_hdr[f'COMPCENY_{index}'] = hdul['COMPCENY']
+                    sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
+                    sci_hdr[f'ROUNDNESS_{index}'] = hdul['ROUNDNESS']
+                    sci_hdr[f'SHARPNESS_{index}'] = hdul['SHARPNESS']
+                    sci_hdr[f'CORESAT_{index}'] = hdul['CORESAT']
+                    sci_hdr[f'ECCCORE_{index}'] = hdul['ECCCORE']
+                    sci_hdr[f'SOLCORE_{index}'] = hdul['SOLCORE']
+                pri_hdus_list.insert(0, pri_hdus_list[0])
+                sci_hdus_list.insert(0, sci_hdr)
+
+                tile_fitsfile = f"jwtile_{pri_hdus_list[0]['DETECTOR'].lower()}_{group_i}_calints.fits"
+                tile_list=np.array(tile_list)
+                err_list=np.array(err_list)
+                dq_list=np.array(dq_list)
+
+                median_tile= np.median(tile_list, axis=0)
+                nsample = np.sum(np.logical_not(np.isnan(err_list)), axis=0)
+                erro = np.true_divide(np.sqrt(np.nansum(err_list ** 2, axis=0)), nsample)
+                pxdq = dq_list[0]
+
+                # Save fits file.
+                tile_fitsfile = widefield_utils.write_obs(fitsfile, output_dir, median_tile, erro, pxdq, pri_hdus_list, sci_hdus_list, is2d, new_fitsfile=tile_fitsfile)
+                key_tile_fitsfile_list.append(tile_fitsfile)
+                pass
 
         # I need to create a new database from scratch since I'm creating snapshots of stars from the original
         # dataset and the old structure of the original database does not work anymore
