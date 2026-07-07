@@ -411,7 +411,7 @@ def fetch_catalog_for_image_fov(path2table,
                             return table_selected
 
 
-def estimate_bkg_and_rms(data,mask,n=15):
+def estimate_bkg_and_rms(data,mask,n=25):
     """Estimate spatial background and RMS maps using a 2D background estimator.
 
     Parameters
@@ -437,10 +437,11 @@ def estimate_bkg_and_rms(data,mask,n=15):
     bkg = Background2D(
         data,
         mask=mask,
-        box_size=int(np.ceil(np.max(data.shape)/np.sqrt(n))),
+        box_size=max(int(np.floor(np.min(data.shape) / np.sqrt(n))), 5),
         filter_size=(3, 3),
         sigma_clip=sigma_clip,
-        bkg_estimator=bkg_estimator
+        bkg_estimator=bkg_estimator,
+        exclude_percentile=50.0
     )
     return bkg.background, bkg.background_rms
 
