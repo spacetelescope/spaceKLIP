@@ -3954,6 +3954,8 @@ class ImageTools():
                             tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
                             if nanmask is not None:
                                 nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
+                                nantile[np.isnan(nantile)] = 1
+                                nantile = (nantile >= 0.5).astype(np.float32)
                                 tile_with_nans = np.copy(tile)
                                 tile_with_nans[(nantile==1)&(tile>0)] = np.nan
                             else:
@@ -4013,8 +4015,8 @@ class ImageTools():
 
                             if nanmask is not None:
                                 nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts=shifts1, fov=fov_pixels, kwargs={'mode':'constant'},showplots=showplots)
+                                nanmasktile[np.isnan(nanmasktile)] = 1
                                 nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
-                                nanmasktile[nanmasktile.astype(np.bool)] = 1
                                 nanmasktile = np.array(nanmasktile)
                                 datatile[nanmasktile.astype(np.bool)] = np.nan
 
@@ -4116,7 +4118,14 @@ class ImageTools():
                 sci_hdr[f'FILE_{index}'] = file_paths[index]
                 sci_hdr[f'STARFRMX_{index}'] = hdul['STARFRMX']
                 sci_hdr[f'STARFRMY_{index}'] = hdul['STARFRMY']
+                sci_hdr[f'COMPCENX_{index}'] = hdul['COMPCENX']
+                sci_hdr[f'COMPCENY_{index}'] = hdul['COMPCENY']
                 sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
+                sci_hdr[f'ROUNDNESS_{index}'] = hdul['ROUNDNESS']
+                sci_hdr[f'SHARPNESS_{index}'] = hdul['SHARPNESS']
+                sci_hdr[f'CORESAT_{index}'] = hdul['CORESAT']
+                sci_hdr[f'ECCSAT_{index}'] = hdul['ECCSAT']
+                sci_hdr[f'SOLSAT_{index}'] = hdul['SOLSAT']
             pri_hdus_list.insert(0, pri_hdus_list[0])
             sci_hdus_list.insert(0, sci_hdr)
 
