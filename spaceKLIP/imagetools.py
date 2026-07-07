@@ -3891,7 +3891,8 @@ class ImageTools():
             catalog['group_id'][unmatched_mask] = isolated_ids
         catalog = catalog.group_by('group_id')
 
-        for group_i in np.unique(catalog['group_id']):
+        for group_i in np.unique(catalog['group_id'])[:10]:
+            log.info(f'Working on median star ID: {group_i}')
             ii=0
             template_wcs = None
             pri_hdus_list = []
@@ -3899,7 +3900,7 @@ class ImageTools():
             all_shifts = []
             all_cat_offsets = []
             group=catalog[catalog['group_id']==group_i]
-
+            all_star_sky_coords = []
             for fitsfile in np.unique(group['fitsfile']):
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 if template_wcs is None:
@@ -4048,24 +4049,21 @@ class ImageTools():
                             pri_hdus_list.append(head_pri)
                             sci_hdus_list.append(head_sci)
                             all_shifts.append(shifts1)
+                            all_shifts.append(shifts1)
+                            with fits.open(fitsfile) as h:
+                                f_wcs = WCS(h[1].header, naxis=2)
+                            star_sky = f_wcs.pixel_to_world(starframex - 1, starframey - 1)
+                            all_star_sky_coords.append([star_sky.ra.degree, star_sky.dec.degree])
                             ii+=1
 
             sci_hdr = fits.Header()
             orig_wcs = template_wcs.deepcopy()
             #Reuse the table values to get the average sky position of the source
-            median_ra = np.nanmedian(group['ra'])
-            median_dec = np.nanmedian(group['dec'])
-            #Apply these to the Master WCS (orig_wcs)
-            #CRVAL is the median catalog position
+            median_ra = np.nanmedian([c[0] for c in all_star_sky_coords])
+            median_dec = np.nanmedian([c[1] for c in all_star_sky_coords])
+            tile_center = fov_pixels / 2 + 0.5
             orig_wcs.wcs.crval = [median_ra, median_dec]
-            #CRPIX is the center of the tile (e.g. 51, 51) MINUS the average shift
-            #that was used to bring the star TO the center.
-            #(Note: Use 1-indexing for CRPIX)
-            tile_center = fov_pixels / 2 + 0.5 + 1
-            #Get the average sub-pixel shift applied during extraction
-            med_cat_off_x = np.nanmedian([o[0] for o in all_cat_offsets])
-            med_cat_off_y = np.nanmedian([o[1] for o in all_cat_offsets])
-            orig_wcs.wcs.crpix = [tile_center + med_cat_off_x, tile_center + med_cat_off_y]
+            orig_wcs.wcs.crpix = [tile_center, tile_center]
             sci_hdr.update(orig_wcs.to_header(relax=True))
 
             sci_hdr['EXTNAME'] = 'SCI'
@@ -4080,6 +4078,39 @@ class ImageTools():
             sci_hdr['CORESAT'] = np.nanmedian([hdul['CORESAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['CORESAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
             sci_hdr['ECCSAT'] = np.nanmedian([hdul['ECCSAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ECCSAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
             sci_hdr['SOLSAT'] = np.nanmedian([hdul['SOLSAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SOLSAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+
+            log.info("Verifying WCS alignment for child images...")
+            tile_wcs = WCS(sci_hdr)
+            individual_offsets_x = []
+            individual_offsets_y = []
+
+            for idx, sky_c in enumerate(all_star_sky_coords):
+                # Project the sky coordinate of this frame's fitted peak back into the stack's WCS
+                res_x, res_y = tile_wcs.world_to_pixel(SkyCoord(ra=sky_c[0], dec=sky_c[1], unit='deg'))
+
+                # We expect these to be exactly 'tile_center' (e.g., 51.0)
+                # The discrepancy tells us exactly how much DS9 "Match WCS" will be off
+                off_x = res_x + 1 - tile_center  # +1 because world_to_pixel is 0-indexed
+                off_y = res_y + 1 - tile_center
+
+                individual_offsets_x.append(off_x)
+                individual_offsets_y.append(off_y)
+
+            avg_off_x = np.nanmean(individual_offsets_x)
+            avg_off_y = np.nanmean(individual_offsets_y)
+            std_off_x = np.nanstd(individual_offsets_x)
+            std_off_y = np.nanstd(individual_offsets_y)
+
+            log.info(f"Mean offset relative to tile center: X={avg_off_x:.4f}, Y={avg_off_y:.4f} pixels")
+            log.info(f"Jitter (std dev): X={std_off_x:.4f}, Y={std_off_y:.4f} pixels")
+
+            if np.abs(avg_off_x) > std_off_x or np.abs(avg_off_y) > std_off_y:
+                log.warning(f"SYSTEMATIC OFFSET DETECTED. avg_off_x: {avg_off_x:.4f} > std_off_x: {std_off_x:.4f}, avg_off_y: {avg_off_y:.4f} > std_off_y: {std_off_y:.4f}")
+                sci_hdr['WCSCHECK'] = False
+            else:
+                log.info(f"Passed systematic offset check. avg_off_x: {avg_off_x:.4f} =< std_off_x: {std_off_x:.4f}, avg_off_y: {avg_off_y:.4f} =< std_off_y: {std_off_y:.4f}")
+                sci_hdr['WCSCHECK'] = True
+
             file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
             for index, hdul in enumerate(sci_hdus_list):
                 sci_hdr[f'FILE_{index}'] = file_paths[index]
