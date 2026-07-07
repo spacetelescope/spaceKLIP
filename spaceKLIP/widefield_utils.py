@@ -953,12 +953,11 @@ def stars_extractor(data,
         # Guard against edge of frame indexing
         tile = data[max(0, y_start):y_end, max(0, x_start):x_end]
 
-        # If we hit an edge, we might need to pad with NaNs to maintain FOV size
         if tile.shape != (fov, fov):
             tile = np.pad(tile,
                           ((max(0, -y_start), max(0, y_end - data.shape[0])),
                            (max(0, -x_start), max(0, x_end - data.shape[1]))),
-                          mode='constant', constant_values=np.nan)
+                          mode='constant', constant_values=0)
     else:
         # SHIFT REQUIRED: Pad, shift, and then crop
         # Extract a slightly larger tile to accommodate padding for shifting
@@ -971,12 +970,12 @@ def stars_extractor(data,
         # Apply padding if crop was near the detector edge
         preshifttile = np.pad(preshifttile,
                               ((max(0, -y_low), max(0, y_high - data.shape[0])),
-                               (max(0, -x_low), max(0, x_high - data.shape[1]))),
-                              mode='reflect')
+                               (max(0, -x_low), max(0, x_high - data.shape[1]))), mode='constant', constant_values=0)
+                              # mode='reflect')
 
         # Apply the sub-pixel shift using spaceKLIP utility
         # Note: ut.imshift takes [dx, dy]
-        shifteddata = ut.imshift(preshifttile, [dx, dy], pad_amount=0, method=method, kwargs=kwargs)
+        shifteddata = ut.imshift(preshifttile, [dx, dy], pad_amount=0, method=method, kwargs=kwargs, nan_reflected=False)
 
         # Crop the shifted tile back to the desired FOV
         # The star is now centered in shifteddata
