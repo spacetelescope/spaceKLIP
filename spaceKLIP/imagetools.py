@@ -4070,7 +4070,7 @@ class ImageTools():
                                 head_sci['CORESAT'] = coresat if not isinstance(coresat, np.ma.MaskedArray) else None
                                 head_sci['ECCCORE'] = ecccore if not isinstance(ecccore, np.ma.MaskedArray) else None
                                 head_sci['SOLCORE'] = solcore if not isinstance(solcore, np.ma.MaskedArray) else None
-                                head_sci['BINARITY'] = str(binarity)
+                                head_sci['BINARITY'] = binarity
 
                                 pri_hdus_list.append(head_pri)
                                 sci_hdus_list.append(head_sci)
@@ -4092,18 +4092,27 @@ class ImageTools():
                 orig_wcs.wcs.crpix = [tile_center, tile_center]
                 sci_hdr.update(orig_wcs.to_header(relax=True))
 
+                pri_hdr = pri_hdus_list[0].copy()
+                tile_fitsfile = f"jwtile_{pri_hdus_list[0]['DETECTOR'].lower()}_{group_i}_calints.fits"
+                pri_hdr['FILENAME'] = tile_fitsfile
+                pri_hdr['DATE'] = None
+                pri_hdr['TIME-OBS'] = None
+                pri_hdr['DATE-BEG'] = None
+                pri_hdr['DATE-END'] = None
+
                 sci_hdr['EXTNAME'] = 'SCI'
                 sci_hdr['STARCENX'] = np.nanmedian([hdul['STARCENX'] for hdul in sci_hdus_list])
                 sci_hdr['STARCENY'] = np.nanmedian([hdul['STARCENY'] for hdul in sci_hdus_list])
                 sci_hdr['STARFLUX'] = np.nanmedian([hdul['STARFLUX'] for hdul in sci_hdus_list])
-                sci_hdr['COMPCENX'] = np.nanmedian([hdul['COMPCENX'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPCENX'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                sci_hdr['COMPCENY'] = np.nanmedian([hdul['COMPCENY'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPCENY'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                sci_hdr['COMPFLUX'] = np.nanmedian([hdul['COMPFLUX'] for hdul in sci_hdus_list])  if not np.all([not isinstance(hdul['COMPFLUX'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                sci_hdr['ROUNDNESS'] = np.nanmedian([hdul['ROUNDNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ROUNDNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                sci_hdr['SHARPNESS'] = np.nanmedian([hdul['SHARPNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SHARPNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['BINARITY'] = True if np.sum([(hdul['BINARITY']=='T') for hdul in sci_hdus_list]) > np.sum([(hdul['BINARITY']=='F') for hdul in sci_hdus_list])  else False
+                sci_hdr['COMPCENX'] = np.nanmedian([hdul['COMPCENX'] for hdul in sci_hdus_list if hdul['COMPCENX'] is not None])  if sci_hdr['BINARITY'] == 'T' else None
+                sci_hdr['COMPCENY'] = np.nanmedian([hdul['COMPCENY'] for hdul in sci_hdus_list if hdul['COMPCENY'] is not None])  if sci_hdr['BINARITY'] == 'T' else None
+                sci_hdr['COMPFLUX'] = np.nanmedian([hdul['COMPFLUX'] for hdul in sci_hdus_list if hdul['COMPFLUX'] is not None])  if sci_hdr['BINARITY'] == 'T' else None
+                # sci_hdr['ROUNDNESS'] = np.nanmedian([hdul['ROUNDNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ROUNDNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                # sci_hdr['SHARPNESS'] = np.nanmedian([hdul['SHARPNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SHARPNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
                 sci_hdr['CORESAT'] = np.nanmedian([hdul['CORESAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['CORESAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                sci_hdr['ECCCORE'] = np.nanmedian([hdul['ECCCORE'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ECCCORE'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                sci_hdr['SOLCORE'] = np.nanmedian([hdul['SOLCORE'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SOLCORE'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                # sci_hdr['ECCCORE'] = np.nanmedian([hdul['ECCCORE'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ECCCORE'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                # sci_hdr['SOLCORE'] = np.nanmedian([hdul['SOLCORE'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SOLCORE'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
 
                 log.info("Verifying WCS alignment for child images...")
                 tile_wcs = WCS(sci_hdr)
@@ -4142,18 +4151,23 @@ class ImageTools():
                     sci_hdr[f'FILE_{index}'] = file_paths[index]
                     sci_hdr[f'STARFRMX_{index}'] = hdul['STARFRMX']
                     sci_hdr[f'STARFRMY_{index}'] = hdul['STARFRMY']
+                    sci_hdr[f'STARCENX_{index}'] = hdul['STARCENX']
+                    sci_hdr[f'STARCENY_{index}'] = hdul['STARCENY']
+                    sci_hdr[f'STARFLUX_{index}'] = hdul['STARFLUX']
                     sci_hdr[f'COMPCENX_{index}'] = hdul['COMPCENX']
                     sci_hdr[f'COMPCENY_{index}'] = hdul['COMPCENY']
+                    sci_hdr[f'COMPFLUX_{index}'] = hdul['COMPFLUX']
                     sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
-                    sci_hdr[f'ROUNDNESS_{index}'] = hdul['ROUNDNESS']
-                    sci_hdr[f'SHARPNESS_{index}'] = hdul['SHARPNESS']
+                    # sci_hdr[f'ROUNDNESS_{index}'] = hdul['ROUNDNESS']
+                    # sci_hdr[f'SHARPNESS_{index}'] = hdul['SHARPNESS']
                     sci_hdr[f'CORESAT_{index}'] = hdul['CORESAT']
-                    sci_hdr[f'ECCCORE_{index}'] = hdul['ECCCORE']
-                    sci_hdr[f'SOLCORE_{index}'] = hdul['SOLCORE']
-                pri_hdus_list.insert(0, pri_hdus_list[0])
+                    # sci_hdr[f'ECCCORE_{index}'] = hdul['ECCCORE']
+                    # sci_hdr[f'SOLCORE_{index}'] = hdul['SOLCORE']
+                    sci_hdr[f'BINARITY_{index}'] = hdul['BINARITY']
+
+                pri_hdus_list.insert(0, pri_hdr)
                 sci_hdus_list.insert(0, sci_hdr)
 
-                tile_fitsfile = f"jwtile_{pri_hdus_list[0]['DETECTOR'].lower()}_{group_i}_calints.fits"
                 tile_list=np.array(tile_list)
                 err_list=np.array(err_list)
                 dq_list=np.array(dq_list)
