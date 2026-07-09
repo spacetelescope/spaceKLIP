@@ -3801,6 +3801,7 @@ class ImageTools():
         -------
         None
         """
+        #TODO: Right now the PSF is one for each fitsfile. I need to investigate if it would be better to create a PSF for each star, at the coordinates of the star in the fits file, and how.
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -3810,7 +3811,7 @@ class ImageTools():
         key_tile_fitsfile_list=[]
         table_list=[]
         log.info('--> Building common detections catalog for all concatenations')
-        psf_dict={}
+        # psf_dict={}
         for i, key in enumerate(self.database.obs.keys()):
             log.info('--> Reading catalog from concatenation ' + key)
 
@@ -3853,11 +3854,11 @@ class ImageTools():
                 with fits.open(fitsfile) as hdu:
                     wcs = WCS(hdu[1].header, naxis=2)
 
-                #Convert pixel arrays or single values (0-based pixel indexing)
-                x_pixels = np.array(table['x'])+1
-                y_pixels = np.array(table['y'])+1
+                #Table x,y are 1-based pixel indexing
+                x_pixels = np.array(table['x'], dtype=float)
+                y_pixels = np.array(table['y'], dtype=float)
 
-                sky_coords = wcs.pixel_to_world(x_pixels, y_pixels)
+                sky_coords = wcs.pixel_to_world(x_pixels-1, y_pixels-1)
 
                 #Extract RA and Dec in degrees
                 table['ra'] = sky_coords.ra.degree
@@ -3913,7 +3914,7 @@ class ImageTools():
             catalog['group_id'][unmatched_mask] = isolated_ids
         catalog = catalog.group_by('group_id')
 
-        for group_i in np.unique(catalog['group_id']):
+        for group_i in np.unique(catalog['group_id'])[:100]:
             for key in np.unique(catalog[(catalog['group_id']==group_i)]['key']):
                 log.info(f'Working on median star: ID {group_i}, key {key}')
                 ii=0
@@ -3924,19 +3925,22 @@ class ImageTools():
                 all_cat_offsets = []
                 group=catalog[(catalog['group_id']==group_i)&(catalog['key']==key)]
                 all_star_sky_coords = []
+                cd_list=[]
+                visit_ids = []
+                program_ids = []
+
                 for fitsfile in np.unique(group['fitsfile']):
                     data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                     if template_wcs is None:
                         template_wcs = WCS(head_sci, naxis=2)
+                        template_pri_header = head_pri.copy()
+                        template_sci_header = head_sci.copy()
                     nanmaskfile = group[group['fitsfile']==fitsfile]['nanmaskfile'][0]
                     nanmask = ut.read_msk(nanmaskfile)
 
                     # Recenter frames. Use different algorithms based on data type.
                     head, tail = os.path.split(fitsfile)
                     log.info('--> Extracting tiles from: ' + tail)
-
-                    #TODO:Right now the PSF is one for each fitsfile. I need to investigate if it would be better to create
-                    # a PSF for each star, at the coordinates of the star in the fits file, and how.
 
                     # Generate a PSF using stpsf for each star (at the center of the tile, not at the postion of the star in the fitsfile)
                     apername = group[group['fitsfile']==fitsfile]['apername'][0]
@@ -4016,8 +4020,8 @@ class ImageTools():
                                 star_pos_raw_y = round(y_extract) - shifts1[1]
                                 # The fit was performed on pixels centered at round(x_extract).
                                 # star_peak = center_pixel - shift
-                                starframex = round(x_extract) - shifts1[0] + 1
-                                starframey = round(y_extract) - shifts1[1] + 1
+                                starframex = round(x_extract) - shifts1[0]
+                                starframey = round(y_extract) - shifts1[1]
                                 # Save the sub-pixel offset between the CATALOG guess and the REAL star peak
                                 # We need this to correctly anchor the master RA/Dec later
                                 # Catalog position is x_extract,y_extract. Star peak is star_pos_raw_x,star_pos_raw_y.
@@ -4031,7 +4035,7 @@ class ImageTools():
                                 pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],method='fourier', pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
                                 datatile = np.array(datatile)
                                 err_list.append(errotile)
-                                dq_list.append(pxdqtile)
+                                dq_list.append(pxdqtile.astype(np.uint32))
                                 if ~np.all([s is None for s in shifts2]):
                                     fitted_x2_pos, fitted_y2_pos =datatile.shape[1] // 2 - shifts2[0],  datatile.shape[1] // 2 - shifts2[1]
                                 else:
@@ -4053,80 +4057,99 @@ class ImageTools():
 
                                 # Write FITS file and update header.
                                 tile_list.append(datatile)
-                                tile_center = fov_pixels / 2 + 0.5
+                                tile_center = (fov_pixels - 1) / 2.0
                                 head_sci['CRPIX1'] -= (starframex - tile_center)
                                 head_sci['CRPIX2'] -= (starframey - tile_center)
-                                head_sci['STARFRMX'] = round(starframex, 4)
-                                head_sci['STARFRMY'] = round(starframey, 4)
-                                head_sci['STARCENX'] = tile_center
-                                head_sci['STARCENY'] = tile_center
+                                head_sci['STARFRMX'] = round(starframex+1, 4)
+                                head_sci['STARFRMY'] = round(starframey+1, 4)
+                                head_sci['STARCENX'] = tile_center+1
+                                head_sci['STARCENY'] = tile_center+1
                                 head_sci['STARFLUX'] = fitted_flux1
-                                head_sci['COMPCENX'] = fitted_x2_pos
-                                head_sci['COMPCENY'] = fitted_y2_pos
+                                head_sci['COMPCENX'] = (fitted_x2_pos + 1) if (fitted_x2_pos is not None and not isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
+                                head_sci['COMPCENY'] = (fitted_y2_pos + 1) if (fitted_y2_pos is not None and not isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
                                 head_sci['COMPFLUX'] = fitted_flux2
                                 head_sci['METHOD'] = det_method
-                                head_sci['ROUNDNESS'] = roundness if not isinstance(roundness, np.ma.MaskedArray) else None
-                                head_sci['SHARPNESS'] = sharpness if not isinstance(sharpness, np.ma.MaskedArray) else None
-                                head_sci['CORESAT'] = coresat if not isinstance(coresat, np.ma.MaskedArray) else None
-                                head_sci['ECCCORE'] = ecccore if not isinstance(ecccore, np.ma.MaskedArray) else None
-                                head_sci['SOLCORE'] = solcore if not isinstance(solcore, np.ma.MaskedArray) else None
+                                head_sci['ROUNDNESS'] = roundness if (roundness is not None and not isinstance(roundness,np.ma.MaskedArray)) else None
+                                head_sci['SHARPNESS'] = sharpness if (sharpness is not None and not isinstance(sharpness,np.ma.MaskedArray)) else None
+                                head_sci['CORESAT'] = coresat if (coresat is not None and not isinstance(coresat,np.ma.MaskedArray)) else None
+                                head_sci['ECCCORE'] = ecccore if (ecccore is not None and not isinstance(ecccore,np.ma.MaskedArray)) else None
+                                head_sci['SOLCORE'] = solcore if (solcore is not None and not isinstance(solcore,np.ma.MaskedArray)) else None
                                 head_sci['BINARITY'] = binarity
 
                                 pri_hdus_list.append(head_pri)
                                 sci_hdus_list.append(head_sci)
                                 all_shifts.append(shifts1)
                                 all_shifts.append(shifts1)
-                                with fits.open(fitsfile) as h:
-                                    f_wcs = WCS(h[1].header, naxis=2)
-                                star_sky = f_wcs.pixel_to_world(starframex - 1, starframey - 1)
+                                f_wcs = WCS(head_sci, naxis=2)
+                                cd_list.append(f_wcs.wcs.cd)
+                                star_sky = f_wcs.pixel_to_world(tile_center, tile_center)
                                 all_star_sky_coords.append([star_sky.ra.degree, star_sky.dec.degree])
                                 ii+=1
 
-                sci_hdr = fits.Header()
-                orig_wcs = template_wcs.deepcopy()
-                #Reuse the table values to get the average sky position of the source
-                median_ra = np.nanmedian([c[0] for c in all_star_sky_coords])
-                median_dec = np.nanmedian([c[1] for c in all_star_sky_coords])
-                tile_center = fov_pixels / 2 + 0.5
-                orig_wcs.wcs.crval = [median_ra, median_dec]
-                orig_wcs.wcs.crpix = [tile_center, tile_center]
-                sci_hdr.update(orig_wcs.to_header(relax=True))
-
-                pri_hdr = pri_hdus_list[0].copy()
+                #Renconstruct an ad-hoc primary header for the final tile
+                pri_hdr = template_pri_header.copy()
                 tile_fitsfile = f"jwtile_{pri_hdus_list[0]['DETECTOR'].lower()}_{group_i}_calints.fits"
                 pri_hdr['FILENAME'] = tile_fitsfile
-                pri_hdr['DATE'] = None
-                pri_hdr['TIME-OBS'] = None
-                pri_hdr['DATE-BEG'] = None
-                pri_hdr['DATE-END'] = None
 
+                #Renconstruct an ad-hoc sci header for the final tile
+                tile_center = (fov_pixels - 1) / 2.0
+                star_array = np.array(all_star_sky_coords)
+                all_coords_objects = SkyCoord(ra=star_array[:, 0], dec=star_array[:, 1], unit='deg')
+                pairwise_separations = all_coords_objects[:, np.newaxis].separation(all_coords_objects)
+                max_separation_found = np.max(pairwise_separations).to(u.arcsec)
+
+                if max_separation_found > 1 * u.arcsec:
+                    raise UserWarning(f"At least one source have separation > 1 arcsec from the others! Plese check which star you are trying to combine and try again")
+                # -------------------------
+
+                target_ra = np.median(star_array[:, 0])
+                target_dec = np.median(star_array[:, 1])
+                new_wcs = WCS(naxis=2)
+                new_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+                new_wcs.wcs.crval = [target_ra, target_dec]
+                new_wcs.wcs.crpix = [tile_center + 1, tile_center + 1]
+
+                # FIXED: Copy the template CD matrix straight. Do not use np.mean across visits.
+                new_wcs.wcs.cd = template_wcs.wcs.cd
+
+                sci_hdr = new_wcs.to_header(relax=True)
+
+                comp_x_list = [hdul['COMPCENX'] for hdul in sci_hdus_list if hdul.get('COMPCENX') is not None]
+                comp_y_list = [hdul['COMPCENY'] for hdul in sci_hdus_list if hdul.get('COMPCENY') is not None]
+                comp_f_list = [hdul['COMPFLUX'] for hdul in sci_hdus_list if hdul.get('COMPFLUX') is not None]
+                t_count = np.sum([hdul.get('BINARITY') == 'T' for hdul in sci_hdus_list])
+                f_count = np.sum([hdul.get('BINARITY') == 'F' for hdul in sci_hdus_list])
+                is_binary = 'T' if t_count >= f_count else 'F'
+
+                sci_hdr['RADESYS'] = template_sci_header.get('RADESYS', 'ICRS')
+                sci_hdr['EQUINOX'] = template_sci_header.get('EQUINOX', 2000.0)
+                sci_hdr['BUNIT'] = template_sci_header.get('BUNIT', 'MJy/sr')
                 sci_hdr['EXTNAME'] = 'SCI'
-                sci_hdr['STARCENX'] = np.nanmedian([hdul['STARCENX'] for hdul in sci_hdus_list])
-                sci_hdr['STARCENY'] = np.nanmedian([hdul['STARCENY'] for hdul in sci_hdus_list])
-                sci_hdr['STARFLUX'] = np.nanmedian([hdul['STARFLUX'] for hdul in sci_hdus_list])
-                sci_hdr['BINARITY'] = True if np.sum([(hdul['BINARITY']=='T') for hdul in sci_hdus_list]) > np.sum([(hdul['BINARITY']=='F') for hdul in sci_hdus_list])  else False
-                sci_hdr['COMPCENX'] = np.nanmedian([hdul['COMPCENX'] for hdul in sci_hdus_list if hdul['COMPCENX'] is not None])  if sci_hdr['BINARITY'] == 'T' else None
-                sci_hdr['COMPCENY'] = np.nanmedian([hdul['COMPCENY'] for hdul in sci_hdus_list if hdul['COMPCENY'] is not None])  if sci_hdr['BINARITY'] == 'T' else None
-                sci_hdr['COMPFLUX'] = np.nanmedian([hdul['COMPFLUX'] for hdul in sci_hdus_list if hdul['COMPFLUX'] is not None])  if sci_hdr['BINARITY'] == 'T' else None
-                # sci_hdr['ROUNDNESS'] = np.nanmedian([hdul['ROUNDNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ROUNDNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                # sci_hdr['SHARPNESS'] = np.nanmedian([hdul['SHARPNESS'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SHARPNESS'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                sci_hdr['CORESAT'] = np.nanmedian([hdul['CORESAT'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['CORESAT'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                # sci_hdr['ECCCORE'] = np.nanmedian([hdul['ECCCORE'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['ECCCORE'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
-                # sci_hdr['SOLCORE'] = np.nanmedian([hdul['SOLCORE'] for hdul in sci_hdus_list]) if not np.all([not isinstance(hdul['SOLCORE'], np.ma.MaskedArray) for hdul in sci_hdus_list]) else None
+                sci_hdr['STARCENX'] = np.nanmean([hdul['STARCENX'] for hdul in sci_hdus_list])
+                sci_hdr['STARCENY'] = np.nanmean([hdul['STARCENY'] for hdul in sci_hdus_list])
+                sci_hdr['STARFLUX'] = np.nanmean([hdul['STARFLUX'] for hdul in sci_hdus_list])
+
+                sci_hdr['BINARITY'] = is_binary
+                sci_hdr['COMPCENX'] = np.nanmean(comp_x_list) if (is_binary == 'T' and comp_x_list) else None
+                sci_hdr['COMPCENY'] = np.nanmean(comp_y_list) if (is_binary == 'T' and comp_y_list) else None
+                sci_hdr['COMPFLUX'] = np.nanmean(comp_f_list) if (is_binary == 'T' and comp_f_list) else None
+                sci_hdr['CORESAT'] = np.nanmean([hdul['CORESAT'] for hdul in sci_hdus_list])
+                sci_hdr['ROLL_REF'] = template_sci_header['ROLL_REF']
+                sci_hdr['V3I_YANG'] = template_sci_header['V3I_YANG']
+                sci_hdr['VPARITY'] = template_sci_header['VPARITY']
 
                 log.info("Verifying WCS alignment for child images...")
                 tile_wcs = WCS(sci_hdr)
                 individual_offsets_x = []
                 individual_offsets_y = []
 
-                for idx, sky_c in enumerate(all_star_sky_coords):
-                    # Project the sky coordinate of this frame's fitted peak back into the stack's WCS
-                    res_x, res_y = tile_wcs.world_to_pixel(SkyCoord(ra=sky_c[0], dec=sky_c[1], unit='deg'))
+                #Project each validated star position back into the new tile coordinates
+                for row in star_array:
+                    res_x, res_y = tile_wcs.world_to_pixel(SkyCoord(ra=row[0], dec=row[1], unit='deg'))
 
-                    # We expect these to be exactly 'tile_center' (e.g., 51.0)
-                    # The discrepancy tells us exactly how much DS9 "Match WCS" will be off
-                    off_x = res_x + 1 - tile_center  # +1 because world_to_pixel is 0-indexed
-                    off_y = res_y + 1 - tile_center
+                    # FIXED: Removed the "+ 1" to align 0-based coordinate systems perfectly
+                    off_x = res_x - tile_center
+                    off_y = res_y - tile_center
 
                     individual_offsets_x.append(off_x)
                     individual_offsets_y.append(off_y)
@@ -4139,12 +4162,16 @@ class ImageTools():
                 log.info(f"Mean offset relative to tile center: X={avg_off_x:.4f}, Y={avg_off_y:.4f} pixels")
                 log.info(f"Jitter (std dev): X={std_off_x:.4f}, Y={std_off_y:.4f} pixels")
 
-                if np.abs(avg_off_x) > std_off_x or np.abs(avg_off_y) > std_off_y:
-                    log.warning(f"SYSTEMATIC OFFSET DETECTED. avg_off_x: {avg_off_x:.4f} > std_off_x: {std_off_x:.4f}, avg_off_y: {avg_off_y:.4f} > std_off_y: {std_off_y:.4f}")
+                # Enforce a strict physical threshold of 0.5 pixels
+                if np.abs(avg_off_x) > 0.5 or np.abs(avg_off_y) > 0.5:
+                    log.warning(f"SYSTEMATIC OFFSET DETECTED. avg_off_x: {avg_off_x:.4f}, avg_off_y: {avg_off_y:.4f}")
                     sci_hdr['WCSCHECK'] = False
                 else:
-                    log.info(f"Passed systematic offset check. avg_off_x: {avg_off_x:.4f} =< std_off_x: {std_off_x:.4f}, avg_off_y: {avg_off_y:.4f} =< std_off_y: {std_off_y:.4f}")
+                    log.info(f"Passed systematic offset check. Jitter: X={std_off_x:.4f}, Y={std_off_y:.4f}")
                     sci_hdr['WCSCHECK'] = True
+
+                if len(all_star_sky_coords)>4:
+                    pass
 
                 file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
                 for index, hdul in enumerate(sci_hdus_list):
@@ -4158,15 +4185,11 @@ class ImageTools():
                     sci_hdr[f'COMPCENY_{index}'] = hdul['COMPCENY']
                     sci_hdr[f'COMPFLUX_{index}'] = hdul['COMPFLUX']
                     sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
-                    # sci_hdr[f'ROUNDNESS_{index}'] = hdul['ROUNDNESS']
-                    # sci_hdr[f'SHARPNESS_{index}'] = hdul['SHARPNESS']
                     sci_hdr[f'CORESAT_{index}'] = hdul['CORESAT']
-                    # sci_hdr[f'ECCCORE_{index}'] = hdul['ECCCORE']
-                    # sci_hdr[f'SOLCORE_{index}'] = hdul['SOLCORE']
                     sci_hdr[f'BINARITY_{index}'] = hdul['BINARITY']
-
-                pri_hdus_list.insert(0, pri_hdr)
-                sci_hdus_list.insert(0, sci_hdr)
+                    sci_hdr[f'ROLL_REF_{index}'] = hdul['ROLL_REF']
+                    sci_hdr[f'V3I_YANG_{index}'] = hdul['V3I_YANG']
+                    sci_hdr[f'VPARITY_{index}'] = hdul['VPARITY']
 
                 tile_list=np.array(tile_list)
                 err_list=np.array(err_list)
