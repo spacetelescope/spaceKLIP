@@ -3769,7 +3769,9 @@ class ImageTools():
                       fwhm=2.5,
                       threshold=1.5,
                       r_max=np.inf,
-                      max_separation=5,
+                      max_separation=1.5,
+                      bin_max_separation=5,
+                      bin_min_separation=1.5,
                       subtract_bkg=True,
                       method='spline',
                       showplots=False):
@@ -3793,7 +3795,11 @@ class ImageTools():
         r_max : float
             Maximum distance from center to accept a candidate in estimating coresat. Default is np.inf.
         max_separation : float
-            Maximum separation in pixels to consider two detections as the same source. Default is 5 pixels.
+            Maximum separation in pixels to consider two detections as the same source. Default is 1 pixels.
+        bin_max_separation: float
+            Maximum separation in pixels to consider two detections as a same binary. Default is 5
+        bin_min_separation: float
+            Minimum separation in pixels to consider two detections as a same binary. Default is 1.5
         subtract_bkg : bool
             If True, subtract a median background from each extracted tile. Default is True.
         method : str, optional
@@ -3832,25 +3838,6 @@ class ImageTools():
                 table['nanmaskfile'] = self.database.obs[key]['NANMASKFILE'][j]
                 table['key'] = key
 
-                # #Create One unique PSF for each fitsfile to use it later
-                # if fitsfile not in psf_dict[key].keys():
-                #     log.info(f'Generating PSF for the first time for {key}: {fitsfile}')
-                #     # Generate the PSF using stpsf
-                #     apername = self.database.obs[key]['APERNAME'][j]
-                #     date = fits.getheader(fitsfile, 0)['DATE-BEG']
-                #     filt =  self.database.obs[key]['FILTER'][0]
-                #     offsetpsf_func = JWST_PSF(apername,
-                #                               filt,
-                #                               date=date,
-                #                               fov_pix=fov_pixels + max_separation + 1 if (fov_pixels + max_separation) % 2 == 0 else fov_pixels + max_separation,
-                #                               oversample=2,
-                #                               sp=None,
-                #                               use_coeff=False)
-                #     psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
-                #     psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
-                #     imaging_psf = psf_no_coronmsk.copy()
-                #     psf_dict[key][fitsfile] = imaging_psf
-
                 #Load your WCS from a FITS header
                 with fits.open(fitsfile) as hdu:
                     wcs = WCS(hdu[1].header, naxis=2)
@@ -3865,27 +3852,19 @@ class ImageTools():
                 table['ra'] = sky_coords.ra.degree
                 table['dec'] = sky_coords.dec.degree
                 table_list.append(table)
+
         catalog = vstack(table_list)
-        # catalog.rename_columns(['id'], ['id_frm'])
-
-        # 1. Generate the coordinate object for your entire catalog
         catalog_coords = SkyCoord(ra=catalog['ra'] * u.deg, dec=catalog['dec'] * u.deg)
-
-        # 2. Set your matching radius tolerance (e.g., 1.5 arcseconds)
-        max_sep = 1.5 * u.arcsec
-
-        # 3. Match the catalog against itself to find all nearby pairs
+        idx, d2d, _ = catalog_coords.match_to_catalog_sky(catalog_coords, nthneighbor=2)
+        catalog['closest_neighbor_distance'] = d2d.to(u.arcsec)
+        pixscale = self.database.obs[key]['PIXSCALE'][j]
+        max_sep = max_separation * pixscale * u.arcsec
         idx1, idx2, d2d, d3d = catalog_coords.search_around_sky(catalog_coords, max_sep)
-
-        # 4. Filter out self-matches (where a row matches itself at 0 distance)
-        # and prevent duplicate pairs (e.g., matching row A to B, and B to A)
         unique_pairs_mask = idx1 < idx2
 
         match_indices_1 = idx1[unique_pairs_mask]
         match_indices_2 = idx2[unique_pairs_mask]
         matching_distances = d2d[unique_pairs_mask]
-
-        # === REPLACES THE GRAPH ROUTINES: Pure index-linking logic ===
         catalog['group_id'] = -1
         current_id = 0
 
@@ -3914,6 +3893,12 @@ class ImageTools():
             isolated_ids = np.arange(current_id, current_id + num_unmatched)
             catalog['group_id'][unmatched_mask] = isolated_ids
         catalog = catalog.group_by('group_id')
+        group_sizes = np.diff(catalog.groups.indices)
+        catalog['group_count'] = np.repeat(group_sizes, group_sizes)
+
+        chek_ids = catalog[(catalog['group_count'] == 1) & (catalog['closest_neighbor_distance'] <= max_sep.value)]['group_id'].tolist()
+        if len(chek_ids) > 0:
+            raise ValueError(f'These group_id: {chek_ids} have a detection within {max_sep} but are miss grouped for some eason. Please check them.')
 
         for group_i in np.unique(catalog['group_id']):
             for key in np.unique(catalog[(catalog['group_id']==group_i)]['key']):
@@ -3949,7 +3934,7 @@ class ImageTools():
                     offsetpsf_func = JWST_PSF(apername,
                                               filt,
                                               date=date,
-                                              fov_pix=fov_pixels + max_separation + 1 if (fov_pixels + max_separation) % 2 == 0 else fov_pixels + max_separation,
+                                              fov_pix=fov_pixels + bin_max_separation + 1 if (fov_pixels + bin_max_separation) % 2 == 0 else fov_pixels + bin_max_separation,
                                               oversample=2,
                                               sp=None,
                                               use_coeff=False)
@@ -3979,9 +3964,9 @@ class ImageTools():
                                 x_extract, y_extract = source['x'], source['y']
 
                                 # Extract tiles around the coordinate of the stars
-                                tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
+                                tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+bin_max_separation + 1 if (fov_pixels+bin_max_separation) % 2 == 0 else fov_pixels+bin_max_separation,showplots=showplots)
                                 if nanmask is not None:
-                                    nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+max_separation + 1 if (fov_pixels+max_separation) % 2 == 0 else fov_pixels+max_separation,showplots=showplots)
+                                    nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+bin_max_separation + 1 if (fov_pixels+bin_max_separation) % 2 == 0 else fov_pixels+bin_max_separation,showplots=showplots)
                                     nantile[np.isnan(nantile)] = 1
                                     nantile = (nantile >= 0.5).astype(np.float32)
                                     tile_with_nans = np.copy(tile)
@@ -4000,7 +3985,7 @@ class ImageTools():
                                 bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
                                 tile-=bkg
 
-                                result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True,max_separation=max_separation, min_separation=1.5)
+                                result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True,max_separation=bin_max_separation, min_separation=bin_min_separation)
                                 shifts1 = np.array([-result[0], -result[1]])
                                 fitted_flux1 = result[2]
                                 if ~np.all([s is None for s in result[3:5]]):
@@ -4008,7 +3993,7 @@ class ImageTools():
                                 else:
                                     shifts2 = np.array([None,None])
                                 fitted_flux2 = result[5]
-                                binarity = result[6]
+                                bintest = result[6]
                                 log.info(f"--> Estimated shifts: {shifts1}")
                                 # Need to determine largest potential shift for padding purposes
                                 max_shift = np.max(np.abs(shifts1))
@@ -4082,7 +4067,9 @@ class ImageTools():
                                 head_sci['CORESAT'] = coresat if (coresat is not None and not isinstance(coresat,np.ma.MaskedArray)) else None
                                 head_sci['ECCCORE'] = ecccore if (ecccore is not None and not isinstance(ecccore,np.ma.MaskedArray)) else None
                                 head_sci['SOLCORE'] = solcore if (solcore is not None and not isinstance(solcore,np.ma.MaskedArray)) else None
-                                head_sci['BINARITY'] = binarity
+                                head_sci['BINTEST'] = bintest
+                                head_sci['CND'] = source['closest_neighbor_distance']
+                                head_sci['OTYPE'] = source['OTYPE']
 
                                 pri_hdus_list.append(head_pri)
                                 sci_hdus_list.append(head_sci)
@@ -4101,18 +4088,18 @@ class ImageTools():
                 #Renconstruct an ad-hoc sci header for the final tile
                 tile_center = (fov_pixels - 1) / 2.0
                 star_array = np.array(all_star_sky_coords)
-                all_coords_objects = SkyCoord(ra=star_array[:, 0], dec=star_array[:, 1], unit='deg')
-                pairwise_separations = all_coords_objects[:, np.newaxis].separation(all_coords_objects)
-                max_separation_found = np.max(pairwise_separations).to(u.arcsec)
-                keep_mask = np.median((pairwise_separations <= 1 * u.arcsec), axis=1).astype(bool)
-
-                skycheck = True
-                if np.sum(~keep_mask) > 0:
-                    log.warning(f"{np.sum(~keep_mask)} source have separation {max_separation_found} > 1 arcsec from the others! Droppig the outlayer. Plese check.")
-                    sci_hdus_list = [hdul for i, hdul in enumerate(sci_hdus_list) if keep_mask[i]]
-                    all_star_sky_coords = [coord for i, coord in enumerate(all_star_sky_coords) if keep_mask[i]]
-                    star_array = np.array(all_star_sky_coords)
-                    skycheck=False
+                # all_coords_objects = SkyCoord(ra=star_array[:, 0], dec=star_array[:, 1], unit='deg')
+                # pairwise_separations = all_coords_objects[:, np.newaxis].separation(all_coords_objects)
+                # max_separation_found = np.max(pairwise_separations).to(u.arcsec)
+                # keep_mask = np.median((pairwise_separations <= 1 * u.arcsec), axis=1).astype(bool)
+                #
+                # skycheck = True
+                # if np.sum(~keep_mask) > 0:
+                #     log.warning(f"{np.sum(~keep_mask)} source have separation {max_separation_found} > 1 arcsec from the others! Droppig the outlayer. Plese check.")
+                #     sci_hdus_list = [hdul for i, hdul in enumerate(sci_hdus_list) if keep_mask[i]]
+                #     all_star_sky_coords = [coord for i, coord in enumerate(all_star_sky_coords) if keep_mask[i]]
+                #     star_array = np.array(all_star_sky_coords)
+                #     skycheck=False
 
                 sci_hdr = template_sci_header.copy()
                 target_ra = np.median(star_array[:, 0])
@@ -4125,7 +4112,7 @@ class ImageTools():
                 comp_x_list = [hdul['COMPCENX'] for hdul in sci_hdus_list if hdul.get('COMPCENX') is not None]
                 comp_y_list = [hdul['COMPCENY'] for hdul in sci_hdus_list if hdul.get('COMPCENY') is not None]
                 comp_f_list = [hdul['COMPFLUX'] for hdul in sci_hdus_list if hdul.get('COMPFLUX') is not None]
-                t_count = np.sum([hdul.get('BINARITY') for hdul in sci_hdus_list])
+                t_count = np.sum([hdul.get('BINTEST') for hdul in sci_hdus_list])
                 f_count = len(sci_hdus_list) - t_count
                 is_binary = True if t_count >= f_count else False
 
@@ -4134,12 +4121,14 @@ class ImageTools():
                 sci_hdr['STARCENY'] = np.nanmean([hdul['STARCENY'] for hdul in sci_hdus_list])
                 sci_hdr['STARFLUX'] = np.nanmean([hdul['STARFLUX'] for hdul in sci_hdus_list])
 
-                sci_hdr['BINARITY'] = is_binary
-                sci_hdr['COMPCENX'] = np.nanmean(comp_x_list) if (is_binary == 'T' and comp_x_list) else None
-                sci_hdr['COMPCENY'] = np.nanmean(comp_y_list) if (is_binary == 'T' and comp_y_list) else None
-                sci_hdr['COMPFLUX'] = np.nanmean(comp_f_list) if (is_binary == 'T' and comp_f_list) else None
+                sci_hdr['CND'] = np.nanmean(group['closest_neighbor_distance'].tolist())
+
+                sci_hdr['BINTEST'] = is_binary
+                sci_hdr['COMPCENX'] = np.nanmean(comp_x_list) if (is_binary and comp_x_list) else None
+                sci_hdr['COMPCENY'] = np.nanmean(comp_y_list) if (is_binary and comp_y_list) else None
+                sci_hdr['COMPFLUX'] = np.nanmean(comp_f_list) if (is_binary and comp_f_list) else None
                 sci_hdr['CORESAT'] = np.nanmean([hdul['CORESAT'] for hdul in sci_hdus_list])
-                sci_hdr['SKYCHECK'] = skycheck
+                # sci_hdr['SKYCHECK'] = skycheck
 
                 file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
                 for index, hdul in enumerate(sci_hdus_list):
@@ -4154,7 +4143,9 @@ class ImageTools():
                     sci_hdr[f'COMPFLUX_{index}'] = hdul['COMPFLUX']
                     sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
                     sci_hdr[f'CORESAT_{index}'] = hdul['CORESAT']
-                    sci_hdr[f'BINARITY_{index}'] = hdul['BINARITY']
+                    sci_hdr[f'CND_{index}'] = hdul['CND']
+                    sci_hdr[f'OTYPE_{index}'] = hdul['OTYPE']
+                    sci_hdr[f'BINARITY_{index}'] = hdul['BINTEST']
                     sci_hdr[f'ROLL_REF_{index}'] = hdul['ROLL_REF']
                     sci_hdr[f'V3I_YANG_{index}'] = hdul['V3I_YANG']
                     sci_hdr[f'VPARITY_{index}'] = hdul['VPARITY']
