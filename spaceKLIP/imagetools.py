@@ -28,6 +28,7 @@ from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astropy.table import Table, vstack
+from astropy.stats import sigma_clipped_stats
 
 # plotting imports
 import matplotlib.pyplot as plt
@@ -4056,8 +4057,16 @@ class ImageTools():
                                     datatile-=bkg
 
                                 # Write FITS file and update header.
-                                tile_list.append(datatile)
                                 tile_center = (fov_pixels - 1) / 2.0
+
+                                # plt.figure(figsize=(8,8))
+                                # plt.imshow(datatile,origin='lower',vmax=10)
+                                # plt.plot(tile_center,tile_center,'xr')
+                                # if (fitted_x2_pos is not None) and (fitted_x2_pos is not None):
+                                #     plt.plot(fitted_x2_pos, fitted_y2_pos, 'xb')
+                                # plt.show()
+
+                                tile_list.append(datatile)
                                 head_sci['CRPIX1'] -= (starframex - tile_center)
                                 head_sci['CRPIX2'] -= (starframey - tile_center)
                                 head_sci['STARFRMX'] = round(starframex+1, 4)
@@ -4097,10 +4106,15 @@ class ImageTools():
                 all_coords_objects = SkyCoord(ra=star_array[:, 0], dec=star_array[:, 1], unit='deg')
                 pairwise_separations = all_coords_objects[:, np.newaxis].separation(all_coords_objects)
                 max_separation_found = np.max(pairwise_separations).to(u.arcsec)
+                keep_mask = np.median((pairwise_separations <= 1 * u.arcsec), axis=1).astype(bool)
 
-                if max_separation_found > 1 * u.arcsec:
-                    raise UserWarning(f"At least one source have separation > 1 arcsec from the others! Plese check which star you are trying to combine and try again")
-                # -------------------------
+                skycheck = True
+                if np.sum(~keep_mask) > 0:
+                    log.warning(f"{np.sum(~keep_mask)} source have separation {max_separation_found} > 1 arcsec from the others! Droppig the outlayer. Plese check.")
+                    sci_hdus_list = [hdul for i, hdul in enumerate(sci_hdus_list) if keep_mask[i]]
+                    all_star_sky_coords = [coord for i, coord in enumerate(all_star_sky_coords) if keep_mask[i]]
+                    star_array = np.array(all_star_sky_coords)
+                    skycheck=False
 
                 target_ra = np.median(star_array[:, 0])
                 target_dec = np.median(star_array[:, 1])
@@ -4137,41 +4151,7 @@ class ImageTools():
                 sci_hdr['ROLL_REF'] = template_sci_header['ROLL_REF']
                 sci_hdr['V3I_YANG'] = template_sci_header['V3I_YANG']
                 sci_hdr['VPARITY'] = template_sci_header['VPARITY']
-
-                log.info("Verifying WCS alignment for child images...")
-                tile_wcs = WCS(sci_hdr)
-                individual_offsets_x = []
-                individual_offsets_y = []
-
-                #Project each validated star position back into the new tile coordinates
-                for row in star_array:
-                    res_x, res_y = tile_wcs.world_to_pixel(SkyCoord(ra=row[0], dec=row[1], unit='deg'))
-
-                    # FIXED: Removed the "+ 1" to align 0-based coordinate systems perfectly
-                    off_x = res_x - tile_center
-                    off_y = res_y - tile_center
-
-                    individual_offsets_x.append(off_x)
-                    individual_offsets_y.append(off_y)
-
-                avg_off_x = np.nanmean(individual_offsets_x)
-                avg_off_y = np.nanmean(individual_offsets_y)
-                std_off_x = np.nanstd(individual_offsets_x)
-                std_off_y = np.nanstd(individual_offsets_y)
-
-                log.info(f"Mean offset relative to tile center: X={avg_off_x:.4f}, Y={avg_off_y:.4f} pixels")
-                log.info(f"Jitter (std dev): X={std_off_x:.4f}, Y={std_off_y:.4f} pixels")
-
-                # Enforce a strict physical threshold of 0.5 pixels
-                if np.abs(avg_off_x) > 0.5 or np.abs(avg_off_y) > 0.5:
-                    log.warning(f"SYSTEMATIC OFFSET DETECTED. avg_off_x: {avg_off_x:.4f}, avg_off_y: {avg_off_y:.4f}")
-                    sci_hdr['WCSCHECK'] = False
-                else:
-                    log.info(f"Passed systematic offset check. Jitter: X={std_off_x:.4f}, Y={std_off_y:.4f}")
-                    sci_hdr['WCSCHECK'] = True
-
-                if len(all_star_sky_coords)>4:
-                    pass
+                sci_hdr['SKYCHECK'] = skycheck
 
                 file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
                 for index, hdul in enumerate(sci_hdus_list):
@@ -4191,6 +4171,8 @@ class ImageTools():
                     sci_hdr[f'V3I_YANG_{index}'] = hdul['V3I_YANG']
                     sci_hdr[f'VPARITY_{index}'] = hdul['VPARITY']
 
+                pri_hdus_list.insert(0,pri_hdr)
+                sci_hdus_list.insert(0,sci_hdr)
                 tile_list=np.array(tile_list)
                 err_list=np.array(err_list)
                 dq_list=np.array(dq_list)
