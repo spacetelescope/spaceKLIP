@@ -1146,11 +1146,11 @@ def write_obs(fitsfile,
         hdul['SCI'].header = head_sci
 
     if isinstance(head_pri, (list,np.ndarray)):
-        for n,header in enumerate(head_sci):
+        for n,header in enumerate(head_sci[1:]):
             new_pri_hdu = pyfits.ImageHDU(data=np.ones((1, 1), dtype=np.float32), header=header, name=f'PRIMARY_{n}')
             hdul.append(new_pri_hdu)
     if isinstance(head_sci, (list,np.ndarray)):
-        for n,header in enumerate(head_sci):
+        for n,header in enumerate(head_sci[1:]):
             new_sci_hdu = pyfits.ImageHDU(data=np.ones((1, 1), dtype=np.float32), header=header, name=f'SCI_{n}')
             hdul.append(new_sci_hdu)
 
