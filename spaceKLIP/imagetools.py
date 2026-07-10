@@ -3915,7 +3915,7 @@ class ImageTools():
             catalog['group_id'][unmatched_mask] = isolated_ids
         catalog = catalog.group_by('group_id')
 
-        for group_i in np.unique(catalog['group_id'])[:10]:
+        for group_i in np.unique(catalog['group_id']):
             for key in np.unique(catalog[(catalog['group_id']==group_i)]['key']):
                 log.info(f'Working on median star: ID {group_i}, key {key}')
                 ii=0
