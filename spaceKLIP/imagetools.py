@@ -4133,7 +4133,7 @@ class ImageTools():
                 comp_f_list = [hdul['COMPFLUX'] for hdul in sci_hdus_list if hdul.get('COMPFLUX') is not None]
                 t_count = np.sum([hdul.get('BINARITY') == 'T' for hdul in sci_hdus_list])
                 f_count = np.sum([hdul.get('BINARITY') == 'F' for hdul in sci_hdus_list])
-                is_binary = 'T' if t_count >= f_count else 'F'
+                is_binary = True if t_count >= f_count else False
 
                 sci_hdr['RADESYS'] = template_sci_header.get('RADESYS', 'ICRS')
                 sci_hdr['EQUINOX'] = template_sci_header.get('EQUINOX', 2000.0)
