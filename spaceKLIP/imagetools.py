@@ -3915,25 +3915,24 @@ class ImageTools():
             catalog['group_id'][unmatched_mask] = isolated_ids
         catalog = catalog.group_by('group_id')
 
-        for group_i in np.unique(catalog['group_id'])[:100]:
+        for group_i in np.unique(catalog['group_id'])[:10]:
             for key in np.unique(catalog[(catalog['group_id']==group_i)]['key']):
                 log.info(f'Working on median star: ID {group_i}, key {key}')
                 ii=0
-                template_wcs = None
+                template_pri_header = None
+                template_sci_header = None
                 pri_hdus_list = []
                 sci_hdus_list = []
                 all_shifts = []
                 all_cat_offsets = []
                 group=catalog[(catalog['group_id']==group_i)&(catalog['key']==key)]
                 all_star_sky_coords = []
-                cd_list=[]
                 visit_ids = []
                 program_ids = []
 
                 for fitsfile in np.unique(group['fitsfile']):
                     data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
-                    if template_wcs is None:
-                        template_wcs = WCS(head_sci, naxis=2)
+                    if template_pri_header is None or template_sci_header is None:
                         template_pri_header = head_pri.copy()
                         template_sci_header = head_sci.copy()
                     nanmaskfile = group[group['fitsfile']==fitsfile]['nanmaskfile'][0]
@@ -4090,7 +4089,6 @@ class ImageTools():
                                 all_shifts.append(shifts1)
                                 all_shifts.append(shifts1)
                                 f_wcs = WCS(head_sci, naxis=2)
-                                cd_list.append(f_wcs.wcs.cd)
                                 star_sky = f_wcs.pixel_to_world(tile_center, tile_center)
                                 all_star_sky_coords.append([star_sky.ra.degree, star_sky.dec.degree])
                                 ii+=1
@@ -4116,28 +4114,21 @@ class ImageTools():
                     star_array = np.array(all_star_sky_coords)
                     skycheck=False
 
+                sci_hdr = template_sci_header.copy()
                 target_ra = np.median(star_array[:, 0])
                 target_dec = np.median(star_array[:, 1])
-                new_wcs = WCS(naxis=2)
-                new_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-                new_wcs.wcs.crval = [target_ra, target_dec]
-                new_wcs.wcs.crpix = [tile_center + 1, tile_center + 1]
-
-                # FIXED: Copy the template CD matrix straight. Do not use np.mean across visits.
-                new_wcs.wcs.cd = template_wcs.wcs.cd
-
-                sci_hdr = new_wcs.to_header(relax=True)
+                sci_hdr['CRVAL1'] = target_ra
+                sci_hdr['CRVAL2'] = target_dec
+                sci_hdr['CRPIX1'] = tile_center + 1
+                sci_hdr['CRPIX2'] = tile_center + 1
 
                 comp_x_list = [hdul['COMPCENX'] for hdul in sci_hdus_list if hdul.get('COMPCENX') is not None]
                 comp_y_list = [hdul['COMPCENY'] for hdul in sci_hdus_list if hdul.get('COMPCENY') is not None]
                 comp_f_list = [hdul['COMPFLUX'] for hdul in sci_hdus_list if hdul.get('COMPFLUX') is not None]
-                t_count = np.sum([hdul.get('BINARITY') == 'T' for hdul in sci_hdus_list])
-                f_count = np.sum([hdul.get('BINARITY') == 'F' for hdul in sci_hdus_list])
+                t_count = np.sum([hdul.get('BINARITY') for hdul in sci_hdus_list])
+                f_count = len(sci_hdus_list) - t_count
                 is_binary = True if t_count >= f_count else False
 
-                sci_hdr['RADESYS'] = template_sci_header.get('RADESYS', 'ICRS')
-                sci_hdr['EQUINOX'] = template_sci_header.get('EQUINOX', 2000.0)
-                sci_hdr['BUNIT'] = template_sci_header.get('BUNIT', 'MJy/sr')
                 sci_hdr['EXTNAME'] = 'SCI'
                 sci_hdr['STARCENX'] = np.nanmean([hdul['STARCENX'] for hdul in sci_hdus_list])
                 sci_hdr['STARCENY'] = np.nanmean([hdul['STARCENY'] for hdul in sci_hdus_list])
@@ -4148,9 +4139,6 @@ class ImageTools():
                 sci_hdr['COMPCENY'] = np.nanmean(comp_y_list) if (is_binary == 'T' and comp_y_list) else None
                 sci_hdr['COMPFLUX'] = np.nanmean(comp_f_list) if (is_binary == 'T' and comp_f_list) else None
                 sci_hdr['CORESAT'] = np.nanmean([hdul['CORESAT'] for hdul in sci_hdus_list])
-                sci_hdr['ROLL_REF'] = template_sci_header['ROLL_REF']
-                sci_hdr['V3I_YANG'] = template_sci_header['V3I_YANG']
-                sci_hdr['VPARITY'] = template_sci_header['VPARITY']
                 sci_hdr['SKYCHECK'] = skycheck
 
                 file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
