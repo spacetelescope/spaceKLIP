@@ -3856,7 +3856,7 @@ class ImageTools():
         catalog = vstack(table_list)
         catalog_coords = SkyCoord(ra=catalog['ra'] * u.deg, dec=catalog['dec'] * u.deg)
         idx, d2d, _ = catalog_coords.match_to_catalog_sky(catalog_coords, nthneighbor=2)
-        catalog['closest_neighbor_distance'] = d2d.to(u.arcsec)
+        catalog['closest_group_memebr_distance'] = d2d.to(u.arcsec)
         pixscale = self.database.obs[key]['PIXSCALE'][j]
         max_sep = max_separation * pixscale * u.arcsec
         idx1, idx2, d2d, d3d = catalog_coords.search_around_sky(catalog_coords, max_sep)
@@ -3896,9 +3896,63 @@ class ImageTools():
         group_sizes = np.diff(catalog.groups.indices)
         catalog['group_count'] = np.repeat(group_sizes, group_sizes)
 
-        chek_ids = catalog[(catalog['group_count'] == 1) & (catalog['closest_neighbor_distance'] <= max_sep.value)]['group_id'].tolist()
+        chek_ids = catalog[(catalog['group_count'] == 1) & (catalog['closest_group_memebr_distance'] <= max_sep.value)]['group_id'].tolist()
         if len(chek_ids) > 0:
             raise ValueError(f'These group_id: {chek_ids} have a detection within {max_sep} but are miss grouped for some eason. Please check them.')
+
+        # Searching for closer detection not belonging to the same group_id that can fall in the same tile.
+        search_radius = 0.7071 * fov_pixels * pixscale * u.arcsec
+
+        grouped_cat = catalog['group_id', 'ra', 'dec']
+        group_means = grouped_cat.groups.aggregate(np.mean)
+
+        # 2. Map the mean coordinates back to every source row in the original catalog
+        max_gid = int(np.max(catalog['group_id']))
+        ra_lookup = np.zeros(max_gid + 1)
+        dec_lookup = np.zeros(max_gid + 1)
+
+        ra_lookup[group_means['group_id']] = group_means['ra']
+        dec_lookup[group_means['group_id']] = group_means['dec']
+
+        catalog['ra_mean'] = ra_lookup[catalog['group_id']]
+        catalog['dec_mean'] = dec_lookup[catalog['group_id']]
+
+        # 3. Create an array of UNIQUE group centers and their matching IDs
+        unique_groups = np.array(group_means['group_id'])
+        unique_centers_sky = SkyCoord(ra=group_means['ra'] * u.deg, dec=group_means['dec'] * u.deg)
+
+        # 4. MATCH GROUP CENTERS AGAINST THEMSELVES
+        # Both idx1 and idx2 now safely map to unique_centers_sky (bounds: 0 to 2912)
+        idx1, idx2, d2d, _ = unique_centers_sky.search_around_sky(unique_centers_sky, search_radius)
+
+        # 5. Cross-group mask for the group-to-group matches
+        cross_group_mask = unique_groups[idx1] != unique_groups[idx2]
+
+        valid_idx1 = idx1[cross_group_mask]
+        valid_idx2 = idx2[cross_group_mask]
+        valid_d2d = d2d[cross_group_mask].to(u.arcsec).value
+
+        # 6. Sort by group index (valid_idx1) and secondarily by distance (valid_d2d)
+        sort_order = np.lexsort((valid_d2d, valid_idx1))
+        sorted_idx1 = valid_idx1[sort_order]
+        sorted_idx2 = valid_idx2[sort_order]
+        sorted_d2d = valid_d2d[sort_order]
+
+        # Grab the single minimum distance group neighbor for each unique group center
+        _, first_match = np.unique(sorted_idx1, return_index=True)
+
+        # 7. Create group-level lookup arrays for distances and neighbor IDs
+        group_distances_lookup = np.full(max_gid + 1, np.nan)
+        group_neighbor_ids_lookup = np.full(max_gid + 1, -1, dtype=int)
+
+        # Map the closest group matches into our lookup tables using their group_id
+        matched_group_gids = unique_groups[sorted_idx1[first_match]]
+        group_distances_lookup[matched_group_gids] = sorted_d2d[first_match]
+        group_neighbor_ids_lookup[matched_group_gids] = unique_groups[sorted_idx2[first_match]]
+
+        # 8. Broadcast the group-level results down to every single member star in the main catalog
+        catalog['closest_neighbor_distance'] = group_distances_lookup[catalog['group_id']]
+        catalog['closest_neighbor_group_id'] = group_neighbor_ids_lookup[catalog['group_id']]
 
         for group_i in np.unique(catalog['group_id']):
             for key in np.unique(catalog[(catalog['group_id']==group_i)]['key']):
@@ -3917,9 +3971,6 @@ class ImageTools():
 
                 for fitsfile in np.unique(group['fitsfile']):
                     data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
-                    if template_pri_header is None or template_sci_header is None:
-                        template_pri_header = head_pri.copy()
-                        template_sci_header = head_sci.copy()
                     nanmaskfile = group[group['fitsfile']==fitsfile]['nanmaskfile'][0]
                     nanmask = ut.read_msk(nanmaskfile)
 
@@ -4058,8 +4109,8 @@ class ImageTools():
                                 head_sci['STARCENX'] = tile_center+1
                                 head_sci['STARCENY'] = tile_center+1
                                 head_sci['STARFLUX'] = fitted_flux1
-                                head_sci['COMPCENX'] = (fitted_x2_pos + 1) if (fitted_x2_pos is not None and not isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
-                                head_sci['COMPCENY'] = (fitted_y2_pos + 1) if (fitted_y2_pos is not None and not isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
+                                head_sci['COMPCENX'] = (fitted_x2_pos + 1) if (fitted_x2_pos is not None and isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
+                                head_sci['COMPCENY'] = (fitted_y2_pos + 1) if (fitted_y2_pos is not None and isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
                                 head_sci['COMPFLUX'] = fitted_flux2
                                 head_sci['METHOD'] = det_method
                                 head_sci['ROUNDNESS'] = roundness if (roundness is not None and not isinstance(roundness,np.ma.MaskedArray)) else None
@@ -4068,8 +4119,12 @@ class ImageTools():
                                 head_sci['ECCCORE'] = ecccore if (ecccore is not None and not isinstance(ecccore,np.ma.MaskedArray)) else None
                                 head_sci['SOLCORE'] = solcore if (solcore is not None and not isinstance(solcore,np.ma.MaskedArray)) else None
                                 head_sci['BINTEST'] = bintest
-                                head_sci['CND'] = source['closest_neighbor_distance']
-                                head_sci['OTYPE'] = source['OTYPE']
+                                head_sci['CND'] = source['closest_neighbor_distance'] if not np.isnan(source['closest_neighbor_distance']) else -1
+                                head_sci['CNG'] = source['closest_neighbor_group_id']
+                                head_sci['OTYPE'] = source['OTYPE'] if (source['OTYPE'] is not None and not isinstance(source['OTYPE'],np.ma.MaskedArray)) else 'UKNOWN'
+                                if template_pri_header is None or template_sci_header is None:
+                                    template_pri_header = head_pri.copy()
+                                    template_sci_header = head_sci.copy()
 
                                 pri_hdus_list.append(head_pri)
                                 sci_hdus_list.append(head_sci)
@@ -4116,12 +4171,10 @@ class ImageTools():
                 f_count = len(sci_hdus_list) - t_count
                 is_binary = True if t_count >= f_count else False
 
-                sci_hdr['EXTNAME'] = 'SCI'
+                # sci_hdr['EXTNAME'] = 'SCI'
                 sci_hdr['STARCENX'] = np.nanmean([hdul['STARCENX'] for hdul in sci_hdus_list])
                 sci_hdr['STARCENY'] = np.nanmean([hdul['STARCENY'] for hdul in sci_hdus_list])
                 sci_hdr['STARFLUX'] = np.nanmean([hdul['STARFLUX'] for hdul in sci_hdus_list])
-
-                sci_hdr['CND'] = np.nanmean(group['closest_neighbor_distance'].tolist())
 
                 sci_hdr['BINTEST'] = is_binary
                 sci_hdr['COMPCENX'] = np.nanmean(comp_x_list) if (is_binary and comp_x_list) else None
@@ -4144,8 +4197,9 @@ class ImageTools():
                     sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
                     sci_hdr[f'CORESAT_{index}'] = hdul['CORESAT']
                     sci_hdr[f'CND_{index}'] = hdul['CND']
+                    sci_hdr[f'CNG_{index}'] = hdul['CNG']
                     sci_hdr[f'OTYPE_{index}'] = hdul['OTYPE']
-                    sci_hdr[f'BINARITY_{index}'] = hdul['BINTEST']
+                    sci_hdr[f'BINTEST_{index}'] = hdul['BINTEST']
                     sci_hdr[f'ROLL_REF_{index}'] = hdul['ROLL_REF']
                     sci_hdr[f'V3I_YANG_{index}'] = hdul['V3I_YANG']
                     sci_hdr[f'VPARITY_{index}'] = hdul['VPARITY']
