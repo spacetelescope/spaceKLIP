@@ -2060,10 +2060,15 @@ class FITPSF():
 
             if len(coarse_candidates) == 0:
                 log.info("fit_psf: saturated-single grid-search found no candidate (coarse).")
-                b_dx1 = b_dy1 = b_flux1 = None
-                self.chi2_single_sat = np.inf
-                self.bic_single_sats = np.inf
-                self.bintest = False
+                self.b_dx1 = None
+                self.b_dy1 = None
+                self.b_dx2 = None
+                self.b_dy2 = None
+                self.b_flux1 = None
+                self.b_flux2 = None
+                self.bintest = None
+                self.chi2_binary = np.inf
+                self.bic_binary_sats = np.inf
             else:
                 coarse_candidates.sort(key=lambda x: x[0])
                 coarse_candidates = coarse_candidates[:max(1, min(self.top_k, len(coarse_candidates)))]
