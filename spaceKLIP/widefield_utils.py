@@ -1618,9 +1618,27 @@ class FITPSF():
                  fine_radius = 0.6,
                  clip_flux_min = 1e-6,
                  top_k = 5,
-                 eps=1e-12
+                 eps=1e-12,
+                 min_companion_flux_frac=0.1,
+                 min_companion_abs_frac_of_initial=1e-3,
+                 min_companion_snr=4.0
                  ):
-
+        self.dx1 = None
+        self.dy1 = None
+        self.dx2 = None
+        self.dy2 = None
+        self.flux1 = None
+        self.flux2 = None
+        self.bintest = False
+        self.sep=None
+        self.chi2_binary_sat = np.inf
+        self.bic_binary_sats = np.inf
+        self.chi2_binary = np.inf
+        self.bic_binary = np.inf
+        self.chi2_single_sat = np.inf
+        self.bic_single_sat =np.inf
+        self.chi2_single = np.inf
+        self.bic_single =np.inf
         self.min_separation = min_separation
         self.max_separation = max_separation
         self.x_limits = x_limits
@@ -1632,6 +1650,14 @@ class FITPSF():
         self.clip_flux_min = clip_flux_min
         self.top_k = top_k
         self.eps = eps
+
+        # minimum *relative* companion flux fraction (primary is index 1).
+        self.min_companion_flux_frac = min_companion_flux_frac
+        # minimum *absolute* flux for any star relative to initial_flux (e.g. 0.001 x initial_flux)
+        self.min_companion_abs_frac_of_initial = min_companion_abs_frac_of_initial
+        # minimum SNR for companion acceptance
+        self.min_companion_snr = min_companion_snr
+
         pass
 
     def find_multiple_saturated_cores(self,data,labeled_nan):
@@ -1681,7 +1707,7 @@ class FITPSF():
 
         if len(candidates) >= 2:
             self.selected = [candidates[0][1], candidates[1][1]]
-            log.info("fit_psf: selected two NaN cores by perimeter brightness within max_separation")
+            log.debug("selected two NaN cores by perimeter brightness within max_separation")
         elif len(candidates) == 1:
             # One good candidate inside radius: pick it and the next-best overall (by perim_sum)
             self.selected = [candidates[0][1]]
@@ -1689,22 +1715,22 @@ class FITPSF():
             if others:
                 others.sort(key=lambda t: (-t[3], t[0]))
                 self.selected.append(others[0][1])
-                log.info("fit_psf: one candidate inside max_separation; selected second-best overall by perim_sum")
+                log.debug("one candidate inside max_separation; selected second-best overall by perim_sum")
             else:
-                log.info("fit_psf: only one NaN region present and selected by perim_sum")
+                log.debug("only one NaN region present and selected by perim_sum")
         else:
             # No candidates inside max_separation: fallback to top two by perimeter brightness overall
             props_info.sort(key=lambda t: (-t[3], t[0]))
             if len(props_info) >= 2:
                 self.selected = [props_info[0][1], props_info[1][1]]
                 log.info(
-                    "fit_psf: no cores within max_separation; selected top two by perimeter brightness overall")
+                    "no cores within max_separation; selected top two by perimeter brightness overall")
             elif len(props_info) == 1:
                 self.selected = [props_info[0][1]]
-                log.info("fit_psf: only one NaN region found; selected the single region")
+                log.info("only one NaN region found; selected the single region")
             else:
                 self.selected = []
-                log.info("fit_psf: no NaN regions available after scoring; skipping saturated-binary")
+                log.info("no NaN regions available after scoring; skipping saturated-binary")
 
     def fit_multiple_saturated_cores(self,data,psf,nanmask):
         p1y, p1x = self.selected[0].centroid
@@ -1722,16 +1748,8 @@ class FITPSF():
         n = int(max(1, data_vec.size))
 
         if data_vec.size == 0:
-            log.info("fit_psf: no finite pixels available -> skipping saturated-binary.")
-            self.b_dx1 = None
-            self.b_dy1 = None
-            self.b_dx2 = None
-            self.b_dy2 = None
-            self.b_flux1 = None
-            self.b_flux2 = None
-            self.bintest = None
-            self.chi2_binary = np.inf
-            self.bic_binary_sats = np.inf
+            log.warning("no finite pixels available -> skipping saturated-binary.")
+            return
         else:
             psf_for_shift = psf.copy()
             sp_cache = {}
@@ -1786,17 +1804,17 @@ class FITPSF():
                             if np.linalg.matrix_rank(A) < 2:
                                 continue
                             # Solve for fluxes with NNLS/bounded LS
-                            sol, chi2 = solve_fluxes_nnls(A, data_vec, clip_min=self.clip_flux_min)
+                            # sol, chi2 = solve_fluxes_nnls(A, data_vec, clip_min=self.clip_flux_min)
+                            # dynamic clip floor: ensure companion >= absolute floor based on initial_flux
+                            clip_min_candidate = max(self.clip_flux_min,self.initial_flux * self.min_companion_abs_frac_of_initial)
+                            sol, chi2 = solve_fluxes_nnls(A, data_vec, clip_min=clip_min_candidate)
                             # keep top K by chi2 (smallest)
                             coarse_candidates.append((chi2, dx1_cand, dy1_cand, dx2_cand, dy2_cand, sol[0], sol[1]))
 
             # If none found, fallback
             if len(coarse_candidates) == 0:
-                log.info("fit_psf: saturated-binary grid-search found no valid candidate (coarse stage).")
-                b_dx1 = b_dy1 = b_dx2 = b_dy2 = b_flux1 = b_flux2 = None
-                chi2_binary = np.inf
-                bic_binary_sats = np.inf
-                bintest = False
+                log.warning("Saturated-binary grid-search found no valid candidate (coarse stage).")
+                return
             else:
                 # sort by chi2 and keep top_k
                 coarse_candidates.sort(key=lambda x: x[0])
@@ -1826,37 +1844,35 @@ class FITPSF():
                                     A = np.vstack([p1, p2]).T
                                     if np.linalg.matrix_rank(A) < 2:
                                         continue
-                                    sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=self.clip_flux_min)
+                                    # sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=self.clip_flux_min)
+                                    # dynamic clip floor: ensure companion >= absolute floor based on initial_flux
+                                    clip_min_candidate = max(self.clip_flux_min,self.initial_flux * self.min_companion_abs_frac_of_initial)
+                                    sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=clip_min_candidate)
                                     if chi2_local < best['chi2']:
                                         best.update({
                                             'chi2': float(chi2_local),
                                             'dx1': float(dx1_f), 'dy1': float(dy1_f),
                                             'dx2': float(dx2_f), 'dy2': float(dy2_f),
                                             'f1': float(sol[0]), 'f2': float(sol[1]),
+                                            'sep': float(sep),
                                         })
 
                 if best['dx1'] is None:
-                    log.info("fit_psf: saturated-binary refinement found no valid candidate.")
-                    self.b_dx1 = None
-                    self.b_dy1 = None
-                    self.b_dx2 = None
-                    self.b_dy2 = None
-                    self.b_flux1 = None
-                    self.b_flux2 = None
-                    self.bintest = None
-                    self.chi2_binary = np.inf
-                    self.bic_binary_sats = np.inf
+                    log.warning("Saturated-binary refinement found no valid candidate.")
+                    return
                 else:
-                    self.b_dx1 = best['dx1']
-                    self.b_dy1 = best['dy1']
-                    self.b_dx2 = best['dx2']
-                    self.b_dy2 = best['dy2']
-                    self.b_flux1 = best['f1']
-                    self.b_flux2 = best['f2']
-                    self.chi2_binary = float(best['chi2'])
-                    self.bic_binary_sats = n * np.log(max(self.eps, self.chi2_binary / n)) + 6.0 * np.log(max(1, n))
-                    log.info("fit_psf: saturated-binary candidate (refined): chi2=%.3e, n=%d, BIC_sats=%.3f",
-                             self.chi2_binary, n, self.bic_binary_sats)
+                    self.dx1 = best['dx1']
+                    self.dy1 = best['dy1']
+                    self.dx2 = best['dx2']
+                    self.dy2 = best['dy2']
+                    self.flux1 = best['f1']
+                    self.flux2 = best['f2']
+                    self.sep = best['sep']
+                    # self.chi2_binary = float(best['chi2'])
+                    self.chi2_binary = float(best['chi2'])/(self.sigma**2)
+                    self.bic_binary_sat = n * np.log(max(self.eps, self.chi2_binary / n)) + 6.0 * np.log(max(1, n))
+                    log.info("Saturated-binary candidate preferred: ΔBIC=%.2f, sep=%.2f, f1=%.3f, f2=%.3f",
+                             self.bic_binary_sat, self.sep, self.flux1, self.flux2)
                     self.bintest = True
 
     def fit_multiple_unsaturated_cores(self, data, psf, nanmask,weights):
@@ -1874,10 +1890,9 @@ class FITPSF():
 
         res_single = minimize(single_objective, single_guess, bounds=single_bounds, method='L-BFGS-B')
         b_dx1, b_dy1, b_flux1 = res_single.x
-        chi2_single = res_single.fun
-        bic_single = chi2_single + 3 * np.log(self.n_pixels)
-
-        # b_dx2, b_dy2, b_flux2, bintest = None, None, None, False
+        # self.chi2_single = res_single.fun
+        self.chi2_single = res_single.fun/(self.sigma**2)
+        self.bic_single = self.chi2_single + 3 * np.log(self.n_pixels)
 
         # perform the fit for 2 not saturated stars.
         # =========================================================================
@@ -1930,8 +1945,8 @@ class FITPSF():
         # extract parameters
         if res_binary is None or not hasattr(res_binary, 'x'):
             # fallback: keep single solution
-            chi2_binary = np.inf
-            bic_binary = np.inf
+            self.chi2_binary = np.inf
+            self.bic_binary = np.inf
             b_dx2 = b_dy2 = b_flux2 = None
         else:
             dx1_fit, dy1_fit, flux1_fit, r_fit, theta_fit, contrast_fit = res_binary.x
@@ -1944,24 +1959,25 @@ class FITPSF():
                      flux2_fit * shift(psf, [dy2_fit, dx2_fit], order=3))
             residuals = (data[~nanmask.astype(bool)] - model[~nanmask.astype(bool)]) * weights[
                 ~nanmask.astype(bool)]
-            chi2_binary = float(np.sum(residuals ** 2))
-            bic_binary = chi2_binary + 6 * np.log(self.n_pixels)
+            # self.chi2_binary = float(np.sum(residuals ** 2))
+            self.chi2_binary = float(np.sum(residuals ** 2))/(self.sigma**2)
+            self.bic_binary = self.chi2_binary + 6 * np.log(self.n_pixels)
 
             # assign outputs
             b_dx1, b_dy1, b_flux1 = dx1_fit, dy1_fit, flux1_fit
             b_dx2, b_dy2, b_flux2 = dx2_fit, dy2_fit, flux2_fit
 
-        delta_bic = bic_single - bic_binary
+        self.delta_bic = self.bic_single - self.bic_binary
         # Calculate final sorted physical separation
-        final_sep = np.sqrt((b_dx1 - b_dx2) ** 2 + (b_dy1 - b_dy2) ** 2)
+        self.sep = np.sqrt((b_dx1 - b_dx2) ** 2 + (b_dy1 - b_dy2) ** 2)
 
         # =========================================================================
         # 3. STATISTICAL COMPARISON WITH FLUX RATIO THRESHOLD
         # =========================================================================
-        if delta_bic > 10.0 and b_flux2 > (0.01 * b_flux1):
-            if final_sep < self.min_separation or not res_binary.success:
-                if round(final_sep, 1) < self.min_separation:
-                    log.error(f"Binary fit collapsed: separation {final_sep} < {self.min_separation:.2f} pix)")
+        if self.delta_bic > 10.0 and b_flux2 > (0.01 * b_flux1):
+            if self.sep < self.min_separation or not res_binary.success:
+                if round(self.sep, 1) < self.min_separation:
+                    log.error(f"Binary fit collapsed: separation {self.sep} < {self.min_separation:.2f} pix)")
                 if not res_binary.success:
                     log.error(f"Single Star Detected. (Binary fit rejected: optimization failed to converge)")
                 return b_dx1, b_dy1, b_flux1, None, None, None, False
@@ -1971,27 +1987,36 @@ class FITPSF():
                 b_dx1, b_dx2 = b_dx2, b_dx1
                 b_dy1, b_dy2 = b_dy2, b_dy1
                 b_flux1, b_flux2 = b_flux2, b_flux1
-            log.info(f"Binary Detected. (ΔBIC = {delta_bic:.1f}, Sep = {final_sep:.2f} pix)")
-            log.info(f"Primary Flux: {b_flux1:.1f} | Companion Flux: {b_flux2:.1f}")
-            self.b_dx1 = b_dx1
-            self.b_dy1 = b_dy1
-            self.b_dx2 = b_dx2
-            self.b_dy2 = b_dy2
-            self.b_flux1 = b_flux1
-            self.b_flux2 = b_flux2
+            self.dx1 = b_dx1
+            self.dy1 = b_dy1
+            self.dx2 = b_dx2
+            self.dy2 = b_dy2
+            self.flux1 = b_flux1
+            self.flux2 = b_flux2
             self.bintest = True
+            log.info("Binary preferred : ΔBIC=%.2f, sep=%.2f, f1=%.3f, f2=%.3f",
+                     self.delta_bic, self.sep, self.flux1, self.flux2)
 
         else:
-            log.info(f"Single Star Detected. (ΔBIC = {delta_bic:.1f})")
-            self.b_dx1 = b_dx1
-            self.b_dy1 = b_dy1
-            self.b_dx2 = None
-            self.b_dy2 = None
-            self.b_flux1 = b_flux1
-            self.b_flux2 = None
+            self.dx1 = b_dx1
+            self.dy1 = b_dy1
+            self.dx2 = None
+            self.dy2 = None
+            self.flux1 = b_flux1
+            self.flux2 = None
             self.bintest = False
+            log.info("Single preferred: ΔBIC=%.3f, f1=%.3f",
+                     self.delta_bic, self.flux1)
 
     def fit_single_saturated_core(self, data, psf, nanmask):
+        """
+        Two-stage approach for the case of a single saturated core with extra checks to avoid
+        spurious tiny-separation binaries:
+          - Stage A: coarse binary NNLS grid to find candidates
+          - Stage B: single-star refinement (coarse+fine)
+          - Stage C: refine top coarse binary candidates; accept only if BIC improvement + additional checks
+        """
+        # centroid seed of saturated core
         p1y, p1x = self.selected[0].centroid
         dx1_s = float(p1x - self.centers[0])
         dy1_s = float(p1y - self.centers[1])
@@ -2002,186 +2027,344 @@ class FITPSF():
         n = int(max(1, data_vec.size))
 
         if data_vec.size == 0:
-            log.info("fit_psf: no finite pixels available -> skipping single saturated fit.")
-            self.b_dx1 = None
-            self.b_dy1 = None
-            self.b_dx2 = None
-            self.b_dy2 = None
-            self.b_flux1 = None
-            self.b_flux2 = None
-            self.bintest = None
-            self.chi2_binary = np.inf
-            self.bic_binary_sats = np.inf
-        else:
-            psf_for_shift = psf.copy()
-            sp_cache = {}
+            log.info("no finite pixels available -> skipping single saturated fit.")
+            return
 
-            def shifted_psf_cached(dx, dy):
-                key = (float(dx), float(dy))
-                if key not in sp_cache:
-                    sp_cache[key] = shift(psf_for_shift, [dy, dx], order=3, mode='constant', cval=0.0)
-                return sp_cache[key]
+        # ---- helpers: shifted PSF cache and NNLS solver (same as other routines) ----
+        psf_for_shift = psf.copy()
+        sp_cache = {}
 
-            coarse_vals = np.arange(-self.coarse_max_jitter, self.coarse_max_jitter + 1e-12, self.coarse_step)
+        def shifted_psf_cached(dx, dy):
+            key = (float(dx), float(dy))
+            if key not in sp_cache:
+                sp_cache[key] = shift(psf_for_shift, [dy, dx], order=3, mode='constant', cval=0.0)
+            return sp_cache[key]
 
-            # reuse solver
-            from scipy.optimize import lsq_linear
-            def solve_fluxes_nnls(A, b, clip_min=self.clip_flux_min):
-                try:
-                    res = lsq_linear(A, b, bounds=(clip_min, np.inf), lsmr_tol='auto', verbose=0)
-                    if res.success:
-                        return res.x, res.cost * 2.0
-                    else:
-                        sol, *_ = np.linalg.lstsq(A, b, rcond=None)
-                        sol = np.clip(np.asarray(sol, dtype=float), clip_min, None)
-                        resid = b - A.dot(sol)
-                        return sol, float(np.sum(resid * resid))
-                except Exception:
+        from scipy.optimize import lsq_linear
+
+        def solve_fluxes_nnls(A, b, clip_min=self.clip_flux_min):
+            try:
+                res = lsq_linear(A, b, bounds=(clip_min, np.inf), lsmr_tol='auto', verbose=0)
+                if res.success:
+                    return res.x, res.cost * 2.0
+                else:
                     sol, *_ = np.linalg.lstsq(A, b, rcond=None)
                     sol = np.clip(np.asarray(sol, dtype=float), clip_min, None)
                     resid = b - A.dot(sol)
                     return sol, float(np.sum(resid * resid))
+            except Exception:
+                sol, *_ = np.linalg.lstsq(A, b, rcond=None)
+                sol = np.clip(np.asarray(sol, dtype=float), clip_min, None)
+                resid = b - A.dot(sol)
+                return sol, float(np.sum(resid * resid))
 
-            # coarse search for best dx,dy (keep top candidates)
-            coarse_candidates = []
-            for dx_j in coarse_vals:
-                for dy_j in coarse_vals:
-                    dx_cand = dx1_s + float(dx_j)
-                    dy_cand = dy1_s + float(dy_j)
-                    p_full = shifted_psf_cached(dx_cand, dy_cand)
-                    p = p_full[mask_inds].ravel()
-                    if np.allclose(p, 0.0):
-                        continue
-                    A = p.reshape(-1, 1)
-                    if np.linalg.matrix_rank(A) < 1:
-                        continue
-                    sol, chi2 = solve_fluxes_nnls(A, data_vec, clip_min=self.clip_flux_min)
-                    coarse_candidates.append((chi2, dx_cand, dy_cand, sol[0]))
+        # -------------------------------------------------------------------------
+        # Determine empirical core radius from NaN region (avoid companions inside core)
+        # -------------------------------------------------------------------------
+        try:
+            core_area = float(self.selected[0].area)
+            core_radius_emp = np.sqrt(core_area / np.pi)  # pixels
+        except Exception:
+            core_radius_emp = 0.0
+        # enforce minimum sensible radius
+        min_sep_enforced = max(self.min_separation, 1.0, 1.2 * core_radius_emp)
 
-            if len(coarse_candidates) == 0:
-                log.info("fit_psf: saturated-single grid-search found no candidate (coarse).")
-                self.b_dx1 = None
-                self.b_dy1 = None
-                self.b_dx2 = None
-                self.b_dy2 = None
-                self.b_flux1 = None
-                self.b_flux2 = None
-                self.bintest = None
-                self.chi2_binary = np.inf
-                self.bic_binary_sats = np.inf
+        # condition-number threshold for A matrix (avoid near-collinear PSF columns)
+        cond_thresh = 1e3
+
+        def single_objective(params):
+            dx, dy, flux = params
+            # Build model at this shift and flux using cached shift helper
+            model_full = flux * shifted_psf_cached(dx, dy)
+            # residuals evaluated only on finite/masked pixels (mask_inds)
+            resid = data_vec - model_full[mask_inds].ravel()
+            return float(np.sum(resid ** 2))
+
+        # sensible initial guess: use centroid-derived seed and initial_flux
+        single_guess = [dx1_s, dy1_s, max(1e-8, float(self.initial_flux))]
+
+        # bounds: keep dx/dy in x/y limits, flux positive and within a wide sensible range
+        flux_min_bound = max(self.clip_flux_min, self.initial_flux * 1e-3)
+        flux_max_bound = self.initial_flux * 1e4
+        single_bounds = [self.x_limits, self.y_limits, (flux_min_bound, flux_max_bound)]
+
+        # run continuous optimizer (L-BFGS-B). Fall back gracefully if it fails.
+        try:
+            from scipy.optimize import minimize
+            res_single = minimize(single_objective, single_guess, bounds=single_bounds, method='L-BFGS-B',
+                                  options={'maxiter': 2000, 'ftol': 1e-9})
+            if res_single is not None and hasattr(res_single, 'x'):
+                b_dx = float(res_single.x[0])
+                b_dy = float(res_single.x[1])
+                b_flux = float(res_single.x[2])
+                raw_chi2_single = float(res_single.fun)
             else:
-                coarse_candidates.sort(key=lambda x: x[0])
-                coarse_candidates = coarse_candidates[:max(1, min(self.top_k, len(coarse_candidates)))]
+                # optimizer did not return a valid result: fallback to seed
+                b_dx, b_dy, b_flux = float(dx1_s), float(dy1_s), float(self.initial_flux)
+                raw_chi2_single = np.inf
+        except Exception as e:
+            log.warning("single-star minimization raised exception: %s -- falling back to seed.", str(e))
+            b_dx, b_dy, b_flux = float(dx1_s), float(dy1_s), float(self.initial_flux)
+            raw_chi2_single = np.inf
 
-                best = {'chi2': np.inf, 'dx': None, 'dy': None, 'f': None}
-                for (chi2_c, dx_c, dy_c, f_c) in coarse_candidates:
-                    dx_ref_vals = np.arange(dx_c - self.fine_radius, dx_c + self.fine_radius + 1e-12, self.fine_step)
-                    dy_ref_vals = np.arange(dy_c - self.fine_radius, dy_c + self.fine_radius + 1e-12, self.fine_step)
-                    for dx_f in dx_ref_vals:
-                        for dy_f in dy_ref_vals:
-                            p_full = shifted_psf_cached(dx_f, dy_f)
-                            p = p_full[mask_inds].ravel()
-                            if np.allclose(p, 0.0):
-                                continue
-                            A = p.reshape(-1, 1)
-                            if np.linalg.matrix_rank(A) < 1:
-                                continue
-                            sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=self.clip_flux_min)
-                            if chi2_local < best['chi2']:
-                                best.update({'chi2': float(chi2_local), 'dx': float(dx_f), 'dy': float(dy_f),
-                                             'f': float(sol[0])})
+        # Assign the robust single-star baseline
+        self.dx1 = float(b_dx)
+        self.dy1 = float(b_dy)
+        self.dx2 = None
+        self.dy2 = None
+        self.flux1 = float(b_flux)
+        self.flux2 = None
+        self.bintest = False
 
-                if best['dx'] is None:
-                    log.info("fit_psf: saturated-single refinement found no valid candidate.")
-                    self.b_dx1 = None
-                    self.b_dy1 = None
-                    self.b_dx2 = None
-                    self.b_dy2 = None
-                    self.b_flux1 = None
-                    self.b_flux2 = None
-                    self.bintest = None
-                    self.chi2_binary = np.inf
-                    self.bic_binary_sats = np.inf
-                else:
-                    self.b_dx1 = best['dx']
-                    self.b_dy1 = best['dy']
-                    self.b_dx2 = None
-                    self.b_dy2 = None
-                    self.b_flux1 = best['f']
-                    self.b_flux2 = None
-                    self.bintest = False
-                    self.chi2_single_sat = float(best['chi2'])
-                    self.bic_single_sats = n * np.log(max(self.eps, self.chi2_single_sat / n)) + 3.0 * np.log(max(1, n))
-                    log.info("fit_psf: saturated-single candidate (refined): chi2=%.3e, n=%d, BIC_sats=%.3f",
-                             self.chi2_single_sat, n, self.bic_single_sats)
+        # Follow existing convention: chi2_single_sat is normalized by sigma**2 later used for BIC.
+        # sigma variable was computed at function start (sigma = np.nanstd(data[~nanmask])).
+        self.chi2_single_sat = float(raw_chi2_single) / (self.sigma ** 2) if np.isfinite(raw_chi2_single) else np.inf
+        self.bic_single_sat = n * np.log(max(self.eps, self.chi2_single_sat / n)) + 3.0 * np.log(max(1, n))
+        log.debug(
+            "saturated-single candidate (minimized): chi2_raw=%.3e chi2_norm=%.3e, n=%d, BIC_sats=%.3f, dx=%.3f dy=%.3f f=%.3f",
+            raw_chi2_single, self.chi2_single_sat, n, self.bic_single_sat, self.dx1, self.dy1, self.flux1)
+
+        # -------------------------------------------------------------------------
+        # STAGE A: COARSE BINARY GRID SEARCH (fast NNLS solves) to find promising candidates
+        # -------------------------------------------------------------------------
+        coarse_dxdy = max(0.5, self.coarse_step)  # coarse dx/dy grid spacing
+        primary_jitter = min(self.coarse_max_jitter, 1.5)  # jitter around detected saturated centroid
+        dx_primary_grid = np.arange(dx1_s - primary_jitter, dx1_s + primary_jitter + 1e-12, coarse_dxdy)
+        dy_primary_grid = np.arange(dy1_s - primary_jitter, dy1_s + primary_jitter + 1e-12, coarse_dxdy)
+        r_step_coarse = max(0.5, self.coarse_step)
+        theta_step_coarse = np.deg2rad(20.0)
+        r_vals = np.arange(max(self.min_separation, 0.0), self.max_separation + 1e-12, r_step_coarse)
+        theta_vals = np.arange(0.0, 2.0 * np.pi, theta_step_coarse)
+
+        coarse_candidates = []  # (chi2, bic, dx1,dy1,dx2,dy2,f1,f2,r,theta,sep,cond)
+
+        center_x = float(self.centers[0])
+        center_y = float(self.centers[1])
+        ny, nx = nanmask.shape[0], nanmask.shape[1]
+
+        for dx1_c in dx_primary_grid:
+            for dy1_c in dy_primary_grid:
+                p1_full = shifted_psf_cached(dx1_c, dy1_c)
+                p1 = p1_full[mask_inds].ravel()
+                if np.allclose(p1, 0.0):
+                    continue
+                for r_c in r_vals:
+                    for th in theta_vals:
+                        dx2_c = dx1_c + r_c * np.cos(th)
+                        dy2_c = dy1_c + r_c * np.sin(th)
+                        # enforce minimal separation (avoid the tiny separation collapse)
+                        sep = np.hypot(dx1_c - dx2_c, dy1_c - dy2_c)
+                        if sep < min_sep_enforced or sep < self.min_separation:
+                            continue
+                        # ensure companion center lies on finite data (not inside NaN core)
+                        x2_pix = int(round(center_x + dx2_c))
+                        y2_pix = int(round(center_y + dy2_c))
+                        if x2_pix < 0 or x2_pix >= nx or y2_pix < 0 or y2_pix >= ny:
+                            continue
+                        if not finite_mask[y2_pix, x2_pix]:
+                            # candidate falls on NaN region (or outside) -> not constrained, skip
+                            continue
+                        p2_full = shifted_psf_cached(dx2_c, dy2_c)
+                        p2 = p2_full[mask_inds].ravel()
+                        A = np.vstack([p1, p2]).T
+                        # check linear independence / condition number
+                        try:
+                            condA = np.linalg.cond(A)
+                        except Exception:
+                            condA = np.inf
+                        if condA > cond_thresh or np.linalg.matrix_rank(A) < 2:
+                            continue
+                        # sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=self.clip_flux_min)
+                        # dynamic clip floor: ensure companion >= absolute floor based on initial_flux
+                        clip_min_candidate = max(self.clip_flux_min,self.initial_flux * self.min_companion_abs_frac_of_initial)
+                        sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=clip_min_candidate)
+                        bic_local = n * np.log(max(self.eps, chi2_local / n)) + 6.0 * np.log(max(1, n))
+                        coarse_candidates.append(
+                            (chi2_local, bic_local, dx1_c, dy1_c, dx2_c, dy2_c, float(sol[0]), float(sol[1]), r_c, th,
+                             sep, condA))
+
+        # Keep top-K coarse candidates by chi2
+        coarse_candidates.sort(key=lambda t: t[0])
+        top_k = max(1, min(self.top_k, len(coarse_candidates)))
+        top_candidates = coarse_candidates[:top_k] if len(coarse_candidates) > 0 else []
+
+        if len(top_candidates) > 0:
+            for idx, c in enumerate(top_candidates):
+                chi2_c, bic_c, dx1_c, dy1_c, dx2_c, dy2_c, f1_c, f2_c, r_c, th, sep, condA = c
+                log.debug("coarse cand %d: chi2=%.3e bic=%.3f r=%.2f f1=%.3f f2=%.3f sep=%.3f cond=%.1e",
+                         idx, chi2_c, bic_c, r_c, f1_c, f2_c, sep, condA)
+        else:
+            log.warning("no coarse binary candidate found around saturated core.")
+            return
+        # -------------------------------------------------------------------------
+        # STAGE C: Refine top coarse candidates (if any) with local fine search and accept only if robust
+        # -------------------------------------------------------------------------
+        if len(top_candidates) == 0:
+            log.warning("no valid candidates found. Quitting.")
+            return
+
+        best_binary = {'chi2': np.inf, 'dx1': None, 'dy1': None, 'dx2': None, 'dy2': None, 'f1': None, 'f2': None,
+                       'sep': None}
+        for cand in top_candidates:
+            _, bic_c, dx1_c, dy1_c, dx2_c, dy2_c, f1_c, f2_c, r_c, th_c, sep_c, cond_c = cand
+
+            # skip coarse candidate if it fails minimal separation or cond checks (extra safety)
+            if sep_c < min_sep_enforced or cond_c > cond_thresh:
+                continue
+
+            dx1_ref_vals = np.arange(dx1_c - self.fine_radius, dx1_c + self.fine_radius + 1e-12, self.fine_step)
+            dy1_ref_vals = np.arange(dy1_c - self.fine_radius, dy1_c + self.fine_radius + 1e-12, self.fine_step)
+            dx2_ref_vals = np.arange(dx2_c - self.fine_radius, dx2_c + self.fine_radius + 1e-12, self.fine_step)
+            dy2_ref_vals = np.arange(dy2_c - self.fine_radius, dy2_c + self.fine_radius + 1e-12, self.fine_step)
+
+            for dx1_f in dx1_ref_vals:
+                for dy1_f in dy1_ref_vals:
+                    p1_full = shifted_psf_cached(dx1_f, dy1_f)
+                    p1 = p1_full[mask_inds].ravel()
+                    if np.allclose(p1, 0.0):
+                        continue
+                    for dx2_f in dx2_ref_vals:
+                        for dy2_f in dy2_ref_vals:
+                            sep = np.hypot(dx1_f - dx2_f, dy1_f - dy2_f)
+                            if sep < min_sep_enforced or sep < self.min_separation or sep > self.max_separation:
+                                continue
+                            # companion must be on finite pixels
+                            x2_pix = int(round(center_x + dx2_f))
+                            y2_pix = int(round(center_y + dy2_f))
+                            if x2_pix < 0 or x2_pix >= nx or y2_pix < 0 or y2_pix >= ny:
+                                continue
+                            if not finite_mask[y2_pix, x2_pix]:
+                                continue
+                            p2_full = shifted_psf_cached(dx2_f, dy2_f)
+                            p2 = p2_full[mask_inds].ravel()
+                            A = np.vstack([p1, p2]).T
+                            try:
+                                condA = np.linalg.cond(A)
+                            except Exception:
+                                condA = np.inf
+                            if condA > cond_thresh or np.linalg.matrix_rank(A) < 2:
+                                continue
+                            # sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=self.clip_flux_min)
+                            # dynamic clip floor: ensure companion >= absolute floor based on initial_flux
+                            clip_min_candidate = max(self.clip_flux_min,self.initial_flux * self.min_companion_abs_frac_of_initial)
+                            sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=clip_min_candidate)
+                            if chi2_local < best_binary['chi2']:
+                                best_binary.update({
+                                    'chi2': float(chi2_local),
+                                    'dx1': float(dx1_f), 'dy1': float(dy1_f),
+                                    'dx2': float(dx2_f), 'dy2': float(dy2_f),
+                                    'f1': float(sol[0]), 'f2': float(sol[1]), 'sep': float(sep)
+                                })
+
+        if best_binary['dx1'] is None:
+            log.warning("no valid refined binary candidate found; keeping single-star result.")
+            return
+
+        # compute bic and decide
+        self.chi2_binary = best_binary['chi2'] / (self.sigma**2)
+        self.bic_binary = n * np.log(max(self.eps, self.chi2_binary / n)) + 6.0 * np.log(max(1, n))
+        self.delta_bic = self.bic_single_sat - self.bic_binary
+        sep_best = best_binary['sep']
+        # compute absolute and relative floor thresholds
+        min_rel = self.min_companion_flux_frac
+        min_abs = max(self.clip_flux_min, self.initial_flux * self.min_companion_abs_frac_of_initial)
+
+        # acceptance: require strong bic improvement and companion not too faint and sep beyond core radius
+        if self.delta_bic > 10.0 and best_binary['f2'] > max(min_abs, min_rel * best_binary['f1']) and sep_best >= min_sep_enforced:
+            # enforce primary brighter
+            f1_final, f2_final = best_binary['f1'], best_binary['f2']
+            dx1_out, dy1_out = best_binary['dx1'], best_binary['dy1']
+            dx2_out, dy2_out = best_binary['dx2'], best_binary['dy2']
+            if f2_final > f1_final:
+                dx1_out, dx2_out = dx2_out, dx1_out
+                dy1_out, dy2_out = dy2_out, dy1_out
+                f1_final, f2_final = f2_final, f1_final
+            self.dx1 = float(dx1_out)
+            self.dy1 = float(dy1_out)
+            self.flux1 = float(f1_final)
+            self.dx2 = float(dx2_out)
+            self.dy2 = float(dy2_out)
+            self.flux2 = float(f2_final)
+            self.bintest = True
+            log.info(
+                "Saturated + Unsaturated Companion preferred: ΔBIC=%.2f, sep=%.2f, f1=%.3f, f2=%.3f",
+                self.delta_bic, sep_best, self.flux1, self.flux2)
+        else:
+            # single-star solution is already assigned above
+            log.info(
+                "Saturated single preferred: ΔBIC=%.3f, f1=%.3f",
+                self.delta_bic, self.flux1)
+        pass
 
     def fitpsf(self,data, nanmask, psf):
-        """
-        Fits a single star and a simultaneous binary star model directly to the data.
+            """
+            Fits a single star and a simultaneous binary star model directly to the data.
 
-        Uses native trust-region constraints to keep stars separated without breaking gradients.
-        Decides between single and binary models based on the Bayesian Information Criterion (BIC).
+            Uses native trust-region constraints to keep stars separated without breaking gradients.
+            Decides between single and binary models based on the Bayesian Information Criterion (BIC).
 
-        Parameters
-        ----------
-        data : numpy.ndarray
-            2D image cutout containing the source(s) to be fitted.
-        psf : numpy.ndarray
-            2D PSF model image.
+            Parameters
+            ----------
+            data : numpy.ndarray
+                2D image cutout containing the source(s) to be fitted.
+            psf : numpy.ndarray
+                2D PSF model image.
 
 
-        Returns
-        -------
-        dx1 : float
-            X-offset of the primary star.
-        dy1 : float
-            Y-offset of the primary star.
-        flux1 : float
-            Flux of the primary star.
-        dx2 : float or None
-            X-offset of the companion (if binary).
-        dy2 : float or None
-            Y-offset of the companion (if binary).
-        flux2 : float or None
-            Flux of the companion (if binary).
-        is_binary : bool
-            True if the binary model was preferred.
-        """
-        weights = np.ones_like(data, dtype=float)
-        self.centers = [nanmask.shape[1] // 2, nanmask.shape[0] // 2]
+            Returns
+            -------
+            dx1 : float
+                X-offset of the primary star.
+            dy1 : float
+                Y-offset of the primary star.
+            flux1 : float
+                Flux of the primary star.
+            dx2 : float or None
+                X-offset of the companion (if binary).
+            dy2 : float or None
+                Y-offset of the companion (if binary).
+            flux2 : float or None
+                Flux of the companion (if binary).
+            is_binary : bool
+                True if the binary model was preferred.
+            """
+            weights = np.ones_like(data, dtype=float)
+            self.centers = [nanmask.shape[1] // 2, nanmask.shape[0] // 2]
 
-        if np.any(nanmask):
-            initial_flux = np.max(data[~nanmask]) / np.max(psf)
-        else:
-            initial_flux = np.max(data) / np.max(psf)
+            if np.any(nanmask):
+                initial_flux = np.max(data[~nanmask]) / np.max(psf)
+                self.sigma = np.nanstd(data[~nanmask])
+            else:
+                initial_flux = np.max(data) / np.max(psf)
+                self.sigma = np.nanstd(data)
 
-        self.initial_flux = max(1e-5, initial_flux)
-        self.n_pixels = np.sum(~nanmask.astype(bool))
+            self.initial_flux = max(1e-5, initial_flux)
+            self.n_pixels = np.sum(~nanmask.astype(bool))
 
-        labeled_nan = label(nanmask.astype(bool), connectivity=1)
-        self.nan_props = [p for p in regionprops(labeled_nan) if p.area > 0]
-        log.info("fit_psf: labeled_nan max %d, num nan props %d", labeled_nan.max(), len(self.nan_props))
+            labeled_nan = label(nanmask.astype(bool), connectivity=1)
+            self.nan_props = [p for p in regionprops(labeled_nan) if p.area > 0]
+            log.debug("labeled_nan max %d, num nan props %d", labeled_nan.max(), len(self.nan_props))
 
-        # --- Perimeter / annulus brightness scoring for NaN-core selection ---
-        # Score each NaN region by the flux in a small annulus around the NaN core
-        # (this prefers true saturated cores with bright PSF wings over tiny bad pixels).
-        if len(self.nan_props) >= 1:
-            self.find_multiple_saturated_cores(data,labeled_nan)
-        elif len(self.nan_props) == 0:
-            self.selected = []
-            log.info("fit_psf: no NaN cores found; skipping saturated star analysis.")
+            # --- Perimeter / annulus brightness scoring for NaN-core selection ---
+            # Score each NaN region by the flux in a small annulus around the NaN core
+            # (this prefers true saturated cores with bright PSF wings over tiny bad pixels).
+            if len(self.nan_props) >= 1:
+                self.find_multiple_saturated_cores(data,labeled_nan)
+                log.info(f"{len(self.nan_props)} NaN cores found; starting saturated star analysis.")
+            elif len(self.nan_props) == 0:
+                self.selected = []
+                log.info("no NaN cores found; skipping saturated star analysis.")
 
-        # If two discrete NaN cores exist, fit the two saturated stars
-        if len(self.selected) >= 2:
-            self.fit_multiple_saturated_cores(data, psf, nanmask)
+            # If two discrete NaN cores exist, fit the two saturated stars
+            if len(self.selected) >= 2:
+                self.fit_multiple_saturated_cores(data, psf, nanmask)
 
-        # If exactly one NaN core found: fit single saturated star (reuse same shift/solver helpers).
-        # TODO: Needs to solve for the case of a single saturated star and a unsaturated companion (e.g., a faint binary). This is not yet implemented.
-        elif len(self.selected) == 1:
-            self.fit_single_saturated_core(data, psf, nanmask)
+            # If exactly one NaN core found: fit single saturated star (reuse same shift/solver helpers).
+            elif len(self.selected) == 1:
+                self.fit_single_saturated_core(data, psf, nanmask)
 
-        # If no seeds found: skip binary and accept single (user requirement)
-        elif len(self.selected) == 0:
-            self.fit_multiple_unsaturated_cores(data, psf, nanmask, weights)
+            # If no seeds found: skip binary and accept single (user requirement)
+            elif len(self.selected) == 0:
+                self.fit_multiple_unsaturated_cores(data, psf, nanmask, weights)
 
 
