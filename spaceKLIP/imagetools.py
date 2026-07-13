@@ -3358,8 +3358,15 @@ class ImageTools():
                     # Replace nans.
                     head, tail = os.path.split(fitsfile)
                     log.info('  --> Nan replacement: ' + tail)
+                    
+                    # Replace NaNs in SCI data.
                     ww = np.isnan(data)
                     data[ww] = cval
+
+                    # Replace NaNs in ERR data.
+                    ww_erro = np.isnan(erro)
+                    erro[ww_erro] = cval
+
                     log.info('  --> Nan replacement: replaced %.0f nan pixel(s) with value ' % (np.sum(ww)) + str(cval) + ' -- %.2f%%' % (100. * np.sum(ww)/np.prod(ww.shape)))
 
                 # Write FITS file and PSF mask.
