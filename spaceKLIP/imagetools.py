@@ -4036,7 +4036,7 @@ class ImageTools():
                                 bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
                                 tile-=bkg
 
-                                result = fit_psf(tile.copy(), imaging_psf, r=coresat, partial=True,max_separation=bin_max_separation, min_separation=bin_min_separation)
+                                result = fit_psf(tile.copy(), nantile.copy(), imaging_psf, r=coresat, partial=True,max_separation=25, min_separation=1.5, x_limits=(-3,3), y_limits=(-3,3))
                                 shifts1 = np.array([-result[0], -result[1]])
                                 fitted_flux1 = result[2]
                                 if ~np.all([s is None for s in result[3:5]]):
@@ -4051,9 +4051,6 @@ class ImageTools():
                                 shiftpad = int(np.ceil(max_shift))
                                 log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
-                                #Create star frame coordinates to keep track of position on the original frame. 1-index
-                                star_pos_raw_x = round(x_extract) - shifts1[0]
-                                star_pos_raw_y = round(y_extract) - shifts1[1]
                                 # The fit was performed on pixels centered at round(x_extract).
                                 # star_peak = center_pixel - shift
                                 starframex = round(x_extract) - shifts1[0]
@@ -4061,8 +4058,8 @@ class ImageTools():
                                 # Save the sub-pixel offset between the CATALOG guess and the REAL star peak
                                 # We need this to correctly anchor the master RA/Dec later
                                 # Catalog position is x_extract,y_extract. Star peak is star_pos_raw_x,star_pos_raw_y.
-                                catalog_offset_x = x_extract - star_pos_raw_x
-                                catalog_offset_y = y_extract - star_pos_raw_y
+                                catalog_offset_x = x_extract - starframex
+                                catalog_offset_y = y_extract - starframey
                                 all_cat_offsets.append([catalog_offset_x, catalog_offset_y])
 
                                 # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
@@ -4093,13 +4090,6 @@ class ImageTools():
 
                                 # Write FITS file and update header.
                                 tile_center = (fov_pixels - 1) / 2.0
-
-                                # plt.figure(figsize=(8,8))
-                                # plt.imshow(datatile,origin='lower',vmax=10)
-                                # plt.plot(tile_center,tile_center,'xr')
-                                # if (fitted_x2_pos is not None) and (fitted_x2_pos is not None):
-                                #     plt.plot(fitted_x2_pos, fitted_y2_pos, 'xb')
-                                # plt.show()
 
                                 tile_list.append(datatile)
                                 head_sci['CRPIX1'] -= (starframex - tile_center)
@@ -4143,18 +4133,6 @@ class ImageTools():
                 #Renconstruct an ad-hoc sci header for the final tile
                 tile_center = (fov_pixels - 1) / 2.0
                 star_array = np.array(all_star_sky_coords)
-                # all_coords_objects = SkyCoord(ra=star_array[:, 0], dec=star_array[:, 1], unit='deg')
-                # pairwise_separations = all_coords_objects[:, np.newaxis].separation(all_coords_objects)
-                # max_separation_found = np.max(pairwise_separations).to(u.arcsec)
-                # keep_mask = np.median((pairwise_separations <= 1 * u.arcsec), axis=1).astype(bool)
-                #
-                # skycheck = True
-                # if np.sum(~keep_mask) > 0:
-                #     log.warning(f"{np.sum(~keep_mask)} source have separation {max_separation_found} > 1 arcsec from the others! Droppig the outlayer. Plese check.")
-                #     sci_hdus_list = [hdul for i, hdul in enumerate(sci_hdus_list) if keep_mask[i]]
-                #     all_star_sky_coords = [coord for i, coord in enumerate(all_star_sky_coords) if keep_mask[i]]
-                #     star_array = np.array(all_star_sky_coords)
-                #     skycheck=False
 
                 sci_hdr = template_sci_header.copy()
                 target_ra = np.median(star_array[:, 0])
