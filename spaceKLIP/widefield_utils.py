@@ -2088,24 +2088,54 @@ class FITPSF():
         flux_max_bound = self.initial_flux * 1e4
         single_bounds = [self.x_limits, self.y_limits, (flux_min_bound, flux_max_bound)]
 
-        # run continuous optimizer (L-BFGS-B). Fall back gracefully if it fails.
-        try:
-            from scipy.optimize import minimize
-            res_single = minimize(single_objective, single_guess, bounds=single_bounds, method='L-BFGS-B',
-                                  options={'maxiter': 2000, 'ftol': 1e-9})
-            if res_single is not None and hasattr(res_single, 'x'):
-                b_dx = float(res_single.x[0])
-                b_dy = float(res_single.x[1])
-                b_flux = float(res_single.x[2])
-                raw_chi2_single = float(res_single.fun)
-            else:
-                # optimizer did not return a valid result: fallback to seed
-                b_dx, b_dy, b_flux = float(dx1_s), float(dy1_s), float(self.initial_flux)
-                raw_chi2_single = np.inf
-        except Exception as e:
-            log.warning("single-star minimization raised exception: %s -- falling back to seed.", str(e))
-            b_dx, b_dy, b_flux = float(dx1_s), float(dy1_s), float(self.initial_flux)
-            raw_chi2_single = np.inf
+        # suggested robust approach: local grid search over dx/dy, solve flux linearly with NNLS
+        # uses shifted_psf_cached and solve_fluxes_nnls already defined earlier in function
+
+        best_chi2 = np.inf
+        best_dx = float(dx1_s)
+        best_dy = float(dy1_s)
+        best_flux = float(self.initial_flux)
+
+        # grid spacing: use a small local search (coarse then fine)
+        coarse_step_local = max(0.5, self.coarse_step)
+        fine_step_local = max(0.05, self.fine_step)
+        coarse_grid_dx = np.arange(dx1_s - coarse_step_local, dx1_s + coarse_step_local + 1e-12, coarse_step_local)
+        coarse_grid_dy = np.arange(dy1_s - coarse_step_local, dy1_s + coarse_step_local + 1e-12, coarse_step_local)
+
+        for dx_c in coarse_grid_dx:
+            for dy_c in coarse_grid_dy:
+                p_full = shifted_psf_cached(dx_c, dy_c)
+                p = p_full[mask_inds].ravel()
+                if np.allclose(p, 0.0):
+                    continue
+                A = p[:, np.newaxis]  # shape (n_pix, 1)
+                sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=flux_min_bound)
+                if chi2_local < best_chi2:
+                    best_chi2 = chi2_local
+                    best_dx = float(dx_c)
+                    best_dy = float(dy_c)
+                    best_flux = float(sol[0])
+
+        # optionally refine around the best coarse location with a finer grid
+        dx_ref_vals = np.arange(best_dx - fine_step_local, best_dx + fine_step_local + 1e-12, fine_step_local)
+        dy_ref_vals = np.arange(best_dy - fine_step_local, best_dy + fine_step_local + 1e-12, fine_step_local)
+        for dx_f in dx_ref_vals:
+            for dy_f in dy_ref_vals:
+                p_full = shifted_psf_cached(dx_f, dy_f)
+                p = p_full[mask_inds].ravel()
+                if np.allclose(p, 0.0):
+                    continue
+                A = p[:, np.newaxis]
+                sol, chi2_local = solve_fluxes_nnls(A, data_vec, clip_min=flux_min_bound)
+                if chi2_local < best_chi2:
+                    best_chi2 = chi2_local
+                    best_dx = float(dx_f)
+                    best_dy = float(dy_f)
+                    best_flux = float(sol[0])
+
+        # assign the chosen best parameters
+        b_dx, b_dy, b_flux = best_dx, best_dy, best_flux
+        raw_chi2_single = float(best_chi2)
 
         # Assign the robust single-star baseline
         self.dx1 = float(b_dx)
