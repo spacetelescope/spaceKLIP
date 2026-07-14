@@ -1621,7 +1621,9 @@ class FITPSF():
                  eps=1e-12,
                  min_companion_flux_frac=0.1,
                  min_companion_abs_frac_of_initial=1e-3,
-                 min_companion_snr=4.0
+                 min_companion_snr=4.0,
+                 theta0=0.0,
+                 initial_contrast_guess = 0.1
                  ):
         self.dx1 = None
         self.dy1 = None
@@ -1650,6 +1652,8 @@ class FITPSF():
         self.clip_flux_min = clip_flux_min
         self.top_k = top_k
         self.eps = eps
+        self.theta0 = theta0
+        self.initial_contrast_guess = initial_contrast_guess
 
         # minimum *relative* companion flux fraction (primary is index 1).
         self.min_companion_flux_frac = min_companion_flux_frac
@@ -1861,12 +1865,21 @@ class FITPSF():
                     log.warning("Saturated-binary refinement found no valid candidate.")
                     return
                 else:
-                    self.dx1 = best['dx1']
-                    self.dy1 = best['dy1']
-                    self.dx2 = best['dx2']
-                    self.dy2 = best['dy2']
-                    self.flux1 = best['f1']
-                    self.flux2 = best['f2']
+                    # Enforce that Star 1 is ALWAYS the brighter "Primary" star
+                    if best['f2'] > best['f1']:
+                        b_dx1, b_dx2 = best['dx2'], best['dx1']
+                        b_dy1, b_dy2 = best['dy2'], best['dy1']
+                        b_flux1, b_flux2 = best['f2'], best['f1']
+                    else:
+                        b_dx1, b_dx2 = best['dx1'], best['dx2']
+                        b_dy1, b_dy2 = best['dy1'], best['dy2']
+                        b_flux1, b_flux2 = best['f1'], best['f2']
+                    self.dx1 = b_dx1
+                    self.dy1 = b_dy1
+                    self.dx2 = b_dx2
+                    self.dy2 = b_dy2
+                    self.flux1 = b_flux1
+                    self.flux2 = b_flux2
                     self.sep = best['sep']
                     # self.chi2_binary = float(best['chi2'])
                     self.chi2_binary = float(best['chi2'])/(self.sigma**2)
@@ -1928,10 +1941,9 @@ class FITPSF():
         prim_flux0 = self.initial_flux * 0.9
         r0 = np.clip(self.min_separation * 1.3 if self.min_separation > 0 else min(self.max_separation, 1.0),
                      max(self.min_separation, 0.0), self.max_separation)
-        theta0 = 0.0
-        initial_contrast_guess = 0.2
 
-        binary_guess = [prim_dx0, prim_dy0, prim_flux0, r0, theta0, initial_contrast_guess]
+
+        binary_guess = [prim_dx0, prim_dy0, prim_flux0, r0, self.theta0, self.initial_contrast_guess]
 
         # Use L-BFGS-B (no nonlinear constraints needed; r bounded enforces separation)
         res_binary = minimize(
