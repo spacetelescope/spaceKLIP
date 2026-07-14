@@ -4001,7 +4001,7 @@ class ImageTools():
                     tile_list = []
                     err_list = []
                     dq_list = []
-                    for source in group[group['fitsfile']==fitsfile][:10]:
+                    for source in group[group['fitsfile']==fitsfile]:
                         for k in range(data.shape[0]):
                             if k == 0:
                                 if nanmask is not None:
@@ -4035,16 +4035,6 @@ class ImageTools():
                                 dilated_mask = binary_dilation(nantile.astype(bool), structure=struct_element)
                                 bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
                                 tile-=bkg
-
-                                # result = fit_psf(tile.copy(), nantile.copy(), imaging_psf, r=coresat, partial=True,max_separation=25, min_separation=1.5, x_limits=(-3,3), y_limits=(-3,3))
-                                # shifts1 = np.array([-result[0], -result[1]])
-                                # fitted_flux1 = result[2]
-                                # if ~np.all([s is None for s in result[3:5]]):
-                                #     shifts2 = np.array([-result[3], -result[4]])
-                                # else:
-                                #     shifts2 = np.array([None,None])
-                                # fitted_flux2 = result[5]
-                                # bintest = result[6]
 
                                 fit_psf = FITPSF(max_separation=bin_max_separation,
                                                  min_separation=max(coresat, bin_min_separation),
