@@ -667,6 +667,7 @@ class AnalysisTools():
                 klip_args = {}
                 klip_args['mode'] = self.database.red[key]['MODE'][j]
                 klip_args['annuli'] = self.database.red[key]['ANNULI'][j]
+                klip_args['annuli_spacing'] = self.database.red[key]['ANNULI_S'][j]
                 klip_args['subsections'] = self.database.red[key]['SUBSECTS'][j]
                 klip_args['numbasis'] = [int(nb) for nb in self.database.red[key]['KLMODES'][j].split(',')]
                 klip_args['algo'] = 'klip' #Currently not logged, may need changing in future. 
