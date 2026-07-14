@@ -62,7 +62,7 @@ from spaceKLIP import mcmc_tools,database
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.plotting import load_plt_style
-from spaceKLIP.widefield_utils import DAO,write_ds9_regions_from_sep_objects,stars_extractor,fit_psf,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms
+from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms
 
 # pyklip imports
 import pyklip.fakes as fakes
@@ -4001,7 +4001,7 @@ class ImageTools():
                     tile_list = []
                     err_list = []
                     dq_list = []
-                    for source in group[group['fitsfile']==fitsfile]:
+                    for source in group[group['fitsfile']==fitsfile][:10]:
                         for k in range(data.shape[0]):
                             if k == 0:
                                 if nanmask is not None:
@@ -4036,15 +4036,32 @@ class ImageTools():
                                 bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
                                 tile-=bkg
 
-                                result = fit_psf(tile.copy(), nantile.copy(), imaging_psf, r=coresat, partial=True,max_separation=25, min_separation=1.5, x_limits=(-3,3), y_limits=(-3,3))
-                                shifts1 = np.array([-result[0], -result[1]])
-                                fitted_flux1 = result[2]
-                                if ~np.all([s is None for s in result[3:5]]):
-                                    shifts2 = np.array([-result[3], -result[4]])
+                                # result = fit_psf(tile.copy(), nantile.copy(), imaging_psf, r=coresat, partial=True,max_separation=25, min_separation=1.5, x_limits=(-3,3), y_limits=(-3,3))
+                                # shifts1 = np.array([-result[0], -result[1]])
+                                # fitted_flux1 = result[2]
+                                # if ~np.all([s is None for s in result[3:5]]):
+                                #     shifts2 = np.array([-result[3], -result[4]])
+                                # else:
+                                #     shifts2 = np.array([None,None])
+                                # fitted_flux2 = result[5]
+                                # bintest = result[6]
+
+                                fit_psf = FITPSF(max_separation=bin_max_separation,
+                                                 min_separation=max(coresat, bin_min_separation),
+                                                 x_limits=(-1,1), y_limits=(-1,1), min_contrast=0.01,
+                                                 max_contrast=1.0)
+                                err_map=np.sqrt(tile_with_nans)
+                                fit_psf.fitpsf(tile_with_nans.copy(), nantile.copy(), err_map, imaging_psf)
+                                bintest = fit_psf.bintest
+                                shifts1 = np.array([-fit_psf.dx1, -fit_psf.dy1])
+                                if bintest:
+                                    shifts2 = np.array([-fit_psf.dx2, -fit_psf.dy2])
+                                    fitted_flux2 = fit_psf.flux2
                                 else:
-                                    shifts2 = np.array([None,None])
-                                fitted_flux2 = result[5]
-                                bintest = result[6]
+                                    shifts2 = np.array([None, None])
+                                    fitted_flux2 = None
+                                fitted_flux1 = fit_psf.flux1
+
                                 log.info(f"--> Estimated shifts: {shifts1}")
                                 # Need to determine largest potential shift for padding purposes
                                 max_shift = np.max(np.abs(shifts1))
