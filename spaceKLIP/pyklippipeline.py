@@ -54,6 +54,11 @@ def run_obs(database,
         - annuli : list of int, optional
             Numbers of subtraction annuli that shall be looped over. The
             default is [1].
+        - annuli_spacing : str, optional
+            How to distribute the annuli radially. Currently three options. 
+                - 'constant' : equally spaced (Default), 
+                - 'log' : logarithmical expansion with r, and 
+                - 'linear' : linearly expansion with r
         - subsections : list of int, optional
             Numbers of subtraction subsections that shall be looped over. The
             default is [1].
@@ -90,6 +95,8 @@ def run_obs(database,
         kwargs['annuli'] = [1]
     if not isinstance(kwargs['annuli'], list):
         kwargs['annuli'] = [kwargs['annuli']]
+    if 'annuli_spacing' not in kwargs.keys():
+        kwargs['annuli_spacing'] = 'constant'
     if 'subsections' not in kwargs.keys():
         kwargs['subsections'] = [1]
     if not isinstance(kwargs['subsections'], list):
@@ -152,7 +159,7 @@ def run_obs(database,
             kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
             kwargs_temp['psf_library'] = dataset.psflib
             kwargs_temp['mode'] = mode
-            
+
             # Can run pyKLIP multiple times on the same dataset with different
             # annuli and subsections.
             for annu in kwargs['annuli']:
@@ -206,6 +213,7 @@ def run_obs(database,
                         pass
                     hdul[0].header['MODE'] = mode
                     hdul[0].header['ANNULI'] = annu
+                    hdul[0].header['ANNULI_S'] = (kwargs['annuli_spacing'], 'Radial annulus spacing: constant, log, or linear')
                     hdul[0].header['SUBSECTS'] = subs
                     hdul[0].header['BUNIT'] = database.obs[key]['BUNIT'][ww_sci[0]]
                     w = wcs.WCS(head_sci)
