@@ -1647,7 +1647,7 @@ class FITPSF:
         (BIC) and passed internal thresholds (e.g., contrast).
     """
 
-    def __init__(self, max_separation=25, min_separation=1, x_limits=(-1, 1), y_limits=(-3, 3),
+    def __init__(self, max_separation=25, min_separation=1, x_limits=(-3, 3), y_limits=(-3, 3),
                  min_contrast=0.01, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0):
         """
         Initialize the FITPSF fitter with constraints and solver options.
@@ -1781,8 +1781,12 @@ class FITPSF:
             return 1.0
 
     def debug_plots(self, clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
-                    dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny):
-        # Ensure we call your preferred style helper
+                    dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny,
+                    is_ellipse_binary=True):
+        import matplotlib.patches as patches
+        import matplotlib.pyplot as plt
+        from scipy.ndimage import distance_transform_edt
+
         load_plt_style(None)
 
         fig, ax = plt.subplots(figsize=(7, 7))
@@ -1790,27 +1794,42 @@ class FITPSF:
         ax.contour(nanmask, levels=[0.5], colors='red', linewidths=2, linestyles='dashed')
         ax.plot(x_b, y_b, '+g', markersize=15, markeredgewidth=3, label='Blob Centroid')
 
-        # Recompute the ellipse tracking boundaries that tracked the border perfectly on your screen
-        a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
-        b_disp = np.sqrt(2 * (mu20 + mu02 - common_term))
-        ellipse_patch = patches.Ellipse((x_b, y_b), width=2 * a_disp, height=2 * b_disp,
-                                        angle=np.degrees(theta), linewidth=2,
-                                        fill=False, edgecolor='white', linestyle='--',
-                                        label='Moment Ellipse')
-        ax.add_patch(ellipse_patch)
-
         x_c, y_c = nx // 2, ny // 2
+
+        # FIX: Dynamically switch the geometric overlay patch based on the tracking state flag
+        if is_ellipse_binary:
+            # Saturated Binary Mode: Recompute and draw the outer boundary tracking ellipse
+            a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
+            b_disp = np.sqrt(2 * (mu20 + mu02 - common_term))
+            patch = patches.Ellipse((x_b, y_b), width=2 * a_disp, height=2 * b_disp,
+                                    angle=np.degrees(theta), linewidth=2,
+                                    fill=False, edgecolor='white', linestyle='--',
+                                    label='Moment Ellipse')
+            title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled core variance"
+        else:
+            # Single Saturated Star Mode: Calculate the exact physical radius of the inscribing circle
+            distance_map = distance_transform_edt(nanmask)
+            circle_radius = float(np.max(distance_map))
+
+            # Map the center coordinates precisely onto your active single star seed location
+            seed_x_pixel = x_c + dx1_guess
+            seed_y_pixel = y_c + dy1_guess
+
+            patch = patches.Circle((seed_x_pixel, seed_y_pixel), radius=circle_radius, linewidth=2,
+                                   fill=False, edgecolor='white', linestyle='--',
+                                   label='Inscribing Circle')
+            title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nEllipse Collapsed -> Best Inscribing Circle"
+
+        ax.add_patch(patch)
+
+        # Plot the primary seed coordinate layer
         ax.plot(x_c + dx1_guess, y_c + dy1_guess, 'Xr', markersize=12,
                 label=f'Primary Seed: [{dx1_guess:.2f}, {dy1_guess:.2f}]')
 
-        # FIX: Check if a companion seed exists before plotting to avoid TypeError crashes
-        # when the ellipse is rejected and drops back onto the single-source track.
+        # Only plot the companion seed layer if it successfully cleared the validation gates
         if dx2_guess is not None and dy2_guess is not None:
             ax.plot(x_c + dx2_guess, y_c + dy2_guess, 'X', color='orange', markersize=12,
                     label=f'Companion Seed: [{dx2_guess:.2f}, {dy2_guess:.2f}]')
-            title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled core variance"
-        else:
-            title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nEllipse Rejected (Too Close) -> Circle Fallback"
 
         ax.set_xlim(x_c - 15, x_c + 15)
         ax.set_ylim(y_c - 15, y_c + 15)
@@ -1870,7 +1889,7 @@ class FITPSF:
             else:
                 eccentricity = 0.0
 
-            if eccentricity >= 0.6 and lambda_max > lambda_min:
+            if eccentricity >= 0.3 and lambda_max > lambda_min:
                 c_cores = np.sqrt(lambda_max - lambda_min)
 
                 node_A_x = float((x_b - nx // 2) + c_cores * np.cos(theta))
@@ -1879,7 +1898,7 @@ class FITPSF:
                 node_B_y = float((y_b - ny // 2) - c_cores * np.sin(theta))
 
                 guess_sep = np.sqrt((node_A_x - node_B_x) ** 2 + (node_A_y - node_B_y) ** 2)
-                min_allowed_sep = self.min_separation #max(self.min_separation, 4.0 if num_sat_pixels > 40 else 1.0)
+                min_allowed_sep = max(self.min_separation, 2.0 if num_sat_pixels > 9 else 1.0)
 
                 if guess_sep >= min_allowed_sep:
                     is_ellipse_binary = True
@@ -1934,7 +1953,8 @@ class FITPSF:
         # Unified live plot trigger tracks the final resolved coordinate maps
         if num_sat_pixels >= 9 and self.debug:
             self.debug_plots(clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
-                             dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny)
+                             dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny,
+                             is_ellipse_binary=is_ellipse_binary)  # <--- Injected here
 
         # -----------------------------------------------------------------
         # HYPOTHESIS 1: ONE SOURCE MODEL (Optimize only dx1, dy1)
@@ -1960,8 +1980,8 @@ class FITPSF:
         # -----------------------------------------------------------------
         # COMPANION CENTROID HEURISTIC (Conditional Vectorized Search)
         # -----------------------------------------------------------------
-        if not is_ellipse_binary:
-            # Mild/No Saturation: Run standard residual subtraction search
+        if dx2_guess is None or dy2_guess is None:
+            # Mild/No Saturation: Run standard residual subtraction search to catch distant companions
             s1_basis_final = ut.imshift(imaging_psf, [dx1_fit_1sky, dy1_fit_1sky], method='spline', nan_reflected=False,
                                         pad_amount=0)
             residuals_1 = (clean_data - (f1_fit_1sky * s1_basis_final)) * weights
@@ -1971,7 +1991,11 @@ class FITPSF:
             dist_from_star1 = np.sqrt((x_indices - star1_x_pos) ** 2 + (y_indices - star1_y_pos) ** 2)
 
             search_residuals = residuals_1.copy()
-            search_residuals[dist_from_star1 < max(self.min_separation, 5.0)] = -1e12
+
+            # Dynamically drop exclusion shield to avoid zeroing out close companions
+            # dynamic_shield = max(self.min_separation, 1.5 if num_sat_pixels > 40 else 1.0)
+            dynamic_shield = max(self.min_separation, 2 if num_sat_pixels > 9 else 1.0)
+            search_residuals[dist_from_star1 < dynamic_shield] = -1e12
 
             y_peak, x_peak = np.unravel_index(np.argmax(search_residuals), (ny, nx))
 
@@ -1990,7 +2014,29 @@ class FITPSF:
             dx1_stage_a = dx1_fit_1sky
             dy1_stage_a = dy1_fit_1sky
         else:
-            # Heavy Saturation: Anchor Stage A to the unblended, moment-predicted core center
+            # Heavy Saturation: Ensure our core separation vector does not drop below
+            # self.min_separation to prevent the 1e18 initial step penalty barrier
+            dx_node_sep = abs(node_A_x - node_B_x)
+            dy_node_sep = abs(node_A_y - node_B_y)
+
+            if np.sqrt(dx_node_sep ** 2 + dy_node_sep ** 2) < self.min_separation:
+                # Pad the nodes slightly along the theta axis to clear the separation barrier safely
+                pad_c = max(1.0, self.min_separation * 0.6)
+                node_A_x = float((x_b - nx // 2) + pad_c * np.cos(theta))
+                node_A_y = float((y_b - ny // 2) + pad_c * np.sin(theta))
+                node_B_x = float((x_b - nx // 2) - pad_c * np.cos(theta))
+                node_B_y = float((y_b - ny // 2) - pad_c * np.sin(theta))
+
+            dist_A = np.sqrt(node_A_x ** 2 + node_A_y ** 2)
+            dist_B = np.sqrt(node_B_x ** 2 + node_B_y ** 2)
+
+            if dist_A > dist_B:
+                dx1_guess, dy1_guess = node_B_x, node_B_y
+                dx2_guess, dy2_guess = node_A_x, node_A_y
+            else:
+                dx1_guess, dy1_guess = node_A_x, node_A_y
+                dx2_guess, dy2_guess = node_B_x, node_B_y
+
             dx1_stage_a = dx1_guess
             dy1_stage_a = dy1_guess
 
@@ -2008,14 +2054,13 @@ class FITPSF:
             contrast, dx2, dy2 = comp_params
             sep = np.sqrt((dx1_stage_a - dx2) ** 2 + (dy1_stage_a - dy2) ** 2)
 
-            current_min_sep = 1.5 if num_sat_pixels > 40 else self.min_separation
+            current_min_sep = 0.5 if num_sat_pixels > 40 else self.min_separation
             if sep < current_min_sep or sep > self.max_separation:
                 return 1e18
 
             full_coords = [dx1_stage_a, dy1_stage_a, contrast, dx2, dy2]
             f1_opt = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, full_coords,
                                                      mode="binary")
-
             s1 = f1_opt * ut.imshift(imaging_psf, [dx1_stage_a, dy1_stage_a], method='spline', nan_reflected=False,
                                      pad_amount=0)
             s2 = (f1_opt * contrast) * ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False,
@@ -2029,24 +2074,20 @@ class FITPSF:
         # HYPOTHESIS 2: STAGE B - JOINT RELAXATION (5 PARAMETERS)
         # -----------------------------------------------------------------
         contrast_seed, dx2_seed, dy2_seed = res_comp.x
-
-        # FIX: Seed using the refined single-star optimized positions (dx1_fit_1sky).
-        # This provides a much closer sub-pixel coordinate alignment plain than
-        # the raw moment seeds, preventing the flux parameter from dropping short.
         guess_2 = [float(dx1_fit_1sky), float(dy1_fit_1sky), float(contrast_seed), float(dx2_seed), float(dy2_seed)]
 
         bounds_2 = [
-            (self.x_limits[0], self.x_limits[1]), (self.y_limits[0], self.y_limits[1]),
-            (0.0, self.max_contrast),
-            (-self.max_separation * 1.5, self.max_separation * 1.5),
-            (-self.max_separation * 1.5, self.max_separation * 1.5)
+            (float(self.x_limits[0]), float(self.x_limits[1])), (float(self.y_limits[0]), float(self.y_limits[1])),
+            (0.0, float(self.max_contrast)),
+            (-float(self.max_separation) * 1.5, float(self.max_separation) * 1.5),
+            (-float(self.max_separation) * 1.5, float(self.max_separation) * 1.5)
         ]
 
         def chisq_2(params_5):
             dx1, dy1, contrast, dx2, dy2 = params_5
             sep = np.sqrt((dx1 - dx2) ** 2 + (dy1 - dy2) ** 2)
 
-            current_min_sep = 1.5 if num_sat_pixels > 40 else self.min_separation
+            current_min_sep = 0.5 if num_sat_pixels > 40 else self.min_separation
             if sep < current_min_sep or sep > self.max_separation:
                 return 1e18
 
@@ -2067,12 +2108,19 @@ class FITPSF:
         delta_bic = bic_1 - bic_2
         dx1_final, dy1_fit, contrast_fit, dx2_fit, dy2_fit = res_2.x
 
-        # 1. Extraction: Unweighted final single star flux pass
+        # Extraction pass leveraging your unified unweighted flux toggle
         f1_final_single = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, res_1.x,
                                                           mode="single", weighted=False)
 
-        # 2. Extraction: Unweighted final binary star flux pass
-        f1_final_bin = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, res_2.x,
+        # Localized Spatial Sub-Matrix Masking for Ultra-Close Binary Photometry Stability
+        x_sys_center = nx // 2 + (dx1_final + dx2_fit) / 2.0
+        y_sys_center = ny // 2 + (dy1_fit + dy2_fit) / 2.0
+        dist_from_system = np.sqrt((x_indices - x_sys_center) ** 2 + (y_indices - y_sys_center) ** 2)
+
+        extraction_weights = weights.copy()
+        extraction_weights[dist_from_system > 6.0] = 0.0
+
+        f1_final_bin = self._solve_primary_flux_linear(clean_data, err_map, extraction_weights, imaging_psf, res_2.x,
                                                        mode="binary", weighted=False)
 
         if delta_bic >= 10.0 and contrast_fit >= self.min_contrast:
@@ -2089,12 +2137,7 @@ class FITPSF:
             else:
                 self.flux1, self.dx1, self.dy1 = f1, dx1, dy1
                 self.flux2, self.dx2, self.dy2 = f2, dx2, dy2
-            log.info(f"Binary model accepted: delta BIC = {delta_bic:.2f}, contrast = {contrast_fit:.3f}, "
-                     f"flux1 = {self.flux1:.2f}, flux2 = {self.flux2:.2f}, "
-                     f"dx1,dy1 = ({self.dx1:.3f},{self.dy1:.3f}), dx2,dy2 = ({self.dx2:.3f},{self.dy2:.3f})")
         else:
             self.bintest = False
             self.flux1, self.dx1, self.dy1 = f1_final_single, dx1_fit_1sky, dy1_fit_1sky
             self.flux2, self.dx2, self.dy2 = 0.0, None, None
-            log.info(f"Single-source model accepted: delta BIC = {delta_bic:.2f}, flux1 = {self.flux1:.2f}, "
-                     f"dx1,dy1 = ({self.dx1:.3f},{self.dy1:.3f})")
