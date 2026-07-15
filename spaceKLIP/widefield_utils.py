@@ -20,6 +20,7 @@ import astropy.io.fits as pyfits
 import numpy as np
 from spaceKLIP import utils as ut
 from scipy.optimize import minimize
+from spaceKLIP.plotting import load_plt_style
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -1776,6 +1777,48 @@ class FITPSF:
         except Exception:
             return 1.0
 
+    def debug_plots(self, clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
+                    dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny):
+        import matplotlib.patches as patches
+        import matplotlib.pyplot as plt
+        # Ensure we call your preferred style helper
+        load_plt_style(None)
+
+        fig, ax = plt.subplots(figsize=(7, 7))
+        im = ax.imshow(clean_data, origin='lower', cmap='viridis')
+        ax.contour(nanmask, levels=[0.5], colors='red', linewidths=2, linestyles='dashed')
+        ax.plot(x_b, y_b, '+g', markersize=15, markeredgewidth=3, label='Blob Centroid')
+
+        # Recompute the ellipse tracking boundaries that tracked the border perfectly on your screen
+        a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
+        b_disp = np.sqrt(2 * (mu20 + mu02 - common_term))
+        ellipse_patch = patches.Ellipse((x_b, y_b), width=2 * a_disp, height=2 * b_disp,
+                                        angle=np.degrees(theta), linewidth=2,
+                                        fill=False, edgecolor='white', linestyle='--',
+                                        label='Moment Ellipse')
+        ax.add_patch(ellipse_patch)
+
+        x_c, y_c = nx // 2, ny // 2
+        ax.plot(x_c + dx1_guess, y_c + dy1_guess, 'Xr', markersize=12,
+                label=f'Primary Seed: [{dx1_guess:.2f}, {dy1_guess:.2f}]')
+
+        # FIX: Check if a companion seed exists before plotting to avoid TypeError crashes
+        # when the ellipse is rejected and drops back onto the single-source track.
+        if dx2_guess is not None and dy2_guess is not None:
+            ax.plot(x_c + dx2_guess, y_c + dy2_guess, 'X', color='orange', markersize=12,
+                    label=f'Companion Seed: [{dx2_guess:.2f}, {dy2_guess:.2f}]')
+            title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled core variance"
+        else:
+            title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nEllipse Rejected (Too Close) -> Circle Fallback"
+
+        ax.set_xlim(x_c - 15, x_c + 15)
+        ax.set_ylim(y_c - 15, y_c + 15)
+        ax.set_title(title_text)
+        ax.legend(loc='upper right')
+        plt.colorbar(im, ax=ax, label='Counts')
+        plt.tight_layout()
+        plt.show()
+
     def fitpsf(self, tile_with_nans, nanmask, err_map, imaging_psf):
         """
         Fit the tile for a primary source and optionally a companion.
@@ -1797,11 +1840,15 @@ class FITPSF:
         y_indices, x_indices = np.mgrid[0:ny, 0:nx]
 
         # -----------------------------------------------------------------
-        # VARIANCE-DECOUPLED ENGINE FOR DEEP HEAVY SATURATION
+        # SELF-VALIDATING MOMENT ENGINE FOR DEEP HEAVY SATURATION
         # -----------------------------------------------------------------
         num_sat_pixels = np.sum(nanmask)
+        ny, nx = tile_with_nans.shape
+        y_indices, x_indices = np.mgrid[0:ny, 0:nx]
 
-        if num_sat_pixels > 40:
+        is_ellipse_binary = False
+
+        if num_sat_pixels >= 9:
             m00 = np.sum(nanmask)
             m10 = np.sum(x_indices * nanmask)
             m01 = np.sum(y_indices * nanmask)
@@ -1813,70 +1860,51 @@ class FITPSF:
             mu02 = np.sum(((y_indices - y_b) ** 2) * nanmask) / m00
             mu11 = np.sum(((x_indices - x_b) * (y_indices - y_b)) * nanmask) / m00
 
-            # Compute the clean principal orientation axis angle
             theta = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
 
-            # Extract the raw eigenvalues (maximum and minimum variance)
             common_term = np.sqrt((mu20 - mu02) ** 2 + 4 * (mu11 ** 2))
             lambda_max = 0.5 * (mu20 + mu02 + common_term)
             lambda_min = 0.5 * (mu20 + mu02 - common_term)
 
-            # FIX: Calculate the core separation vector directly from the variance difference.
-            # This extracts the point-source positions, ignoring the circular wing blowout.
-            if lambda_max > lambda_min:
+            if lambda_max > 0:
+                eccentricity = np.sqrt(1.0 - (lambda_min / lambda_max))
+            else:
+                eccentricity = 0.0
+
+            if eccentricity >= 0.45 and lambda_max > lambda_min:
                 c_cores = np.sqrt(lambda_max - lambda_min)
+
+                node_A_x = float((x_b - nx // 2) + c_cores * np.cos(theta))
+                node_A_y = float((y_b - ny // 2) + c_cores * np.sin(theta))
+                node_B_x = float((x_b - nx // 2) - c_cores * np.cos(theta))
+                node_B_y = float((y_b - ny // 2) - c_cores * np.sin(theta))
+
+                guess_sep = np.sqrt((node_A_x - node_B_x) ** 2 + (node_A_y - node_B_y) ** 2)
+                min_allowed_sep = max(self.min_separation, 4.0 if num_sat_pixels > 40 else 1.0)
+
+                if guess_sep >= min_allowed_sep:
+                    is_ellipse_binary = True
+                    dist_A = np.sqrt(node_A_x ** 2 + node_A_y ** 2)
+                    dist_B = np.sqrt(node_B_x ** 2 + node_B_y ** 2)
+
+                    if dist_A > dist_B:
+                        dx1_guess, dy1_guess = node_B_x, node_B_y
+                        dx2_guess, dy2_guess = node_A_x, node_A_y
+                    else:
+                        dx1_guess, dy1_guess = node_A_x, node_A_y
+                        dx2_guess, dy2_guess = node_B_x, node_B_y
+
+                    log.info(
+                        f"Saturated binary ellipse confirmed (eccentricity={eccentricity:.3f}, sep={guess_sep:.2f})!")
+                else:
+                    log.info(
+                        f"Ellipse rejected: seeds too close ({guess_sep:.2f} < {min_allowed_sep}). Falling back to circular single star track.")
             else:
-                c_cores = 0.5
+                log.info(
+                    f"Saturated shape is circular (eccentricity={eccentricity:.3f}). Routing to single-source track.")
 
-            # Project the initial guesses using the corrected core separation vector
-            node_A_x = float((x_b - nx // 2) + c_cores * np.cos(theta))
-            node_A_y = float((y_b - ny // 2) + c_cores * np.sin(theta))
-            node_B_x = float((x_b - nx // 2) - c_cores * np.cos(theta))
-            node_B_y = float((y_b - ny // 2) - c_cores * np.sin(theta))
-
-            dist_A = np.sqrt(node_A_x ** 2 + node_A_y ** 2)
-            dist_B = np.sqrt(node_B_x ** 2 + node_B_y ** 2)
-
-            if dist_A > dist_B:
-                dx1_guess, dy1_guess = node_B_x, node_B_y
-                dx2_guess, dy2_guess = node_A_x, node_A_y
-            else:
-                dx1_guess, dy1_guess = node_A_x, node_A_y
-                dx2_guess, dy2_guess = node_B_x, node_B_y
-
-            log.info(f"Elongated saturation blob detected! Primary seed: [{dx1_guess:.2f}, {dy1_guess:.2f}], Companion: [{dx2_guess:.2f}, {dy2_guess:.2f}]")
-            if self.debug:
-                # -----------------------------------------------------------------
-                # LIVE DIAGNOSTIC DISPLAY (Keeps your preferred ellipse tracking)
-                # -----------------------------------------------------------------
-                import matplotlib.patches as patches
-                fig, ax = plt.subplots(figsize=(7, 7))
-                im = ax.imshow(clean_data, origin='lower', cmap='viridis')
-                ax.contour(nanmask, levels=[0.5], colors='red', linewidths=2, linestyles='dashed')
-                ax.plot(x_b, y_b, '+g', markersize=15, markeredgewidth=3, label='Blob Centroid')
-
-                # Recompute the ellipse tracking boundaries for display purposes
-                a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
-                b_disp = np.sqrt(2 * (mu20 + mu02 - common_term))
-                ellipse_patch = patches.Ellipse((x_b, y_b), width=2 * a_disp, height=2 * b_disp,
-                                                angle=np.degrees(theta), linewidth=2,
-                                                fill=False, edgecolor='white', linestyle='--', label='Moment Ellipse')
-                ax.add_patch(ellipse_patch)
-
-                x_c, y_c = nx // 2, ny // 2
-                ax.plot(x_c + dx1_guess, y_c + dy1_guess, 'Xr', markersize=12,
-                        label=f'Primary Seed: [{dx1_guess:.2f}, {dy1_guess:.2f}]')
-                ax.plot(x_c + dx2_guess, y_c + dy2_guess, 'X', color='orange', markersize=12,
-                        label=f'Companion Seed: [{dx2_guess:.2f}, {dy2_guess:.2f}]')
-
-                ax.set_xlim(x_c - 15, x_c + 15)
-                ax.set_ylim(y_c - 15, y_c + 15)
-                ax.set_title("Live Fitter Diagnostics Window\nSeeds now tracking decoupled core variance")
-                ax.legend(loc='upper right')
-                plt.colorbar(im, ax=ax, label='Counts')
-                plt.show()
-        else:
-            # Unsaturated Track: Classic local center-of-mass barycenter mapping
+        # UNIFIED FALLBACK CONTROLLER
+        if not is_ellipse_binary:
             central_zone = np.sqrt((x_indices - nx // 2) ** 2 + (y_indices - ny // 2) ** 2) <= 3.0
             core_residuals = np.maximum(clean_data * weights * central_zone, 0.0)
             total_core_flux = np.sum(core_residuals)
@@ -1884,12 +1912,22 @@ class FITPSF:
             if total_core_flux > 0:
                 dx1_guess = float((np.sum(x_indices * core_residuals) / total_core_flux) - nx // 2)
                 dy1_guess = float((np.sum(y_indices * core_residuals) / total_core_flux) - ny // 2)
-                dx1_guess = np.clip(dx1_guess, self.x_limits[0], self.x_limits[1])
-                dy1_guess = np.clip(dy1_guess, self.y_limits[0], self.y_limits[1])
+                # FIX: Unpack tuples correctly to keep guesses as standard flat float values
+                dx1_guess = np.clip(dx1_guess, *self.x_limits)
+                dy1_guess = np.clip(dy1_guess, *self.y_limits)
             else:
-                dx1_guess, dy1_guess = -0.005, 0.005
+                if num_sat_pixels >= 9:
+                    dx1_guess = float(x_b - nx // 2)
+                    dy1_guess = float(y_b - ny // 2)
+                else:
+                    dx1_guess, dy1_guess = -0.005, 0.005
 
             dx2_guess, dy2_guess = None, None
+
+        # FIX: Unified live plot trigger executes here after BOTH pathways resolve their final coordinate maps
+        if num_sat_pixels >= 9 and self.debug:
+            self.debug_plots(clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
+                             dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny)
 
         # -----------------------------------------------------------------
         # HYPOTHESIS 1: ONE SOURCE MODEL (Optimize only dx1, dy1)
@@ -1915,7 +1953,7 @@ class FITPSF:
         # -----------------------------------------------------------------
         # COMPANION CENTROID HEURISTIC (Conditional Vectorized Search)
         # -----------------------------------------------------------------
-        if dx2_guess is None or dy2_guess is None:
+        if not is_ellipse_binary:
             # Mild/No Saturation: Run standard residual subtraction search
             s1_basis_final = ut.imshift(imaging_psf, [dx1_fit_1sky, dy1_fit_1sky], method='spline', nan_reflected=False,
                                         pad_amount=0)
