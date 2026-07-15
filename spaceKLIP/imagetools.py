@@ -3365,7 +3365,7 @@ class ImageTools():
 
                     # Replace NaNs in ERR data.
                     ww_erro = np.isnan(erro)
-                    erro[ww_erro] = cval
+                    erro[ww_erro] = 1e6
 
                     log.info('  --> Nan replacement: replaced %.0f nan pixel(s) with value ' % (np.sum(ww)) + str(cval) + ' -- %.2f%%' % (100. * np.sum(ww)/np.prod(ww.shape)))
 
