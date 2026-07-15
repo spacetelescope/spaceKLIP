@@ -184,11 +184,10 @@ def run_obs(database,
                     hdul = fits.open(datapath)
                     
                     # Adding comments to a handful of the FITS header keywords populated by pyKLIP.
-                    hdul[0].header.comments['PSFCENTX'] = '[pixel] PSF center along the x axis'
-                    hdul[0].header.comments['PSFCENTY'] = '[pixel] PSF center along the x axis'
+                    hdul[0].header.comments['PSFCENTX'] = 'Star center along the X axis, 0-indexed'
+                    hdul[0].header.comments['PSFCENTY'] = 'Star center along the Y axis, 0-indexed'
                     hdul[0].header.comments['STARCENX'] = 'Star center along the X axis, 1-indexed'
                     hdul[0].header.comments['STARCENY'] = 'Star center along the Y axis, 1-indexed'
-
                     
                     hdul[0].header['TELESCOP'] = (database.obs[key]['TELESCOP'][ww_sci[0]], head_primary.comments["TELESCOP"])
                     hdul[0].header['TARGPROP'] = (database.obs[key]['TARGPROP'][ww_sci[0]], head_primary.comments["TARGPROP"])
