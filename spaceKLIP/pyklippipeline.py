@@ -182,6 +182,14 @@ def run_obs(database,
                     head_sci = fits.getheader(database.obs[key]['FITSFILE'][ww_sci[0]], 'SCI')
                     head_sci['NAXIS'] = 2
                     hdul = fits.open(datapath)
+                    
+                    # Adding comments to a handful of the FITS header keywords populated by pyKLIP.
+                    hdul[0].header.comments['PSFCENTX'] = '[pixel] PSF center along the x axis'
+                    hdul[0].header.comments['PSFCENTY'] = '[pixel] PSF center along the x axis'
+                    hdul[0].header.comments['STARCENX'] = 'Star center along the X axis, 1-indexed'
+                    hdul[0].header.comments['STARCENY'] = 'Star center along the Y axis, 1-indexed'
+
+                    
                     hdul[0].header['TELESCOP'] = (database.obs[key]['TELESCOP'][ww_sci[0]], head_primary.comments["TELESCOP"])
                     hdul[0].header['TARGPROP'] = (database.obs[key]['TARGPROP'][ww_sci[0]], head_primary.comments["TARGPROP"])
                     hdul[0].header['TARG_RA'] = (database.obs[key]['TARG_RA'][ww_sci[0]], head_primary.comments["TARG_RA"])
@@ -189,8 +197,8 @@ def run_obs(database,
                     hdul[0].header['INSTRUME'] = (database.obs[key]['INSTRUME'][ww_sci[0]], head_primary.comments["INSTRUME"])
                     hdul[0].header['DETECTOR'] = (database.obs[key]['DETECTOR'][ww_sci[0]], head_primary.comments["DETECTOR"])
                     hdul[0].header['FILTER'] = (database.obs[key]['FILTER'][ww_sci[0]], head_primary.comments["FILTER"])
-                    hdul[0].header['CWAVEL'] = database.obs[key]['CWAVEL'][ww_sci[0]]
-                    hdul[0].header['DWAVEL'] = database.obs[key]['DWAVEL'][ww_sci[0]]
+                    hdul[0].header['CWAVEL'] = (database.obs[key]['CWAVEL'][ww_sci[0]], "[micron] Filter pivot wavelength")
+                    hdul[0].header['DWAVEL'] = (database.obs[key]['DWAVEL'][ww_sci[0]], "[micron] Filter effective width")
                     hdul[0].header['PUPIL'] = (database.obs[key]['PUPIL'][ww_sci[0]], head_primary.comments["PUPIL"])
                     hdul[0].header['CORONMSK'] = (database.obs[key]['CORONMSK'][ww_sci[0]], head_primary.comments["CORONMSK"])
                     hdul[0].header['EXP_TYPE'] = (database.obs[key]['EXP_TYPE'][ww_sci[0]], head_primary.comments["EXP_TYPE"])
@@ -200,7 +208,7 @@ def run_obs(database,
                     hdul[0].header['SUBARRAY'] = (database.obs[key]['SUBARRAY'][ww_sci[0]], head_primary.comments["SUBARRAY"])
                     hdul[0].header['APERNAME'] = (database.obs[key]['APERNAME'][ww_sci[0]], head_primary.comments["APERNAME"])
                     hdul[0].header['PPS_APER'] = (database.obs[key]['PPS_APER'][ww_sci[0]], head_primary.comments["PPS_APER"])
-                    hdul[0].header['PIXSCALE'] = database.obs[key]['PIXSCALE'][ww_sci[0]]
+                    hdul[0].header['PIXSCALE'] = (database.obs[key]['PIXSCALE'][ww_sci[0]], "[arcsec/pixel] Pixel scale")
                     try:
                         hdul[0].header['PIXAR_SR'] = (database.obs[key]['PIXAR_SR'][ww_sci[0]], head_sci.comments["PIXAR_SR"])
                     except:
@@ -208,7 +216,6 @@ def run_obs(database,
 
                     hdul[0].header['MODE'] = (mode, "PSF subtraction mode: ADI, RDI, or ADI+RDI")
                     hdul[0].header['ANNULI'] = (annu, "Number of subtraction annuli")
-                    hdul[0].header['ANNULI_S'] = (kwargs['annuli_spacing'], "Radial distribution of annuli: constant, log, or linear")
                     hdul[0].header['SUBSECTS'] = (subs, "Number of subtraction subsections within each annulus")
                     hdul[0].header['BUNIT'] = (database.obs[key]['BUNIT'][ww_sci[0]], head_sci.comments["BUNIT"])
                     w = wcs.WCS(head_sci)
@@ -257,19 +264,19 @@ def run_obs(database,
                             else:
                                 hdul[0].data = np.nanmedian(dataset.allints[:, :, ww, :, :], axis=2)
                             hdul[0].header['NINTS'] = (database.obs[key]['NINTS'][j], head_primary.comments['NINTS'])
-                            hdul[0].header['WCSAXES'] = (head_sci['WCSAXES'], head_primary.comments['WCSAXES'])
-                            hdul[0].header['CRPIX1'] = (head_sci['STARCENX'], head_primary.comments['CRPIX1'])
-                            hdul[0].header['CRPIX2'] = (head_sci['STARCENY'], head_primary.comments['CRPIX2'])
-                            hdul[0].header['CRVAL1'] = (head_sci['CRVAL1'], head_primary.comments['CRVAL1'])
-                            hdul[0].header['CRVAL2'] = (head_sci['CRVAL2'], head_primary.comments['CRVAL2'])
-                            hdul[0].header['CTYPE1'] = (head_sci['CTYPE1'], head_primary.comments['CTYPE1'])
-                            hdul[0].header['CTYPE2'] = (head_sci['CTYPE2'], head_primary.comments['CTYPE2'])
-                            hdul[0].header['CUNIT1'] = (head_sci['CUNIT1'], head_primary.comments['CUNIT1'])
-                            hdul[0].header['CUNIT2'] = (head_sci['CUNIT2'], head_primary.comments['CUNIT2'])
-                            hdul[0].header['CD1_1'] = (head_sci['CD1_1'], head_primary.comments['CD1_1'])
-                            hdul[0].header['CD1_2'] = (head_sci['CD1_2'], head_primary.comments['CD1_2'])
-                            hdul[0].header['CD2_1'] = (head_sci['CD2_1'], head_primary.comments['CD2_1'])
-                            hdul[0].header['CD2_2'] = (head_sci['CD2_2'], head_primary.comments['CD2_2'])
+                            hdul[0].header['WCSAXES'] = (head_sci['WCSAXES'], head_sci.comments['WCSAXES'])
+                            hdul[0].header['CRPIX1'] = (head_sci['STARCENX'], head_sci.comments['CRPIX1'])
+                            hdul[0].header['CRPIX2'] = (head_sci['STARCENY'], head_sci.comments['CRPIX2'])
+                            hdul[0].header['CRVAL1'] = (head_sci['CRVAL1'], head_sci.comments['CRVAL1'])
+                            hdul[0].header['CRVAL2'] = (head_sci['CRVAL2'], head_sci.comments['CRVAL2'])
+                            hdul[0].header['CTYPE1'] = (head_sci['CTYPE1'], head_sci.comments['CTYPE1'])
+                            hdul[0].header['CTYPE2'] = (head_sci['CTYPE2'], head_sci.comments['CTYPE2'])
+                            hdul[0].header['CUNIT1'] = (head_sci['CUNIT1'], head_sci.comments['CUNIT1'])
+                            hdul[0].header['CUNIT2'] = (head_sci['CUNIT2'], head_sci.comments['CUNIT2'])
+                            hdul[0].header['CD1_1'] = (head_sci['CD1_1'], head_sci.comments['CD1_1'])
+                            hdul[0].header['CD1_2'] = (head_sci['CD1_2'], head_sci.comments['CD1_2'])
+                            hdul[0].header['CD2_1'] = (head_sci['CD2_1'], head_sci.comments['CD2_1'])
+                            hdul[0].header['CD2_2'] = (head_sci['CD2_2'], head_sci.comments['CD2_2'])
                             hdul.writeto(datapath.replace('-KLmodes-all.fits', '-KLmodes-all_roll%.0f.fits' % n_roll), output_verify='fix', overwrite=True)
                             hdul.close()
                             n_roll += 1
