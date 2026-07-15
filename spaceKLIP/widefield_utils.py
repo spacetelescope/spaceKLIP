@@ -21,6 +21,9 @@ import numpy as np
 from spaceKLIP import utils as ut
 from scipy.optimize import minimize
 from spaceKLIP.plotting import load_plt_style
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+from scipy.ndimage import distance_transform_edt
 
 # Set up log.
 log = logging.getLogger(__name__)
@@ -1779,8 +1782,6 @@ class FITPSF:
 
     def debug_plots(self, clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
                     dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny):
-        import matplotlib.patches as patches
-        import matplotlib.pyplot as plt
         # Ensure we call your preferred style helper
         load_plt_style(None)
 
@@ -1840,8 +1841,6 @@ class FITPSF:
         # -----------------------------------------------------------------
         # SELF-VALIDATING MOMENT ENGINE FOR DEEP HEAVY SATURATION
         # -----------------------------------------------------------------
-        from scipy.ndimage import distance_transform_edt
-
         num_sat_pixels = np.sum(nanmask)
         ny, nx = tile_with_nans.shape
         y_indices, x_indices = np.mgrid[0:ny, 0:nx]
@@ -1871,7 +1870,7 @@ class FITPSF:
             else:
                 eccentricity = 0.0
 
-            if eccentricity >= 0.45 and lambda_max > lambda_min:
+            if eccentricity >= 0.6 and lambda_max > lambda_min:
                 c_cores = np.sqrt(lambda_max - lambda_min)
 
                 node_A_x = float((x_b - nx // 2) + c_cores * np.cos(theta))
@@ -1880,7 +1879,7 @@ class FITPSF:
                 node_B_y = float((y_b - ny // 2) - c_cores * np.sin(theta))
 
                 guess_sep = np.sqrt((node_A_x - node_B_x) ** 2 + (node_A_y - node_B_y) ** 2)
-                min_allowed_sep = max(self.min_separation, 4.0 if num_sat_pixels > 40 else 1.0)
+                min_allowed_sep = self.min_separation #max(self.min_separation, 4.0 if num_sat_pixels > 40 else 1.0)
 
                 if guess_sep >= min_allowed_sep:
                     is_ellipse_binary = True
@@ -1894,14 +1893,11 @@ class FITPSF:
                         dx1_guess, dy1_guess = node_A_x, node_A_y
                         dx2_guess, dy2_guess = node_B_x, node_B_y
 
-                    log.info(
-                        f"Saturated binary ellipse confirmed (eccentricity={eccentricity:.3f}, sep={guess_sep:.2f})!")
+                    log.debug( f"Saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep={guess_sep:.2f}")
                 else:
-                    log.info(
-                        f"Ellipse rejected: seeds too close ({guess_sep:.2f} < {min_allowed_sep}). Fitting inscribing circle.")
+                    log.debug(f"Ellipse rejected, seeds too close: eccentricity={eccentricity:.3f}, sep={guess_sep:.2f} < {min_allowed_sep}. Considering circular blob.")
             else:
-                log.info(
-                    f"Saturated shape is circular (eccentricity={eccentricity:.3f}). Routing to single-source track.")
+                log.debug(f"Saturated circular blob: eccentricity={eccentricity:.3f} < 0.6 or lambda_max {lambda_max} <= lambda_min {lambda_min}. Routing to single-source track.")
 
         # -----------------------------------------------------------------
         # UNIFIED FALLBACK CONTROLLER (With Inscribing Circle Optimization)
