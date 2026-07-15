@@ -1836,12 +1836,12 @@ class FITPSF:
         clean_data = np.nan_to_num(tile_with_nans, nan=0.0) - self.background
         weights = 1.0 - nanmask
         num_data_points = np.sum(weights)
-        ny, nx = tile_with_nans.shape
-        y_indices, x_indices = np.mgrid[0:ny, 0:nx]
 
         # -----------------------------------------------------------------
         # SELF-VALIDATING MOMENT ENGINE FOR DEEP HEAVY SATURATION
         # -----------------------------------------------------------------
+        from scipy.ndimage import distance_transform_edt
+
         num_sat_pixels = np.sum(nanmask)
         ny, nx = tile_with_nans.shape
         y_indices, x_indices = np.mgrid[0:ny, 0:nx]
@@ -1898,33 +1898,44 @@ class FITPSF:
                         f"Saturated binary ellipse confirmed (eccentricity={eccentricity:.3f}, sep={guess_sep:.2f})!")
                 else:
                     log.info(
-                        f"Ellipse rejected: seeds too close ({guess_sep:.2f} < {min_allowed_sep}). Falling back to circular single star track.")
+                        f"Ellipse rejected: seeds too close ({guess_sep:.2f} < {min_allowed_sep}). Fitting inscribing circle.")
             else:
                 log.info(
                     f"Saturated shape is circular (eccentricity={eccentricity:.3f}). Routing to single-source track.")
 
-        # UNIFIED FALLBACK CONTROLLER
+        # -----------------------------------------------------------------
+        # UNIFIED FALLBACK CONTROLLER (With Inscribing Circle Optimization)
+        # -----------------------------------------------------------------
         if not is_ellipse_binary:
-            central_zone = np.sqrt((x_indices - nx // 2) ** 2 + (y_indices - ny // 2) ** 2) <= 3.0
-            core_residuals = np.maximum(clean_data * weights * central_zone, 0.0)
-            total_core_flux = np.sum(core_residuals)
+            if num_sat_pixels >= 9:
+                # FIX: Find the center of the best inscribing circle using the distance transform matrix
+                # distance_map holds the exact Euclidean pixel distance to the nearest mask background boundary edge
+                distance_map = distance_transform_edt(nanmask)
+                y_max_dist, x_max_dist = np.unravel_index(np.argmax(distance_map), (ny, nx))
 
-            if total_core_flux > 0:
-                dx1_guess = float((np.sum(x_indices * core_residuals) / total_core_flux) - nx // 2)
-                dy1_guess = float((np.sum(y_indices * core_residuals) / total_core_flux) - ny // 2)
-                # FIX: Unpack tuples correctly to keep guesses as standard flat float values
+                # Assign the center coordinates of this optimal inscribing circle as the seed
+                dx1_guess = float(x_max_dist - nx // 2)
+                dy1_guess = float(y_max_dist - ny // 2)
+
                 dx1_guess = np.clip(dx1_guess, *self.x_limits)
                 dy1_guess = np.clip(dy1_guess, *self.y_limits)
             else:
-                if num_sat_pixels >= 9:
-                    dx1_guess = float(x_b - nx // 2)
-                    dy1_guess = float(y_b - ny // 2)
+                # Unsaturated Track: Classic local center-of-mass barycenter mapping
+                central_zone = np.sqrt((x_indices - nx // 2) ** 2 + (y_indices - ny // 2) ** 2) <= 3.0
+                core_residuals = np.maximum(clean_data * weights * central_zone, 0.0)
+                total_core_flux = np.sum(core_residuals)
+
+                if total_core_flux > 0:
+                    dx1_guess = float((np.sum(x_indices * core_residuals) / total_core_flux) - nx // 2)
+                    dy1_guess = float((np.sum(y_indices * core_residuals) / total_core_flux) - ny // 2)
+                    dx1_guess = np.clip(dx1_guess, *self.x_limits)
+                    dy1_guess = np.clip(dy1_guess, *self.y_limits)
                 else:
                     dx1_guess, dy1_guess = -0.005, 0.005
 
             dx2_guess, dy2_guess = None, None
 
-        # FIX: Unified live plot trigger executes here after BOTH pathways resolve their final coordinate maps
+        # Unified live plot trigger tracks the final resolved coordinate maps
         if num_sat_pixels >= 9 and self.debug:
             self.debug_plots(clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
                              dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny)
