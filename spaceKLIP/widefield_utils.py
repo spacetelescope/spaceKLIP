@@ -1643,7 +1643,7 @@ class FITPSF:
         (BIC) and passed internal thresholds (e.g., contrast).
     """
 
-    def __init__(self, max_separation=25, min_separation=1, x_limits=(-1, 1), y_limits=(-1, 1),
+    def __init__(self, max_separation=25, min_separation=1, x_limits=(-1, 1), y_limits=(-3, 3),
                  min_contrast=0.01, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0):
         """
         Initialize the FITPSF fitter with constraints and solver options.
@@ -1685,6 +1685,7 @@ class FITPSF:
         self.dx2 = None
         self.dy2 = None
         self.bintest = False
+        self.debug = False
 
     def _model_1_source(self, params, imaging_psf):
         """
@@ -1737,45 +1738,26 @@ class FITPSF:
         s2 = f2 * ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False, pad_amount=0)
         return s1 + s2
 
-    def _solve_primary_flux_linear(self, clean_data, err_map, weights, imaging_psf, params, mode="single"):
+    def _solve_primary_flux_linear(self, clean_data, err_map, weights, imaging_psf, params, mode="single",
+                                   weighted=True):
         """
-        Analytic linear least-squares solve for the optimal primary flux scale.
-
-        This routine solves for the primary flux f1 given fixed positions (and
-        optionally a companion configuration) by performing a weighted linear
-        least-squares fit. Two modes are supported:
-
-        - "single": expect params = (dx1, dy1) and solve for f1 such that
-          data ~ f1 * shifted_psf.
-        - other (binary) mode: expect params = (dx1, dy1, contrast, dx2, dy2)
-          and solve for f1 assuming data ~ f1 * (psf1 + contrast * psf2).
-
-        The returned flux is clipped to be >= 1.0 in case of numerical issues.
+        Analytical linear least-squares solver to find the optimal primary flux scale factor.
 
         Parameters
         ----------
-        clean_data : 2D array
-            Data tile with NaNs converted to zero and background subtracted.
-        err_map : 2D array
-            Pixel-wise error (standard deviation) map used to compute chi^2 weighting.
-        weights : 2D array
-            Binary mask or weights (1 usable, 0 masked).
-        imaging_psf : 2D array
-            PSF stamp image centered on the tile.
-        params : sequence
-            Positional parameters depending on mode (see above).
-        mode : {"single", "binary"}, optional
-            Choose "single" to solve for single source flux, "binary" for two-source model.
-            Internally the code checks mode == "single" else treats as binary.
-
-        Returns
-        -------
-        f1_opt : float
-            Optimal primary flux scale factor (floored to 1.0 on failure).
+        weighted : bool, optional
+            If True, applies err_map (Poisson noise) weighting for optimization steps.
+            If False, performs an unweighted fit for final high-fidelity flux extraction.
         """
-        inv_sigma = weights / err_map
-        d_flat = (clean_data * inv_sigma).flatten()
+        # 1. Apply the conditional noise weighting switch
+        if weighted:
+            inv_sigma = weights / err_map
+            d_flat = (clean_data * inv_sigma).flatten()
+        else:
+            inv_sigma = weights
+            d_flat = (clean_data * weights).flatten()
 
+        # 2. Build the design matrix M using the appropriate weights
         if mode == "single":
             dx1, dy1 = params
             s1_basis = ut.imshift(imaging_psf, [dx1, dy1], method='spline', nan_reflected=False, pad_amount=0)
@@ -1784,15 +1766,14 @@ class FITPSF:
             dx1, dy1, contrast, dx2, dy2 = params
             s1_basis = ut.imshift(imaging_psf, [dx1, dy1], method='spline', nan_reflected=False, pad_amount=0)
             s2_basis = ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False, pad_amount=0)
-            # Combine the primary and companion profiles using the contrast ratio into a single design basis
             combined_basis = s1_basis + contrast * s2_basis
             M = (combined_basis * inv_sigma).flatten()[:, np.newaxis]
 
         try:
             f1_opt, _, _, _ = np.linalg.lstsq(M, d_flat, rcond=None)
-            # Ensure a positive physically meaningful flux; floor to 1.0 on failure/degenerate case.
-            return float(np.maximum(f1_opt[0], 1.0))
-        except (np.linalg.LinAlgError, IndexError):
+            f1_scalar = float(f1_opt[0]) if hasattr(f1_opt, "__len__") else float(f1_opt)
+            return max(f1_scalar, 1.0)
+        except Exception:
             return 1.0
 
     def fitpsf(self, tile_with_nans, nanmask, err_map, imaging_psf):
@@ -1803,68 +1784,122 @@ class FITPSF:
         1. Subtract constant background and apply mask weights.
         2. Fit a one-source model (optimize dx1, dy1 non-linearly; solve f1 analytically).
         3. Compute residuals and run a heuristic ring search to find a candidate companion peak.
+           (If heavy saturation is active, utilizes a geometric image moment engine).
         4. Stage A companion fit: freeze primary position, optimize companion (contrast, dx2, dy2).
         5. Stage B joint relaxation: optimize dx1, dy1, contrast, dx2, dy2 jointly.
         6. Model selection via BIC: if the binary model is significantly better (delta BIC >= 10)
            and the contrast meets the minimum threshold, accept binary fit; otherwise accept single-source fit.
-
-        Side effects
-        ------------
-        Populates these attributes on success:
-            - self.flux1, self.dx1, self.dy1
-            - self.flux2, self.dx2, self.dy2
-            - self.bintest (True if binary model accepted)
-
-        Parameters
-        ----------
-        tile_with_nans : 2D array
-            Data tile possibly containing NaNs at masked pixels.
-        nanmask : 2D array
-            Binary mask (1 for masked/invalid pixels, 0 for valid); used to set weights.
-        err_map : 2D array
-            Error (sigma) map for each pixel.
-        imaging_psf : 2D array
-            PSF stamp to be shifted and scaled. Should be centered on the tile center.
-
-        Notes
-        -----
-        - Coordinates dx, dy are defined as offsets in pixels relative to the tile center
-          (tile center computed as integer center nx//2, ny//2).
-        - The routine uses `ut.imshift` to shift the PSF with subpixel precision.
-        - `err_map` values should be positive; masked pixels are zeroed out by `weights`.
         """
         clean_data = np.nan_to_num(tile_with_nans, nan=0.0) - self.background
         weights = 1.0 - nanmask
         num_data_points = np.sum(weights)
+        ny, nx = tile_with_nans.shape
+        y_indices, x_indices = np.mgrid[0:ny, 0:nx]
+
+        # -----------------------------------------------------------------
+        # VARIANCE-DECOUPLED ENGINE FOR DEEP HEAVY SATURATION
+        # -----------------------------------------------------------------
+        num_sat_pixels = np.sum(nanmask)
+
+        if num_sat_pixels > 40:
+            m00 = np.sum(nanmask)
+            m10 = np.sum(x_indices * nanmask)
+            m01 = np.sum(y_indices * nanmask)
+
+            x_b = m10 / m00
+            y_b = m01 / m00
+
+            mu20 = np.sum(((x_indices - x_b) ** 2) * nanmask) / m00
+            mu02 = np.sum(((y_indices - y_b) ** 2) * nanmask) / m00
+            mu11 = np.sum(((x_indices - x_b) * (y_indices - y_b)) * nanmask) / m00
+
+            # Compute the clean principal orientation axis angle
+            theta = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
+
+            # Extract the raw eigenvalues (maximum and minimum variance)
+            common_term = np.sqrt((mu20 - mu02) ** 2 + 4 * (mu11 ** 2))
+            lambda_max = 0.5 * (mu20 + mu02 + common_term)
+            lambda_min = 0.5 * (mu20 + mu02 - common_term)
+
+            # FIX: Calculate the core separation vector directly from the variance difference.
+            # This extracts the point-source positions, ignoring the circular wing blowout.
+            if lambda_max > lambda_min:
+                c_cores = np.sqrt(lambda_max - lambda_min)
+            else:
+                c_cores = 0.5
+
+            # Project the initial guesses using the corrected core separation vector
+            node_A_x = float((x_b - nx // 2) + c_cores * np.cos(theta))
+            node_A_y = float((y_b - ny // 2) + c_cores * np.sin(theta))
+            node_B_x = float((x_b - nx // 2) - c_cores * np.cos(theta))
+            node_B_y = float((y_b - ny // 2) - c_cores * np.sin(theta))
+
+            dist_A = np.sqrt(node_A_x ** 2 + node_A_y ** 2)
+            dist_B = np.sqrt(node_B_x ** 2 + node_B_y ** 2)
+
+            if dist_A > dist_B:
+                dx1_guess, dy1_guess = node_B_x, node_B_y
+                dx2_guess, dy2_guess = node_A_x, node_A_y
+            else:
+                dx1_guess, dy1_guess = node_A_x, node_A_y
+                dx2_guess, dy2_guess = node_B_x, node_B_y
+
+            log.info(f"Elongated saturation blob detected! Primary seed: [{dx1_guess:.2f}, {dy1_guess:.2f}], Companion: [{dx2_guess:.2f}, {dy2_guess:.2f}]")
+            if self.debug:
+                # -----------------------------------------------------------------
+                # LIVE DIAGNOSTIC DISPLAY (Keeps your preferred ellipse tracking)
+                # -----------------------------------------------------------------
+                import matplotlib.patches as patches
+                fig, ax = plt.subplots(figsize=(7, 7))
+                im = ax.imshow(clean_data, origin='lower', cmap='viridis')
+                ax.contour(nanmask, levels=[0.5], colors='red', linewidths=2, linestyles='dashed')
+                ax.plot(x_b, y_b, '+g', markersize=15, markeredgewidth=3, label='Blob Centroid')
+
+                # Recompute the ellipse tracking boundaries for display purposes
+                a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
+                b_disp = np.sqrt(2 * (mu20 + mu02 - common_term))
+                ellipse_patch = patches.Ellipse((x_b, y_b), width=2 * a_disp, height=2 * b_disp,
+                                                angle=np.degrees(theta), linewidth=2,
+                                                fill=False, edgecolor='white', linestyle='--', label='Moment Ellipse')
+                ax.add_patch(ellipse_patch)
+
+                x_c, y_c = nx // 2, ny // 2
+                ax.plot(x_c + dx1_guess, y_c + dy1_guess, 'Xr', markersize=12,
+                        label=f'Primary Seed: [{dx1_guess:.2f}, {dy1_guess:.2f}]')
+                ax.plot(x_c + dx2_guess, y_c + dy2_guess, 'X', color='orange', markersize=12,
+                        label=f'Companion Seed: [{dx2_guess:.2f}, {dy2_guess:.2f}]')
+
+                ax.set_xlim(x_c - 15, x_c + 15)
+                ax.set_ylim(y_c - 15, y_c + 15)
+                ax.set_title("Live Fitter Diagnostics Window\nSeeds now tracking decoupled core variance")
+                ax.legend(loc='upper right')
+                plt.colorbar(im, ax=ax, label='Counts')
+                plt.show()
+        else:
+            # Unsaturated Track: Classic local center-of-mass barycenter mapping
+            central_zone = np.sqrt((x_indices - nx // 2) ** 2 + (y_indices - ny // 2) ** 2) <= 3.0
+            core_residuals = np.maximum(clean_data * weights * central_zone, 0.0)
+            total_core_flux = np.sum(core_residuals)
+
+            if total_core_flux > 0:
+                dx1_guess = float((np.sum(x_indices * core_residuals) / total_core_flux) - nx // 2)
+                dy1_guess = float((np.sum(y_indices * core_residuals) / total_core_flux) - ny // 2)
+                dx1_guess = np.clip(dx1_guess, self.x_limits[0], self.x_limits[1])
+                dy1_guess = np.clip(dy1_guess, self.y_limits[0], self.y_limits[1])
+            else:
+                dx1_guess, dy1_guess = -0.005, 0.005
+
+            dx2_guess, dy2_guess = None, None
 
         # -----------------------------------------------------------------
         # HYPOTHESIS 1: ONE SOURCE MODEL (Optimize only dx1, dy1)
         # -----------------------------------------------------------------
-        ny, nx = tile_with_nans.shape
-        y_mesh_1, x_mesh_1 = np.mgrid[0:ny, 0:nx]
-
-        # Isolate the central 3-pixel region to prevent outer companions from dragging the guess
-        central_zone = np.sqrt((x_mesh_1 - nx // 2) ** 2 + (y_mesh_1 - ny // 2) ** 2) <= 3.0
-        core_residuals = np.maximum(clean_data * weights * central_zone, 0.0)
-        total_core_flux = np.sum(core_residuals)
-
-        if total_core_flux > 0:
-            dx1_guess = float((np.sum(x_mesh_1 * core_residuals) / total_core_flux) - nx // 2)
-            dy1_guess = float((np.sum(y_mesh_1 * core_residuals) / total_core_flux) - ny // 2)
-            dx1_guess = np.clip(dx1_guess, self.x_limits[0], self.x_limits[1])
-            dy1_guess = np.clip(dy1_guess, self.y_limits[0], self.y_limits[1])
-        else:
-            dx1_guess, dy1_guess = -0.005, 0.005
-
         guess_1 = [dx1_guess, dy1_guess]
         bounds_1 = [(self.x_limits[0], self.x_limits[1]), (self.y_limits[0], self.y_limits[1])]
 
         def chisq_1(coords):
-            """
-            Chi-squared function for the 1-source positional fit; flux solved analytically.
-            coords contains (dx1, dy1).
-            """
-            f1_opt = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, coords, mode="single")
+            f1_opt = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, coords,
+                                                     mode="single")
             mod = f1_opt * ut.imshift(imaging_psf, coords, method='spline', nan_reflected=False, pad_amount=0)
             return np.sum((((clean_data - mod) / err_map) * weights) ** 2)
 
@@ -1874,40 +1909,50 @@ class FITPSF:
         bic_1 = res_1.fun + 2 * np.log(num_data_points)
 
         dx1_fit_1sky, dy1_fit_1sky = res_1.x
-        f1_fit_1sky = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, res_1.x, mode="single")
+        f1_fit_1sky = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, res_1.x,
+                                                      mode="single")
 
         # -----------------------------------------------------------------
-        # COMPANION CENTROID HEURISTIC (Pure Cartesian Ring Search)
+        # COMPANION CENTROID HEURISTIC (Conditional Vectorized Search)
         # -----------------------------------------------------------------
-        s1_basis_final = ut.imshift(imaging_psf, [dx1_fit_1sky, dy1_fit_1sky], method='spline', nan_reflected=False,
-                                    pad_amount=0)
-        residuals_1 = (clean_data - (f1_fit_1sky * s1_basis_final)) * weights
+        if dx2_guess is None or dy2_guess is None:
+            # Mild/No Saturation: Run standard residual subtraction search
+            s1_basis_final = ut.imshift(imaging_psf, [dx1_fit_1sky, dy1_fit_1sky], method='spline', nan_reflected=False,
+                                        pad_amount=0)
+            residuals_1 = (clean_data - (f1_fit_1sky * s1_basis_final)) * weights
 
-        star1_x_pos = nx // 2 + dx1_fit_1sky
-        star1_y_pos = ny // 2 + dy1_fit_1sky
-        dist_from_star1 = np.sqrt((x_mesh_1 - star1_x_pos) ** 2 + (y_mesh_1 - star1_y_pos) ** 2)
+            star1_x_pos = nx // 2 + dx1_fit_1sky
+            star1_y_pos = ny // 2 + dy1_fit_1sky
+            dist_from_star1 = np.sqrt((x_indices - star1_x_pos) ** 2 + (y_indices - star1_y_pos) ** 2)
 
-        search_residuals = residuals_1.copy()
-        search_residuals[dist_from_star1 < max(self.min_separation, 5.0)] = -1e12
+            search_residuals = residuals_1.copy()
+            search_residuals[dist_from_star1 < max(self.min_separation, 5.0)] = -1e12
 
-        y_peak, x_peak = np.unravel_index(np.argmax(search_residuals), (ny, nx))
+            y_peak, x_peak = np.unravel_index(np.argmax(search_residuals), (ny, nx))
 
-        y_min, y_max = max(0, y_peak - 2), min(ny, y_peak + 3)
-        x_min, x_max = max(0, x_peak - 2), min(nx, x_peak + 3)
-        sub_window = np.maximum(search_residuals[y_min:y_max, x_min:x_max], 0.0)
-        sub_sum = np.sum(sub_window)
+            y_min, y_max = max(0, y_peak - 2), min(ny, y_peak + 3)
+            x_min, x_max = max(0, x_peak - 2), min(nx, x_peak + 3)
+            sub_window = np.maximum(search_residuals[y_min:y_max, x_min:x_max], 0.0)
+            sub_sum = np.sum(sub_window)
 
-        if sub_sum > 0:
-            y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
-            dx2_guess = float((np.sum(x_mesh * sub_window) / sub_sum) - nx // 2)
-            dy2_guess = float((np.sum(y_mesh * sub_window) / sub_sum) - ny // 2)
+            if sub_sum > 0:
+                y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
+                dx2_guess = float((np.sum(x_mesh * sub_window) / sub_sum) - nx // 2)
+                dy2_guess = float((np.sum(y_mesh * sub_window) / sub_sum) - ny // 2)
+            else:
+                dx2_guess, dy2_guess = float(x_peak - nx // 2), float(y_peak - ny // 2)
+
+            dx1_stage_a = dx1_fit_1sky
+            dy1_stage_a = dy1_fit_1sky
         else:
-            dx2_guess, dy2_guess = float(x_peak - nx // 2), float(y_peak - ny // 2)
+            # Heavy Saturation: Anchor Stage A to the unblended, moment-predicted core center
+            dx1_stage_a = dx1_guess
+            dy1_stage_a = dy1_guess
 
         # -----------------------------------------------------------------
         # HYPOTHESIS 2: STAGE A - FREEZE PRIMARY, LOCK COMPANION IN WELL
         # -----------------------------------------------------------------
-        guess_comp = [0.1 * f1_fit_1sky, dx2_guess, dy2_guess]
+        guess_comp = [0.05, dx2_guess, dy2_guess]
         bounds_comp = [
             (0.0, self.max_contrast),
             (-self.max_separation * 1.5, self.max_separation * 1.5),
@@ -1915,20 +1960,18 @@ class FITPSF:
         ]
 
         def chisq_companion_stage(comp_params):
-            """
-            Chi-squared for companion-only stage where primary position is frozen.
-            comp_params contains (contrast, dx2, dy2).
-            """
             contrast, dx2, dy2 = comp_params
-            sep = np.sqrt((dx1_fit_1sky - dx2) ** 2 + (dy1_fit_1sky - dy2) ** 2)
-            if sep < self.min_separation or sep > self.max_separation:
+            sep = np.sqrt((dx1_stage_a - dx2) ** 2 + (dy1_stage_a - dy2) ** 2)
+
+            current_min_sep = 1.5 if num_sat_pixels > 40 else self.min_separation
+            if sep < current_min_sep or sep > self.max_separation:
                 return 1e18
 
-            full_coords = [dx1_fit_1sky, dy1_fit_1sky, contrast, dx2, dy2]
+            full_coords = [dx1_stage_a, dy1_stage_a, contrast, dx2, dy2]
             f1_opt = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, full_coords,
                                                      mode="binary")
 
-            s1 = f1_opt * ut.imshift(imaging_psf, [dx1_fit_1sky, dy1_fit_1sky], method='spline', nan_reflected=False,
+            s1 = f1_opt * ut.imshift(imaging_psf, [dx1_stage_a, dy1_stage_a], method='spline', nan_reflected=False,
                                      pad_amount=0)
             s2 = (f1_opt * contrast) * ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False,
                                                   pad_amount=0)
@@ -1941,6 +1984,10 @@ class FITPSF:
         # HYPOTHESIS 2: STAGE B - JOINT RELAXATION (5 PARAMETERS)
         # -----------------------------------------------------------------
         contrast_seed, dx2_seed, dy2_seed = res_comp.x
+
+        # FIX: Seed using the refined single-star optimized positions (dx1_fit_1sky).
+        # This provides a much closer sub-pixel coordinate alignment plain than
+        # the raw moment seeds, preventing the flux parameter from dropping short.
         guess_2 = [float(dx1_fit_1sky), float(dy1_fit_1sky), float(contrast_seed), float(dx2_seed), float(dy2_seed)]
 
         bounds_2 = [
@@ -1951,12 +1998,11 @@ class FITPSF:
         ]
 
         def chisq_2(params_5):
-            """
-            Chi-squared for the 5-parameter joint fit (dx1, dy1, contrast, dx2, dy2).
-            """
             dx1, dy1, contrast, dx2, dy2 = params_5
             sep = np.sqrt((dx1 - dx2) ** 2 + (dy1 - dy2) ** 2)
-            if sep < self.min_separation or sep > self.max_separation:
+
+            current_min_sep = 1.5 if num_sat_pixels > 40 else self.min_separation
+            if sep < current_min_sep or sep > self.max_separation:
                 return 1e18
 
             f1_opt = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, params_5, mode="binary")
@@ -1975,11 +2021,16 @@ class FITPSF:
         # -----------------------------------------------------------------
         delta_bic = bic_1 - bic_2
         dx1_final, dy1_fit, contrast_fit, dx2_fit, dy2_fit = res_2.x
+
+        # 1. Extraction: Unweighted final single star flux pass
+        f1_final_single = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, res_1.x,
+                                                          mode="single", weighted=False)
+
+        # 2. Extraction: Unweighted final binary star flux pass
         f1_final_bin = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, res_2.x,
-                                                       mode="binary")
+                                                       mode="binary", weighted=False)
 
         if delta_bic >= 10.0 and contrast_fit >= self.min_contrast:
-            # Accept binary model
             self.bintest = True
             f1, dx1, dy1, contrast, dx2, dy2 = f1_final_bin, dx1_final, dy1_fit, contrast_fit, dx2_fit, dy2_fit
             f2 = f1 * contrast
@@ -1987,8 +2038,6 @@ class FITPSF:
             dist1 = np.sqrt(dx1 ** 2 + dy1 ** 2)
             dist2 = np.sqrt(dx2 ** 2 + dy2 ** 2)
 
-            # Ensure flux1/flux2 correspond to closer/farther logic such that flux1 is the closest-to-center?
-            # Original code swaps depending on which distance is greater.
             if dist1 > dist2:
                 self.flux1, self.dx1, self.dy1 = f2, dx2, dy2
                 self.flux2, self.dx2, self.dy2 = f1, dx1, dy1
@@ -1999,10 +2048,8 @@ class FITPSF:
                      f"flux1 = {self.flux1:.2f}, flux2 = {self.flux2:.2f}, "
                      f"dx1,dy1 = ({self.dx1:.3f},{self.dy1:.3f}), dx2,dy2 = ({self.dx2:.3f},{self.dy2:.3f})")
         else:
-            # Accept single-source model
             self.bintest = False
-            self.flux1, self.dx1, self.dy1 = f1_fit_1sky, dx1_fit_1sky, dy1_fit_1sky
+            self.flux1, self.dx1, self.dy1 = f1_final_single, dx1_fit_1sky, dy1_fit_1sky
             self.flux2, self.dx2, self.dy2 = 0.0, None, None
             log.info(f"Single-source model accepted: delta BIC = {delta_bic:.2f}, flux1 = {self.flux1:.2f}, "
                      f"dx1,dy1 = ({self.dx1:.3f},{self.dy1:.3f})")
-
