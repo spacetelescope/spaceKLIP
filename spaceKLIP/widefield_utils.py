@@ -1742,18 +1742,45 @@ class FITPSF:
         s2 = f2 * ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False, pad_amount=0)
         return s1 + s2
 
-    def _solve_primary_flux_linear(self, clean_data, err_map, weights, imaging_psf, params, mode="single",
-                                   weighted=True):
-        """
-        Analytical linear least-squares solver to find the optimal primary flux scale factor.
-
-        Parameters
-        ----------
-        weighted : bool, optional
-            If True, applies err_map (Poisson noise) weighting for optimization steps.
-            If False, performs an unweighted fit for final high-fidelity flux extraction.
-        """
-        # 1. Apply the conditional noise weighting switch
+    # def _solve_primary_flux_linear(self, clean_data, err_map, weights, imaging_psf, params, mode="single",
+    #                                weighted=True):
+    #     """
+    #     Analytical linear least-squares solver to find the optimal primary flux scale factor.
+    #
+    #     Parameters
+    #     ----------
+    #     weighted : bool, optional
+    #         If True, applies err_map (Poisson noise) weighting for optimization steps.
+    #         If False, performs an unweighted fit for final high-fidelity flux extraction.
+    #     """
+    #     # 1. Apply the conditional noise weighting switch
+    #     if weighted:
+    #         inv_sigma = weights / err_map
+    #         d_flat = (clean_data * inv_sigma).flatten()
+    #     else:
+    #         inv_sigma = weights
+    #         d_flat = (clean_data * weights).flatten()
+    #
+    #     # 2. Build the design matrix M using the appropriate weights
+    #     if mode == "single":
+    #         dx1, dy1 = params
+    #         s1_basis = ut.imshift(imaging_psf, [dx1, dy1], method='spline', nan_reflected=False, pad_amount=0)
+    #         M = (s1_basis * inv_sigma).flatten()[:, np.newaxis]
+    #     else:
+    #         dx1, dy1, contrast, dx2, dy2 = params
+    #         s1_basis = ut.imshift(imaging_psf, [dx1, dy1], method='spline', nan_reflected=False, pad_amount=0)
+    #         s2_basis = ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False, pad_amount=0)
+    #         combined_basis = s1_basis + contrast * s2_basis
+    #         M = (combined_basis * inv_sigma).flatten()[:, np.newaxis]
+    #
+    #     try:
+    #         f1_opt, _, _, _ = np.linalg.lstsq(M, d_flat, rcond=None)
+    #         f1_scalar = float(f1_opt[0]) if hasattr(f1_opt, "__len__") else float(f1_opt)
+    #         return max(f1_scalar, 1.0)
+    #     except Exception:
+    #         return 1.0
+    def _solve_primary_flux_linear(self, clean_data, err_map, weights, imaging_psf, params, mode="single", weighted=True):
+        """Analytical linear least-squares solver to find the optimal primary flux scale factor."""
         if weighted:
             inv_sigma = weights / err_map
             d_flat = (clean_data * inv_sigma).flatten()
@@ -1761,7 +1788,6 @@ class FITPSF:
             inv_sigma = weights
             d_flat = (clean_data * weights).flatten()
 
-        # 2. Build the design matrix M using the appropriate weights
         if mode == "single":
             dx1, dy1 = params
             s1_basis = ut.imshift(imaging_psf, [dx1, dy1], method='spline', nan_reflected=False, pad_amount=0)
@@ -1773,32 +1799,45 @@ class FITPSF:
             combined_basis = s1_basis + contrast * s2_basis
             M = (combined_basis * inv_sigma).flatten()[:, np.newaxis]
 
+        # FIX: Bulletproof Numerical Barrier.
+        # If the templates collapse to a zero vector during wild optimization steps,
+        # skip np.linalg.lstsq entirely to prevent the DLASCL Fortran library crash.
+        if np.all(M == 0.0) or np.any(np.isnan(M)) or np.any(np.isinf(M)):
+            return 1.0
+
         try:
             f1_opt, _, _, _ = np.linalg.lstsq(M, d_flat, rcond=None)
-            f1_scalar = float(f1_opt[0]) if hasattr(f1_opt, "__len__") else float(f1_opt)
+            f1_scalar = float(f1_opt) if hasattr(f1_opt, "__len__") else float(f1_opt)
             return max(f1_scalar, 1.0)
         except Exception:
             return 1.0
 
-    def debug_plots(self, clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
+    def debug_saturated_seeds(self, clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
                     dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny,
                     is_ellipse_binary=True):
-        import matplotlib.patches as patches
-        import matplotlib.pyplot as plt
-        from scipy.ndimage import distance_transform_edt
-
         load_plt_style(None)
 
+        # FIX: Extract data range and force a non-zero color scale window
+        # to prevent Matplotlib from crashing on flat or uniform data canvases.
+        d_min = float(np.nanmin(clean_data))
+        d_max = float(np.nanmax(clean_data))
+        if d_min == d_max:
+            # If the image is completely flat, expand the bounds symmetrically
+            vmin, vmax = d_min - 1.0, d_max + 1.0
+        else:
+            vmin, vmax = d_min, d_max
+
         fig, ax = plt.subplots(figsize=(7, 7))
-        im = ax.imshow(clean_data, origin='lower', cmap='viridis')
+
+        # Pass explicit vmin and vmax parameters to safeguard color normalisation
+        im = ax.imshow(clean_data, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+
         ax.contour(nanmask, levels=[0.5], colors='red', linewidths=2, linestyles='dashed')
         ax.plot(x_b, y_b, '+g', markersize=15, markeredgewidth=3, label='Blob Centroid')
 
         x_c, y_c = nx // 2, ny // 2
 
-        # FIX: Dynamically switch the geometric overlay patch based on the tracking state flag
         if is_ellipse_binary:
-            # Saturated Binary Mode: Recompute and draw the outer boundary tracking ellipse
             a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
             b_disp = np.sqrt(2 * (mu20 + mu02 - common_term))
             patch = patches.Ellipse((x_b, y_b), width=2 * a_disp, height=2 * b_disp,
@@ -1807,11 +1846,9 @@ class FITPSF:
                                     label='Moment Ellipse')
             title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled core variance"
         else:
-            # Single Saturated Star Mode: Calculate the exact physical radius of the inscribing circle
             distance_map = distance_transform_edt(nanmask)
-            circle_radius = float(np.max(distance_map))
+            circle_radius = float(np.max(distance_map)) if np.max(distance_map) > 0 else 3.0
 
-            # Map the center coordinates precisely onto your active single star seed location
             seed_x_pixel = x_c + dx1_guess
             seed_y_pixel = y_c + dy1_guess
 
@@ -1822,11 +1859,9 @@ class FITPSF:
 
         ax.add_patch(patch)
 
-        # Plot the primary seed coordinate layer
         ax.plot(x_c + dx1_guess, y_c + dy1_guess, 'Xr', markersize=12,
                 label=f'Primary Seed: [{dx1_guess:.2f}, {dy1_guess:.2f}]')
 
-        # Only plot the companion seed layer if it successfully cleared the validation gates
         if dx2_guess is not None and dy2_guess is not None:
             ax.plot(x_c + dx2_guess, y_c + dy2_guess, 'X', color='orange', markersize=12,
                     label=f'Companion Seed: [{dx2_guess:.2f}, {dy2_guess:.2f}]')
@@ -1837,6 +1872,49 @@ class FITPSF:
         ax.legend(loc='upper right')
         plt.colorbar(im, ax=ax, label='Counts')
         plt.tight_layout()
+        plt.show()
+
+    def debug_final_fit(self, tile):
+        # Plot Diagnostics Window
+        ny, nx = tile.shape
+        fitted_x1_pos = nx // 2 + self.dx1
+        fitted_y1_pos = ny // 2 + self.dy1
+
+        # 1. Safely extract the data min and max bounds
+        tile_min = float(np.nanmin(tile))
+        tile_max = float(np.nanmax(tile))
+
+        # 2. FIX: Dynamically safeguard the normalization limits
+        # If the image is completely flat or invalid, provide a safe default window
+        if tile_max <= tile_min:
+            vmin, vmax = -1.0, 1.0
+        else:
+            vmin = tile_min
+            # Try your preferred 20% scaling threshold
+            vmax_trial = tile_max * 0.2
+
+            # If the scaled vmax falls below or equal to vmin (due to negative values),
+            # fall back to a safe upper bound (e.g., halfway between min and max)
+            if vmax_trial <= vmin:
+                vmax = vmin + (tile_max - vmin) * 0.5
+            else:
+                vmax = vmax_trial
+
+        # Double check to guarantee absolute safety before passing to Matplotlib
+        if vmin >= vmax:
+            vmax = vmin + 1.0
+
+        fig, ax = plt.subplots(figsize=(5, 5))
+
+        # Pass explicit, fully verified parameters to the renderer
+        ax.imshow(tile, origin='lower', vmin=vmin, vmax=vmax, cmap='viridis')
+
+        ax.plot(fitted_x1_pos, fitted_y1_pos, 'xr', markersize=12, label='Fitted Star 1')
+        if self.bintest:
+            fitted_x2_pos = nx // 2 + self.dx2
+            fitted_y2_pos = ny // 2 + self.dy2
+            ax.plot(fitted_x2_pos, fitted_y2_pos, 'xb', markersize=12, label='Fitted Star 2')
+        ax.legend()
         plt.show()
 
     def fitpsf(self, tile_with_nans, nanmask, err_map, imaging_psf):
@@ -1952,7 +2030,7 @@ class FITPSF:
 
         # Unified live plot trigger tracks the final resolved coordinate maps
         if num_sat_pixels >= 9 and self.debug:
-            self.debug_plots(clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
+            self.debug_saturated_seeds(clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
                              dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny,
                              is_ellipse_binary=is_ellipse_binary)  # <--- Injected here
 
@@ -2102,24 +2180,51 @@ class FITPSF:
                          options={'eps': eps_vector_2, 'maxiter': self.maxiter, 'ftol': 1e-12})
         bic_2 = res_2.fun + 5 * np.log(num_data_points)
 
+        # # -----------------------------------------------------------------
+        # # MODEL SELECTION & INTEGRATED SELF-SORTING GATE
+        # # -----------------------------------------------------------------
+        # delta_bic = bic_1 - bic_2
+        # dx1_final, dy1_fit, contrast_fit, dx2_fit, dy2_fit = res_2.x
+        #
+        # # Extraction pass leveraging your unified unweighted flux toggle
+        # f1_final_single = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, res_1.x,
+        #                                                   mode="single", weighted=False)
+        #
+        # # Localized Spatial Sub-Matrix Masking for Ultra-Close Binary Photometry Stability
+        # x_sys_center = nx // 2 + (dx1_final + dx2_fit) / 2.0
+        # y_sys_center = ny // 2 + (dy1_fit + dy2_fit) / 2.0
+        # dist_from_system = np.sqrt((x_indices - x_sys_center) ** 2 + (y_indices - y_sys_center) ** 2)
+        #
+        # extraction_weights = weights.copy()
+        # extraction_weights[dist_from_system > 6.0] = 0.0
+        #
+        # f1_final_bin = self._solve_primary_flux_linear(clean_data, err_map, extraction_weights, imaging_psf, res_2.x,
+        #                                                mode="binary", weighted=False)
         # -----------------------------------------------------------------
         # MODEL SELECTION & INTEGRATED SELF-SORTING GATE
         # -----------------------------------------------------------------
         delta_bic = bic_1 - bic_2
         dx1_final, dy1_fit, contrast_fit, dx2_fit, dy2_fit = res_2.x
 
-        # Extraction pass leveraging your unified unweighted flux toggle
+        # 1. Extraction: Unweighted final single star flux pass
         f1_final_single = self._solve_primary_flux_linear(clean_data, err_map, weights, imaging_psf, res_1.x,
                                                           mode="single", weighted=False)
 
-        # Localized Spatial Sub-Matrix Masking for Ultra-Close Binary Photometry Stability
+        # 2. FIX: Dynamic Adaptive Extraction Masking.
+        # Instead of a hardcoded 6.0 pixel ring, the extraction window scales dynamically
+        # to encompass the actual fitted separation distance of the system plus a 3.5-pixel
+        # buffer to capture profile wings without clipping wide companions.
+        fitted_sep = np.sqrt((dx1_final - dx2_fit) ** 2 + (dy1_fit - dy2_fit) ** 2)
+        dynamic_radius = max(6.0, fitted_sep + 3.5)
+
         x_sys_center = nx // 2 + (dx1_final + dx2_fit) / 2.0
         y_sys_center = ny // 2 + (dy1_fit + dy2_fit) / 2.0
         dist_from_system = np.sqrt((x_indices - x_sys_center) ** 2 + (y_indices - y_sys_center) ** 2)
 
         extraction_weights = weights.copy()
-        extraction_weights[dist_from_system > 6.0] = 0.0
+        extraction_weights[dist_from_system > dynamic_radius] = 0.0
 
+        # 3. Extraction: Final unweighted binary flux pass using the safe adaptive mask
         f1_final_bin = self._solve_primary_flux_linear(clean_data, err_map, extraction_weights, imaging_psf, res_2.x,
                                                        mode="binary", weighted=False)
 
@@ -2141,3 +2246,6 @@ class FITPSF:
             self.bintest = False
             self.flux1, self.dx1, self.dy1 = f1_final_single, dx1_fit_1sky, dy1_fit_1sky
             self.flux2, self.dx2, self.dy2 = 0.0, None, None
+
+        if self.debug:
+            self.debug_final_fit(tile_with_nans.copy())
