@@ -1818,6 +1818,7 @@ class FITPSF:
             fig, ax = plt.subplots(figsize=(7, 7))
             # Pass explicit vmin and vmax parameters to safeguard color normalisation
             im = ax.imshow(ann_values, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+            ax.plot(x_peak, y_peak, '+r', markersize=15, markeredgewidth=3, label='Figure Center')
             plt.title('Annulus area for STD')
             plt.tight_layout()
             plt.show()
@@ -1873,6 +1874,7 @@ class FITPSF:
             fig, ax = plt.subplots(figsize=(7, 7))
             # Pass explicit vmin and vmax parameters to safeguard color normalisation
             im = ax.imshow(ann_values, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+            ax.plot(x_peak, y_peak, '+r', markersize=15, markeredgewidth=3)
             plt.title('Selected annulus area')
             plt.tight_layout()
             plt.show()
@@ -1906,9 +1908,9 @@ class FITPSF:
         sigma_sample = np.std(vals, ddof=1) if n_pix > 1 else np.nan
         return med, sigma_mad, sigma_sample, n_pix
 
-    def _debug_saturated_seeds(self, clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
-                    dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny,
-                    is_ellipse_binary=True,node_A_x=None,node_A_y=None,node_B_x=None,node_B_y=None):
+    def _debug_saturated_seeds(self, clean_data, nanmask, x_b=None, y_b=None, mu20=None, mu02=None, theta=None,
+                    dx1_guess=None, dy1_guess=None, dx2_guess=None, dy2_guess=None, eccentricity=None, common_term=None, nx=None, ny=None,
+                    is_ellipse_binary=True,node_A_x=None,node_A_y=None,node_B_x=None,node_B_y=None,circle_x=None, circle_y=None, circle_radius=None):
         load_plt_style(None)
 
         # FIX: Extract data range and force a non-zero color scale window
@@ -1923,13 +1925,13 @@ class FITPSF:
 
         fig, ax = plt.subplots(figsize=(9, 9))
 
+        x_c, y_c = (nx - 1) / 2.0, (ny - 1) / 2.0
         # Pass explicit vmin and vmax parameters to safeguard color normalisation
         im = ax.imshow(clean_data, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
 
         ax.contour(nanmask, levels=[0.5], colors='red', linewidths=5, linestyles='dashed',label='Blob Area')
-        ax.plot(x_b, y_b, '+g', markersize=15, markeredgewidth=3, label='Blob Centroid')
+        ax.plot(x_c, y_c, '+g', markersize=15, markeredgewidth=3, label='Figure Center')
 
-        x_c, y_c = (nx - 1) / 2.0, (ny - 1) / 2.0
 
         if is_ellipse_binary:
             a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
@@ -1939,30 +1941,26 @@ class FITPSF:
                                     fill=False, edgecolor='lightgray', linestyle='--',
                                     label='Moment Ellipse')
             title_text = f"Saturated target/s Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled cores"
+            if node_A_x is not None and node_A_y is not None:
+                ax.plot(x_c + node_A_x, y_c + node_A_y, 'Xr', markersize=12, alpha=0.25,
+                        label=f'Primary Node: [{node_A_x:.3f}, {node_A_y:.3f}]')
+            if node_B_x is not None and node_B_y is not None:
+                ax.plot(x_c + node_B_x, y_c + node_B_y, 'X', color='orange', markersize=12, alpha=0.25,
+                        label=f'Companion Node: [{node_B_x:.3f}, {node_B_y:.3f}]')
         else:
-            distance_map = distance_transform_edt(nanmask)
-            circle_radius = float(np.max(distance_map)) if np.max(distance_map) > 0 else 3.0
-
-            seed_x_pixel = x_c + dx1_guess
-            seed_y_pixel = y_c + dy1_guess
-
-            patch = patches.Circle((seed_x_pixel, seed_y_pixel), radius=circle_radius, linewidth=5,
+            patch = patches.Circle((circle_x, circle_y), radius=circle_radius, linewidth=5,
                                    fill=False, edgecolor='lightgray', linestyle='--',
                                    label='Inscribing Circle')
+            ax.plot(circle_x,  circle_y, 'Xr', markersize=12, alpha=0.25,
+                    label=f'Primary Node: [{circle_x:.3f}, {circle_y:.3f}]')
             title_text = f"Saturated target/s Diagnostics (ecc={eccentricity:.3f})\nEllipse Collapsed -> Best Inscribing Circle"
         ax.add_patch(patch)
         ax.plot(x_c + dx1_guess, y_c + dy1_guess, 'Xr', markersize=12,
-                label=f'Primary Seed: [{dx1_guess:.2f}, {dy1_guess:.2f}]')
-        if node_A_x is not None and node_A_y is not None:
-            ax.plot(x_c + node_A_x, y_c + node_A_y, 'Xr', markersize=12,alpha = 0.25,
-                    label=f'Primary Node: [{node_A_x:.2f}, {node_A_y:.2f}]')
+                label=f'Primary Seed: [{dx1_guess:.3f}, {dy1_guess:.3f}]')
 
         if dx2_guess is not None and dy2_guess is not None:
             ax.plot(x_c + dx2_guess, y_c + dy2_guess, 'X', color='orange', markersize=12,
-                    label=f'Companion Seed: [{dx2_guess:.2f}, {dy2_guess:.2f}]')
-            if node_B_x is not None and node_B_y is not None:
-                ax.plot(x_c + node_B_x, y_c + node_B_y, 'X', color='orange', markersize=12, alpha=0.25,
-                        label=f'Companion Node: [{node_B_x:.2f}, {node_B_y:.2f}]')
+                    label=f'Companion Seed: [{dx2_guess:.3f}, {dy2_guess:.3f}]')
 
         ax.set_xlim(x_c - 15, x_c + 15)
         ax.set_ylim(y_c - 15, y_c + 15)
@@ -2049,7 +2047,6 @@ class FITPSF:
         is_ellipse_binary = False
 
         if num_sat_pixels > 0:
-
             nanmask = np.array(nanmask, dtype=int)
             mask_bool = (nanmask == 1)
             labeled = label(mask_bool, connectivity=1)
@@ -2120,44 +2117,74 @@ class FITPSF:
                     log.debug( f"Tentative saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}, theta={np.degrees(theta):.3f}")
                 else:
                     log.debug(f"Ellipse rejected, seeds too close: eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} or sep B={guess_sep_B:.2f} < {min_allowed_sep}. Considering circular blob.")
+                    dx1_guess, dy1_guess = None, None
+                    dx2_guess, dy2_guess = None, None
+                    node_A_x = None
+                    node_A_y = None
+                    node_B_x = None
+                    node_B_y = None
+                    m00 = None
+                    m10 =None
+                    m01 = None
+                    x_b = None
+                    y_b = None
+                    mu20 = None
+                    mu02 = None
+                    mu11 = None
+                    theta = None
             else:
-                log.debug(f"Saturated circular blob: eccentricity={eccentricity:.3f} < 0.6 or lambda_max {lambda_max} <= lambda_min {lambda_min}. Routing to single-source track.")
-
+                log.debug(f"Saturated circular blob: eccentricity={eccentricity:.3f} < 0.3 or lambda_max {lambda_max} <= lambda_min {lambda_min}. Routing to single-source track.")
+                dx1_guess, dy1_guess = None, None
+                dx2_guess, dy2_guess = None, None
+                node_A_x = None
+                node_A_y = None
+                node_B_x = None
+                node_B_y = None
+                m00 = None
+                m10 = None
+                m01 = None
+                x_b = None
+                y_b = None
+                mu20 = None
+                mu02 = None
+                mu11 = None
+                theta = None
+        y_max_p1, x_max_p1, radius = None, None, None
         # -----------------------------------------------------------------
         # UNIFIED FALLBACK CONTROLLER (For not ellipses)
         # -----------------------------------------------------------------
         search_canvas1 = clean_data * weights
         if not is_ellipse_binary:
             if num_sat_pixels > 0:
-                distance_map = distance_transform_edt(nanmask)
-                maxval = np.nanmax(distance_map)
-                # find all pixels very close to the maximum (use isclose to be robust)
-                ys, xs = np.where(np.isclose(distance_map, maxval))
-                if ys.size > 0:
-                    y_max_dist = float(np.mean(ys))
-                    x_max_dist = float(np.mean(xs))
-                else:
-                    # fallback to argmax if something weird happens
-                    y_max_dist, x_max_dist = np.unravel_index(np.nanargmax(distance_map), (ny, nx))
+                nanmask = np.array(nanmask, dtype=int)
+                mask_bool = (nanmask == 1)
+                labeled = label(mask_bool, connectivity=1)
+                sizes = np.bincount(labeled.ravel())
+                small_labels = np.where(sizes < max(sizes[1:]))[0]
+                small_labels = small_labels[small_labels != 0]
+                mask_bool[np.isin(labeled, small_labels)] = False
 
-                # compute image center consistently as fractional coordinate
+                struct_element = np.ones((3, 3), dtype=bool)
+                dilated_mask = binary_dilation(mask_bool, structure=struct_element)
+
+                distance_map = distance_transform_edt(dilated_mask)
                 x_center = (nx - 1) / 2.0
                 y_center = (ny - 1) / 2.0
 
-                # Assign seed as subpixel offset from fractional center
-                dx1_guess = float(x_max_dist - x_center)
-                dy1_guess = float(y_max_dist - y_center)
+                y_center_guess, x_center_guess = np.unravel_index(np.argmax(distance_map), distance_map.shape)
+                radius = float(distance_map[y_center_guess, x_center_guess])
+                dx1_guess = float(x_center_guess - x_center)
+                dy1_guess = float(y_center_guess - y_center)
 
                 # clip to limits if desired
                 dx1_guess = np.clip(dx1_guess, *self.x_limits)
                 dy1_guess = np.clip(dy1_guess, *self.y_limits)
-                x_max_p1 = dx1_guess + (nx - 1) / 2 + 0.005
-                y_max_p1 = dy1_guess + (ny - 1) / 2 - 0.005
+                x_max_p1 = x_center_guess + 0.005
+                y_max_p1 = y_center_guess - 0.005
                 dx2_guess, dy2_guess = None, None
 
                 log.debug(f"[Early Single Saturated check]")
                 log.debug(f"  primary position: ({dx1_guess}, {dy1_guess})")
-                # log.debug(f"  primary peak (search_canvas1): {p1_guess:.6f}")
             else:
                 # 1. Primary Unsaturated Peak
                 y_max_p1, x_max_p1 = np.unravel_index(np.nanargmax(search_canvas1), (ny, nx))
@@ -2198,9 +2225,11 @@ class FITPSF:
         # Debug 2: Plot Final Saturated cores if present
         # -----------------------------------------------------------------
         if num_sat_pixels > 0 and self.debug:
-            self._debug_saturated_seeds(clean_data, dilated_mask, x_b, y_b, mu20, mu02, theta,
-                             dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny,
-                             is_ellipse_binary=is_ellipse_binary,node_A_x=node_A_x,node_A_y=node_A_y,node_B_x=node_B_x,node_B_y=node_B_y)
+            self._debug_saturated_seeds(clean_data, dilated_mask, x_b=x_b, y_b=y_b, mu20=mu20, mu02=mu02, theta=theta,
+                                     dx1_guess=dx1_guess, dy1_guess=dy1_guess, dx2_guess=dx2_guess, dy2_guess=dy2_guess,
+                                     eccentricity=eccentricity, common_term=common_term, nx=nx, ny=ny,
+                                     is_ellipse_binary=is_ellipse_binary,node_A_x=node_A_x,node_A_y=node_A_y,node_B_x=node_B_x,node_B_y=node_B_y,
+                                     circle_x=x_max_p1, circle_y=y_max_p1, circle_radius=radius)
 
         # -----------------------------------------------------------------
         # HYPOTHESIS 1: ONE SOURCE MODEL (Optimize only dx1, dy1)
@@ -2307,9 +2336,8 @@ class FITPSF:
                 else:
                     integrated_noise = 1.0
 
-            threshold_val = 5 * self._get_std_in_annulus(search_residuals, x_peak, x_peak)
+            threshold_val = 5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak)
             if peak_val > threshold_val:
-                # centroid
                 y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
                 cx = float(np.nansum(x_mesh * sub_window) / sub_sum)
                 cy = float(np.nansum(y_mesh * sub_window) / sub_sum)
@@ -2321,39 +2349,39 @@ class FITPSF:
                 dx2_guess, dy2_guess = None, None
                 log.debug(f"[Companion rejected]")
                 log.debug(f"  below 5-sigma annulus: {peak_val}<={threshold_val}")
-            dx1_stage_a = dx1_fit
-            dy1_stage_a = dy1_fit
-        else:
-            # FIX: Check if 'node_A_x' exists locally (from the heavy saturation ellipse engine).
-            # If it does, run the core node padding checks. If it doesn't (from unsaturated track),
-            # skip straight to assigning the finalized guess variables.
-            if 'node_A_x' in locals():
-                dx_node_sep = abs(node_A_x - node_B_x)
-                dy_node_sep = abs(node_A_y - node_B_y)
-
-                if np.sqrt(dx_node_sep ** 2 + dy_node_sep ** 2) < self.min_separation:
-                    # Pad the nodes slightly along the theta axis to clear the separation barrier safely
-                    pad_c = max(1.0, self.min_separation * 0.6)
-                    node_A_x = float((x_b - (nx-1) / 2) + pad_c * np.cos(theta))
-                    node_A_y = float((y_b - (ny-1) / 2) + pad_c * np.sin(theta))
-                    node_B_x = float((x_b - (nx-1) / 2) - pad_c * np.cos(theta))
-                    node_B_y = float((y_b - (ny-1) / 2) - pad_c * np.sin(theta))
-
-                dist_A = np.sqrt(node_A_x ** 2 + node_A_y ** 2)
-                dist_B = np.sqrt(node_B_x ** 2 + node_B_y ** 2)
-
-                if dist_A > dist_B:
-                    dx1_guess, dy1_guess = node_B_x, node_B_y
-                    dx2_guess, dy2_guess = node_A_x, node_A_y
-                else:
-                    dx1_guess, dy1_guess = node_A_x, node_A_y
-                    dx2_guess, dy2_guess = node_B_x, node_B_y
-
-                dx1_stage_a = dx1_guess
-                dy1_stage_a = dy1_guess
-            else:
-                dx1_stage_a = dx1_fit
-                dy1_stage_a = dy1_fit
+        #     dx1_stage_a = dx1_fit
+        #     dy1_stage_a = dy1_fit
+        # else:
+        #     # FIX: Check if 'node_A_x' exists locally (from the heavy saturation ellipse engine).
+        #     # If it does, run the core node padding checks. If it doesn't (from unsaturated track),
+        #     # skip straight to assigning the finalized guess variables.
+        #     if 'node_A_x' in locals():
+        #         dx_node_sep = abs(node_A_x - node_B_x)
+        #         dy_node_sep = abs(node_A_y - node_B_y)
+        #
+        #         if np.sqrt(dx_node_sep ** 2 + dy_node_sep ** 2) < self.min_separation:
+        #             # Pad the nodes slightly along the theta axis to clear the separation barrier safely
+        #             pad_c = max(1.0, self.min_separation * 0.6)
+        #             node_A_x = float((x_b - (nx-1) / 2) + pad_c * np.cos(theta))
+        #             node_A_y = float((y_b - (ny-1) / 2) + pad_c * np.sin(theta))
+        #             node_B_x = float((x_b - (nx-1) / 2) - pad_c * np.cos(theta))
+        #             node_B_y = float((y_b - (ny-1) / 2) - pad_c * np.sin(theta))
+        #
+        #         dist_A = np.sqrt(node_A_x ** 2 + node_A_y ** 2)
+        #         dist_B = np.sqrt(node_B_x ** 2 + node_B_y ** 2)
+        #
+        #         if dist_A > dist_B:
+        #             dx1_guess, dy1_guess = node_B_x, node_B_y
+        #             dx2_guess, dy2_guess = node_A_x, node_A_y
+        #         else:
+        #             dx1_guess, dy1_guess = node_A_x, node_A_y
+        #             dx2_guess, dy2_guess = node_B_x, node_B_y
+        #
+        #         dx1_stage_a = dx1_guess
+        #         dy1_stage_a = dy1_guess
+        #     else:
+        dx1_stage_a = dx1_fit
+        dy1_stage_a = dy1_fit
 
         # -----------------------------------------------------------------
         # HYPOTHESIS 2: STAGE A - FREEZE PRIMARY, LOCK COMPANION IN WELL
