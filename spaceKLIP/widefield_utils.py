@@ -1906,9 +1906,9 @@ class FITPSF:
         sigma_sample = np.std(vals, ddof=1) if n_pix > 1 else np.nan
         return med, sigma_mad, sigma_sample, n_pix
 
-    def debug_saturated_seeds(self, clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
+    def _debug_saturated_seeds(self, clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
                     dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny,
-                    is_ellipse_binary=True):
+                    is_ellipse_binary=True,node_A_x=None,node_A_y=None,node_B_x=None,node_B_y=None):
         load_plt_style(None)
 
         # FIX: Extract data range and force a non-zero color scale window
@@ -1921,12 +1921,12 @@ class FITPSF:
         else:
             vmin, vmax = d_min, d_max
 
-        fig, ax = plt.subplots(figsize=(7, 7))
+        fig, ax = plt.subplots(figsize=(9, 9))
 
         # Pass explicit vmin and vmax parameters to safeguard color normalisation
         im = ax.imshow(clean_data, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
 
-        ax.contour(nanmask, levels=[0.5], colors='red', linewidths=2, linestyles='dashed')
+        ax.contour(nanmask, levels=[0.5], colors='red', linewidths=5, linestyles='dashed',label='Blob Area')
         ax.plot(x_b, y_b, '+g', markersize=15, markeredgewidth=3, label='Blob Centroid')
 
         x_c, y_c = (nx - 1) / 2.0, (ny - 1) / 2.0
@@ -1935,10 +1935,10 @@ class FITPSF:
             a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
             b_disp = np.sqrt(2 * (mu20 + mu02 - common_term))
             patch = patches.Ellipse((x_b, y_b), width=2 * a_disp, height=2 * b_disp,
-                                    angle=np.degrees(theta), linewidth=2,
-                                    fill=False, edgecolor='white', linestyle='--',
+                                    angle=np.degrees(theta), linewidth=5,
+                                    fill=False, edgecolor='lightgray', linestyle='--',
                                     label='Moment Ellipse')
-            title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled core variance"
+            title_text = f"Saturated target/s Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled cores"
         else:
             distance_map = distance_transform_edt(nanmask)
             circle_radius = float(np.max(distance_map)) if np.max(distance_map) > 0 else 3.0
@@ -1946,26 +1946,31 @@ class FITPSF:
             seed_x_pixel = x_c + dx1_guess
             seed_y_pixel = y_c + dy1_guess
 
-            patch = patches.Circle((seed_x_pixel, seed_y_pixel), radius=circle_radius, linewidth=2,
-                                   fill=False, edgecolor='white', linestyle='--',
+            patch = patches.Circle((seed_x_pixel, seed_y_pixel), radius=circle_radius, linewidth=5,
+                                   fill=False, edgecolor='lightgray', linestyle='--',
                                    label='Inscribing Circle')
-            title_text = f"Live Diagnostics (ecc={eccentricity:.3f})\nEllipse Collapsed -> Best Inscribing Circle"
-
+            title_text = f"Saturated target/s Diagnostics (ecc={eccentricity:.3f})\nEllipse Collapsed -> Best Inscribing Circle"
         ax.add_patch(patch)
-
         ax.plot(x_c + dx1_guess, y_c + dy1_guess, 'Xr', markersize=12,
                 label=f'Primary Seed: [{dx1_guess:.2f}, {dy1_guess:.2f}]')
+        if node_A_x is not None and node_A_y is not None:
+            ax.plot(x_c + node_A_x, y_c + node_A_y, 'Xr', markersize=12,alpha = 0.25,
+                    label=f'Primary Node: [{node_A_x:.2f}, {node_A_y:.2f}]')
 
         if dx2_guess is not None and dy2_guess is not None:
             ax.plot(x_c + dx2_guess, y_c + dy2_guess, 'X', color='orange', markersize=12,
                     label=f'Companion Seed: [{dx2_guess:.2f}, {dy2_guess:.2f}]')
+            if node_B_x is not None and node_B_y is not None:
+                ax.plot(x_c + node_B_x, y_c + node_B_y, 'X', color='orange', markersize=12, alpha=0.25,
+                        label=f'Companion Node: [{node_B_x:.2f}, {node_B_y:.2f}]')
 
         ax.set_xlim(x_c - 15, x_c + 15)
         ax.set_ylim(y_c - 15, y_c + 15)
         ax.set_title(title_text)
-        ax.legend(loc='upper right')
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.14), ncol=2)
         plt.colorbar(im, ax=ax, label='Counts')
         plt.tight_layout()
+        plt.subplots_adjust(bottom=0.2)  # increase if legend clipped
         plt.show()
 
     def debug_final_fit(self, tile):
@@ -2044,16 +2049,28 @@ class FITPSF:
         is_ellipse_binary = False
 
         if num_sat_pixels > 0:
-            m00 = np.sum(nanmask)
-            m10 = np.sum(x_indices * nanmask)
-            m01 = np.sum(y_indices * nanmask)
+
+            nanmask = np.array(nanmask, dtype=int)
+            mask_bool = (nanmask == 1)
+            labeled = label(mask_bool, connectivity=1)
+            sizes = np.bincount(labeled.ravel())
+            small_labels = np.where(sizes < max(sizes[1:]))[0]
+            small_labels = small_labels[small_labels != 0]
+            mask_bool[np.isin(labeled, small_labels)] = False
+
+            struct_element = np.ones((3, 3), dtype=bool)
+            dilated_mask = binary_dilation(mask_bool, structure=struct_element)
+
+            m00 = np.sum(dilated_mask)
+            m10 = np.sum(x_indices * dilated_mask)
+            m01 = np.sum(y_indices * dilated_mask)
 
             x_b = m10 / m00
             y_b = m01 / m00
 
-            mu20 = np.sum(((x_indices - x_b) ** 2) * nanmask) / m00
-            mu02 = np.sum(((y_indices - y_b) ** 2) * nanmask) / m00
-            mu11 = np.sum(((x_indices - x_b) * (y_indices - y_b)) * nanmask) / m00
+            mu20 = np.sum(((x_indices - x_b) ** 2) * dilated_mask) / m00
+            mu02 = np.sum(((y_indices - y_b) ** 2) * dilated_mask) / m00
+            mu11 = np.sum(((x_indices - x_b) * (y_indices - y_b)) * dilated_mask) / m00
 
             theta = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
 
@@ -2090,24 +2107,24 @@ class FITPSF:
                         dx1_guess, dy1_guess = node_A_x, node_A_y
                         dx2_guess, dy2_guess = node_B_x, node_B_y
 
-                    log.debug( f"Saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}")
+                    log.debug( f"Saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}, theta={np.degrees(theta):.3f}")
                 elif guess_sep_A > min_allowed_sep and guess_sep_B <= min_allowed_sep:
                     is_ellipse_binary = True
                     dx1_guess, dy1_guess = - 0.005, + 0.005
                     dx2_guess, dy2_guess = node_A_x-node_B_x, node_A_y-node_B_y
-                    log.debug( f"Tentative saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}")
+                    log.debug( f"Tentative saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}, theta={np.degrees(theta):.3f}")
                 elif guess_sep_B > min_allowed_sep and guess_sep_A <= min_allowed_sep:
                     is_ellipse_binary = True
                     dx1_guess, dy1_guess = - 0.005, + 0.005
                     dx2_guess, dy2_guess = node_B_x-node_A_x, node_B_y-node_A_y
-                    log.debug( f"Tentative saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}")
+                    log.debug( f"Tentative saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}, theta={np.degrees(theta):.3f}")
                 else:
                     log.debug(f"Ellipse rejected, seeds too close: eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} or sep B={guess_sep_B:.2f} < {min_allowed_sep}. Considering circular blob.")
             else:
                 log.debug(f"Saturated circular blob: eccentricity={eccentricity:.3f} < 0.6 or lambda_max {lambda_max} <= lambda_min {lambda_min}. Routing to single-source track.")
 
         # -----------------------------------------------------------------
-        # UNIFIED FALLBACK CONTROLLER (With Inscribing Circle Optimization)
+        # UNIFIED FALLBACK CONTROLLER (For not ellipses)
         # -----------------------------------------------------------------
         search_canvas1 = clean_data * weights
         if not is_ellipse_binary:
@@ -2178,12 +2195,12 @@ class FITPSF:
                     log.debug(f"  >>> Companion rejected (too faint)")
 
         # -----------------------------------------------------------------
-        # Debug 1: Plot Saturated cores if present
+        # Debug 2: Plot Final Saturated cores if present
         # -----------------------------------------------------------------
         if num_sat_pixels > 0 and self.debug:
-            self.debug_saturated_seeds(clean_data, nanmask, x_b, y_b, mu20, mu02, theta,
+            self._debug_saturated_seeds(clean_data, dilated_mask, x_b, y_b, mu20, mu02, theta,
                              dx1_guess, dy1_guess, dx2_guess, dy2_guess, eccentricity, common_term, nx, ny,
-                             is_ellipse_binary=is_ellipse_binary)
+                             is_ellipse_binary=is_ellipse_binary,node_A_x=node_A_x,node_A_y=node_A_y,node_B_x=node_B_x,node_B_y=node_B_y)
 
         # -----------------------------------------------------------------
         # HYPOTHESIS 1: ONE SOURCE MODEL (Optimize only dx1, dy1)
