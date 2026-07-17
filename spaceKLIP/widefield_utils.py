@@ -2158,20 +2158,40 @@ class FITPSF:
         # -----------------------------------------------------------------
         # SELF-VALIDATING MOMENT ENGINE FOR DEEP HEAVY SATURATION
         # -----------------------------------------------------------------
-        num_sat_pixels = np.sum(nanmask)
+
         ny, nx = tile_with_nans.shape
         y_indices, x_indices = np.mgrid[0:ny, 0:nx]
 
         is_ellipse_binary = False
+        center_radius = 1  # pixels
+        yy, xx = np.indices(nanmask.shape)
+        center_mask = ((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2) <= (center_radius + 0.5) ** 2
 
-        if num_sat_pixels > 0:
+        #Find the true saturated area excluding spurious bad pixels clusters
+        if not np.any(np.isnan(tile_with_nans[center_mask])):
+            num_sat_pixels=0
+        else:
             nanmask = np.array(nanmask, dtype=int)
             mask_bool = (nanmask == 1)
             labeled = label(mask_bool, connectivity=1)
-            sizes = np.bincount(labeled.ravel())
-            small_labels = np.where(sizes < max(sizes[1:]))[0]
-            small_labels = small_labels[small_labels != 0]
-            mask_bool[np.isin(labeled, small_labels)] = False
+            # sizes = np.bincount(labeled.ravel())
+            # small_labels = np.where(sizes < max(sizes[1:]))[0]
+            # small_labels = small_labels[small_labels != 0]
+            # mask_bool[np.isin(labeled, small_labels)] = False
+            # labeled, sizes already computed above
+            center_counts = np.bincount(labeled[center_mask].ravel(), minlength=(labeled.max() + 1))
+            center_counts[0] = 0  # ignore background
+            if center_counts.sum() == 0:
+                # no component touches the center -> clear everything
+                num_sat_pixels = 0
+            else:
+                best_label = int(np.argmax(center_counts))
+                # set mask_bool True only where the chosen label is present
+                mask_bool[:] = False
+                mask_bool[labeled == best_label] = True
+                num_sat_pixels = np.sum(mask_bool)
+
+        if num_sat_pixels > 0:
             struct_element = np.ones((3, 3), dtype=bool)
             dilated_mask = binary_dilation(mask_bool, structure=struct_element)
 
@@ -2265,17 +2285,6 @@ class FITPSF:
         y_max_p1, x_max_p1, radius = None, None, None
         if not is_ellipse_binary:
             if num_sat_pixels > 0:
-                nanmask = np.array(nanmask, dtype=int)
-                mask_bool = (nanmask == 1)
-                labeled = label(mask_bool, connectivity=1)
-                sizes = np.bincount(labeled.ravel())
-                small_labels = np.where(sizes < max(sizes[1:]))[0]
-                small_labels = small_labels[small_labels != 0]
-                mask_bool[np.isin(labeled, small_labels)] = False
-
-                struct_element = np.ones((3, 3), dtype=bool)
-                dilated_mask = binary_dilation(mask_bool, structure=struct_element)
-
                 distance_map = distance_transform_edt(dilated_mask)
                 x_center = (nx - 1) / 2.0
                 y_center = (ny - 1) / 2.0
@@ -2304,11 +2313,11 @@ class FITPSF:
                 # 2. Companion Unsaturated Peak: Mask around primary based on min_separation
                 # Use a mask radius that's slightly less than min_separation to allow close companions
                 search_canvas2 = search_canvas1.copy()
-                mask=self._get_annulus_mask_by_radius(search_canvas2, x_max_p1, y_max_p1, r_in=self.min_separation+1, r_out=self.max_separation)
+                mask=self._get_annulus_mask_by_radius(search_canvas2.copy(), x_max_p1, y_max_p1, r_in=self.min_separation+1, r_out=self.max_separation)
                 search_canvas2[~mask] = np.nan
                 y_max_p2, x_max_p2 = np.unravel_index(np.nanargmax(search_canvas2), (ny, nx))
                 companion_peak = search_canvas2[y_max_p2, x_max_p2]
-                threshold_val = 5 * self._get_std_in_annulus(search_canvas2,x_max_p2,y_max_p2)
+                threshold_val = 5 * self._get_std_in_annulus(search_canvas2.copy(),x_max_p2,y_max_p2)
 
                 log.debug(f"[Early companion check]")
                 log.debug(f"  primary position: ({x_max_p1}, {y_max_p1})")
@@ -2368,7 +2377,7 @@ class FITPSF:
             return chi_sq
 
         log.debug(f"[HYPOTHESIS 1: ONE SOURCE MODEL]")
-        log.debug(f"  Initial guess_comp: dx1={guess_1[0]:.4f}, dy1={guess_1[1]:.4f}")
+        log.debug(f"  Initial guess_1: dx1={guess_1[0]:.4f}, dy1={guess_1[1]:.4f}")
         test_chi = chisq_1(guess_1)
         log.debug(f"  Chisq at initial guess: {test_chi:.4e}")
 
@@ -2465,10 +2474,12 @@ class FITPSF:
         # HYPOTHESIS 2: STAGE A - FREEZE PRIMARY, LOCK COMPANION IN WELL
         # -----------------------------------------------------------------
         if dx2_guess is not None and dy2_guess is not None:
-            guess_flux_comp = clean_data[int(round((clean_data.shape[0]-1)/2+dy2_guess)),int(round((clean_data.shape[1]-1)/2+dx2_guess))]/p1_fit
-            guess_comp = [guess_flux_comp, dx2_guess, dy2_guess]
+            p2_guess = self._solve_primary_peak_linear(clean_data, err_map, weights, imaging_psf, [dx2_guess,dy2_guess], mode="single")
+            c2_guess = np.nanmax([p2_guess/p1_fit,self.min_contrast])
+
+            guess_comp = [c2_guess, dx2_guess, dy2_guess]
             bounds_comp = [
-                (0.1, self.max_contrast),
+                (self.min_contrast, self.max_contrast),
                 (-self.max_separation, self.max_separation),
                 (-self.max_separation, self.max_separation)
             ]
@@ -2515,7 +2526,7 @@ class FITPSF:
             bounds_2 = [
                 (float(self.x_limits[0]), float(self.x_limits[1])),
                 (float(self.y_limits[0]), float(self.y_limits[1])),
-                (0.1, float(self.max_contrast)),
+                (float(self.min_contrast), float(self.max_contrast)),
                 (-float(self.max_separation) * 1.5, float(self.max_separation) * 1.5),
                 (-float(self.max_separation) * 1.5, float(self.max_separation) * 1.5)
             ]
@@ -2587,3 +2598,4 @@ class FITPSF:
 
         if self.showplot:
             self._plot_final_fit(tile_with_nans.copy())
+        pass
