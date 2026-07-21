@@ -2393,7 +2393,7 @@ class FITPSF:
         dx1_fit, dy1_fit = res_1.x
         p1_fit = self._solve_primary_peak_linear(clean_data, err_map, weights, imaging_psf, res_1.x, mode="single")
 
-        log.debug(f"  Final res_1.x: dx1={dx1_fit:.4f}, dy1={dy1_fit:.4f}")
+        log.debug(f"  Final res_1.x: dx1={dx1_fit:.4f}, dy1={dy1_fit:.4f}. p1_fit: {p1_fit:.4f}")
         log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}")
 
         # -----------------------------------------------------------------
@@ -2405,9 +2405,9 @@ class FITPSF:
                                         pad_amount=0)
             residuals_1 = (clean_data - (p1_fit * s1_basis_final)) * weights
 
-            star1_x_pos = (nx-1) / 2 + dx1_fit
-            star1_y_pos = (ny-1) / 2 + dy1_fit
-            dist_from_star1 = np.sqrt((x_indices - star1_x_pos) ** 2 + (y_indices - star1_y_pos) ** 2)
+            # star1_x_pos = (nx-1) / 2 + dx1_fit
+            # star1_y_pos = (ny-1) / 2 + dy1_fit
+            # dist_from_star1 = np.sqrt((x_indices - star1_x_pos) ** 2 + (y_indices - star1_y_pos) ** 2)
 
             search_residuals = residuals_1.copy()
 
