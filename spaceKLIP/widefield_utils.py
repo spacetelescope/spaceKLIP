@@ -23,8 +23,7 @@ from scipy.optimize import minimize
 from spaceKLIP.plotting import load_plt_style
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-from scipy.ndimage import distance_transform_edt
-
+from scipy.ndimage import binary_fill_holes
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -1647,8 +1646,8 @@ class FITPSF:
         True if binary (two-source) model was preferred by selection criteria.
     """
 
-    def __init__(self, max_separation=25, min_separation=1, x_limits=(-3, 3), y_limits=(-3, 3),
-                 min_contrast=0.01, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0):
+    def __init__(self, max_separation=25, min_separation=1, r_sat=0, x_limits=(-3, 3), y_limits=(-3, 3),
+                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0):
                 """
                 Initialize FITPSF fitter with solver options and gating thresholds.
 
@@ -1697,6 +1696,7 @@ class FITPSF:
                 self.min_contrast = min_contrast
                 self.max_contrast = max_contrast
                 self.eps = eps
+                self.r_sat = r_sat
                 self.maxiter = maxiter
                 self.background = background
 
@@ -1742,6 +1742,8 @@ class FITPSF:
             Optimal fitted primary peak amplitude. Returns np.nan if the design vector
             is numerically invalid (all zeros, contains NaN/Inf).
         """
+        imaging_psf = imaging_psf / np.nanmax(imaging_psf)  # <-- ADD THIS LINE, normalize PSF
+
         if weighted:
             inv_sigma = weights / err_map
             d_flat = (clean_data * inv_sigma).flatten()
@@ -1760,9 +1762,6 @@ class FITPSF:
             combined_basis = s1_basis + contrast * s2_basis
             M = (combined_basis * inv_sigma).flatten()[:, np.newaxis]
 
-        # FIX: Bulletproof Numerical Barrier.
-        # If the templates collapse to a zero vector during wild optimization steps,
-        # skip np.linalg.lstsq entirely to prevent the DLASCL Fortran library crash.
         if np.all(M == 0.0) or np.any(np.isnan(M)) or np.any(np.isinf(M)):
             return np.nan
 
@@ -1799,24 +1798,16 @@ class FITPSF:
         # radial distance from center to candidate (float)
         r = np.sqrt((x_peak - x_center) ** 2 + (y_peak - y_center) ** 2)
         # inner and outer radii for annulus (ensure inner >= 0)
-        r_in = max(self.min_separation+1, r - dr)
-        r_out = min(r + dr,self.max_separation+1)
-        # build radius map
+        r_in = max(0, r - dr)
+        r_out = min(r + dr,min(nx//2,ny//2))
+
         y_idx, x_idx = np.indices(tile.shape)
-        cx = x_idx  # shape (1, nx) broadcast to (ny, nx)
-        cy = y_idx  # shape (ny, 1) broadcast
-        # half sizes of pixel squares
         half = 0.5
-        # distance of pixel-center to image center
-        dx = np.abs(cx - x_center)
-        dy = np.abs(cy - y_center)
-        # minimal distance from center to any point in the pixel rectangle:
-        # if center projects inside the pixel along an axis, contribution is 0
+        dx = np.abs(x_idx - x_center)
+        dy = np.abs(y_idx - y_center)
         dx_min = np.maximum(dx - half, 0.0)
         dy_min = np.maximum(dy - half, 0.0)
         min_dist = np.sqrt(dx_min ** 2 + dy_min ** 2)
-        # maximal distance from center to any point in the pixel rectangle:
-        # this is distance to the farthest corner
         dx_max = dx + half
         dy_max = dy + half
         max_dist = np.sqrt(dx_max ** 2 + dy_max ** 2)
@@ -1839,7 +1830,7 @@ class FITPSF:
             # Pass explicit vmin and vmax parameters to safeguard color normalisation
             im = ax.imshow(ann_values, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
             ax.plot(x_peak, y_peak, '+r', markersize=15, markeredgewidth=3, label='Figure Center')
-            plt.title('Annulus area for STD')
+            plt.title('Annulus area for STD for companion')
             plt.tight_layout()
             plt.show()
 
@@ -1873,19 +1864,14 @@ class FITPSF:
             True for pixels whose pixel-square intersects the annulus region.
         """
         ny, nx = tile.shape
-
         if r_in is None:
-            r_in = float(getattr(self, "min_separation", 2.0))
+            r_in = np.max(self.r_sat,float(getattr(self, "min_separation", 2.0)))
         if r_out is None:
             r_out = float(getattr(self, "max_separation", r_in + dr))
 
-        # pixel centers indices
         y_idx, x_idx = np.indices((ny, nx))
-
-        # distances from the candidate center to pixel centers
         dx = np.abs(x_idx - float(x_peak))
         dy = np.abs(y_idx - float(y_peak))
-
         half = 0.5
         # minimal distance from center to any point in the pixel square
         dx_min = np.maximum(dx - half, 0.0)
@@ -1898,7 +1884,7 @@ class FITPSF:
         max_dist = np.sqrt(dx_max ** 2 + dy_max ** 2)
 
         # include pixels whose square intersects [r_in, r_out]
-        ann_mask = (min_dist <= float(r_out)) & (max_dist >= float(r_in))
+        ann_mask = (max_dist <= float(r_out)) & (min_dist >= float(r_in))
 
         if self.debug:
             ann_values = tile.copy()
@@ -1958,7 +1944,7 @@ class FITPSF:
 
     def _debug_saturated_seeds(self, clean_data, nanmask, x_b=None, y_b=None, mu20=None, mu02=None, theta=None,
                     dx1_guess=None, dy1_guess=None, dx2_guess=None, dy2_guess=None, eccentricity=None, common_term=None, nx=None, ny=None,
-                    is_ellipse_binary=True,node_A_x=None,node_A_y=None,node_B_x=None,node_B_y=None,circle_x=None, circle_y=None, circle_radius=None):
+                    is_ellipse_binary=True,node_A_x=None,a_sem=None,b_sem=None,node_A_y=None,node_B_x=None,node_B_y=None,circle_x=None, circle_y=None, circle_radius=None):
         """
         Interactive diagnostic plot for saturated-core seed proposals.
 
@@ -2021,11 +2007,11 @@ class FITPSF:
 
 
         if is_ellipse_binary:
-            a_disp = np.sqrt(2 * (mu20 + mu02 + common_term))
-            b_disp = np.sqrt(2 * (mu20 + mu02 - common_term))
-            patch = patches.Ellipse((x_b, y_b), width=2 * a_disp, height=2 * b_disp,
-                                    angle=np.degrees(theta), linewidth=5,
-                                    fill=False, edgecolor='lightgray', linestyle='--',
+            patch = patches.Ellipse((x_b, y_b),
+                                    width=2.0 * a_sem,  # full major axis
+                                    height=2.0 * b_sem,  # full minor axis
+                                    angle=np.degrees(theta),
+                                    linewidth=5, fill=False, edgecolor='lightgray', linestyle='--',
                                     label='Moment Ellipse')
             title_text = f"Saturated target/s Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled cores"
             if node_A_x is not None and node_A_y is not None:
@@ -2115,6 +2101,206 @@ class FITPSF:
         ax.legend()
         plt.show()
 
+    def _fit_two_circles_to_mask(self, dilated_mask, min_separation=1.0, max_separation=25.0,
+                                 min_radius=1.0, max_radius=30.0, debug=False):
+        """
+        Fit two circles sequentially to maximize coverage of saturated blob mask.
+
+        1. Find the largest circle that fits entirely inside the mask
+        2. Find the largest second circle that maximizes coverage of uncovered areas
+           (allows overlap with Circle 1, but maximizes new coverage)
+        Both circles must stay fully enclosed within the mask.
+        """
+        from scipy.ndimage import binary_erosion, distance_transform_edt
+
+        ny, nx = dilated_mask.shape
+        x_center, y_center = (nx - 1) / 2.0, (ny - 1) / 2.0
+
+        # Compute distance transform: each pixel's distance to mask boundary
+        distance_map = distance_transform_edt(dilated_mask.astype(int))
+
+        # Get border pixels for visualization
+        eroded = binary_erosion(dilated_mask)
+        border_mask = dilated_mask & (~eroded)
+        ys, xs = np.nonzero(border_mask)
+
+        # if xs.size < 10:
+        #     ys, xs = np.nonzero(dilated_mask)
+        #
+        # if xs.size < 4:
+        #     log.warning("Not enough pixels to fit two circles")
+        #     return x_center, y_center, 5.0, x_center + 5.0, y_center, 5.0, np.inf
+
+        # border_points = np.column_stack([xs.astype(float), ys.astype(float)])
+
+        # ===== STEP 1: Find largest circle (Circle 1) =====
+        # The center with maximum distance to boundary is the best candidate
+        y_max, x_max = np.unravel_index(np.argmax(distance_map), distance_map.shape)
+        x1 = float(x_max)
+        y1 = float(y_max)
+        r1_max = distance_map[y_max, x_max]
+
+        # Clamp to valid range
+        r1 = min(r1_max * 0.98, max_radius)  # 98% to add small margin
+        r1 = max(r1, min_radius)
+
+        log.debug(f"Circle 1: center=({x1:.1f}, {y1:.1f}), max_r_safe={r1_max:.2f}, fitted_r={r1:.2f}")
+
+        # ===== STEP 2: Find largest circle for Circle 2 =====
+        # Strategy: For each candidate location, compute the maximum radius that:
+        # 1. Stays within the border (distance_map)
+        # 2. Stays within the mask
+        # Then compute coverage of uncovered areas (areas not covered by Circle 1)
+
+        # Create a mask of Circle 1 for coverage calculation
+        yy, xx = np.indices(dilated_mask.shape, dtype=np.float64)
+        circle1_mask = (xx - x1) ** 2 + (yy - y1) ** 2 <= r1 ** 2
+
+        # For each pixel, compute maximum radius it can have
+        # max_radius_at_point = distance_map.copy().astype(float)
+
+        # Score each pixel as a potential Circle 2 center
+        # based on coverage of uncovered areas
+        coverage_score = np.zeros(dilated_mask.shape, dtype=np.float64)
+        for iy in range(ny):
+            for ix in range(nx):
+                if not dilated_mask[iy, ix]:
+                    coverage_score[iy, ix] = -np.inf
+                else:
+                    # Maximum radius at this point (stays within border)
+                    r_max_at_point = distance_map[iy, ix]
+
+                    if r_max_at_point < min_radius:
+                        coverage_score[iy, ix] = -np.inf
+                    else:
+                        # Create a circle at this location with max radius
+                        circle2_mask = (xx - ix) ** 2 + (yy - iy) ** 2 <= r_max_at_point ** 2
+
+                        # Calculate uncovered area: Circle 2 but not Circle 1
+                        uncovered = circle2_mask & dilated_mask & (~circle1_mask)
+
+                        # Score: how much NEW area does this cover
+                        coverage_score[iy, ix] = float(np.sum(uncovered))
+
+        # Find all pixels with max score
+        max_score = np.max(coverage_score)
+        tie_pixels = np.argwhere(coverage_score == max_score)
+
+        if len(tie_pixels) > 1:
+            # Among ties, pick the one farthest from Circle 1
+            distances_from_c1 = np.sqrt((tie_pixels[:, 1] - x1) ** 2 + (tie_pixels[:, 0] - y1) ** 2)
+            best_idx = np.argmax(distances_from_c1)
+            y_max_2, x_max_2 = tie_pixels[best_idx]
+            log.debug( f"Coverage tie-breaking: {len(tie_pixels)} pixels with score={max_score:.1f}, chose ({x_max_2}, {y_max_2}) [dist from C1: {distances_from_c1[best_idx]:.2f}]")
+        else:
+            y_max_2, x_max_2 = tie_pixels[0]
+
+
+        # # Find best location for Circle 2 (maximize uncovered coverage)
+        # y_max_2, x_max_2 = np.unravel_index(np.argmax(coverage_score), coverage_score.shape)
+        # Find ALL pixels with the max score (ties)
+        # max_score = np.max(coverage_score)
+        # tie_locations = np.argwhere(coverage_score == max_score)
+        x2 = float(x_max_2) + 0.005
+        y2 = float(y_max_2) - 0.005
+        r2_max = distance_map[y_max_2, x_max_2]
+
+        # Clamp to valid range
+        r2 = min(r2_max * 0.98, max_radius)
+        r2 = max(r2, min_radius)
+
+        dx1 = x1 - x_center
+        dy1 = y1 - y_center
+        log.debug(f"Circle 1: (dx1, dy1)=({dx1:.3f}, {dy1:.3f}), r1={r1:.2f}")
+
+
+        # Check separation constraint
+        sep = np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+        if sep < min_separation or sep > max_separation:
+            log.debug(f"Circles too close/far away: sep={sep:.2f} < min_separation={min_separation} or sep={sep:.2f} > max_separation={max_separation}. Dropping circle 2")
+            dx2 = None
+            dy2 = None
+            x2 = None
+            y2 = None
+        else:
+            dx2 = x2 - x_center
+            dy2 = y2 - y_center
+            log.debug(f"Circle 2: (dx2, dy2)=({dx2:.3f}, {dy2:.3f}), r2={r2:.2f}, sep={sep:.2f}")
+
+        if debug:
+            load_plt_style(None)
+            canvas = dilated_mask.astype(float)
+            d_min = float(np.min(canvas))
+            d_max = float(np.max(canvas))
+            if d_min == d_max:
+                vmin, vmax = d_min - 1.0, d_max + 1.0
+            else:
+                vmin, vmax = d_min, d_max
+
+            fig, ax = plt.subplots(figsize=(9, 9))
+            im = ax.imshow(canvas, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+            ax.contour(dilated_mask, levels=[0.5], colors='white', linewidths=2,
+                       linestyles='dashed', label='Blob Boundary')
+
+            # Plot circles
+            circle1 = patches.Circle((x1, y1), r1, fill=False, edgecolor='red',
+                                     linewidth=2.5, label=f'Circle 1 (r={r1:.2f})')
+            ax.add_patch(circle1)
+            if x2 is not None and y2 is not None:
+                circle2 = patches.Circle((x2, y2), r2, fill=False, edgecolor='blue',
+                                         linewidth=2.5, label=f'Circle 2 (r={r2:.2f})')
+                ax.add_patch(circle2)
+
+            ax.plot(x1, y1, 'Xr', markersize=12, markeredgewidth=2,
+                    label=f'Circle 1 Center: [{x1:.1f}, {y1:.1f}]')
+            if x2 is not None and y2 is not None:
+                ax.plot(x2, y2, 'X', color='orange', markersize=12, markeredgewidth=2,
+                        label=f'Circle 2 Center: [{x2:.1f}, {y2:.1f}]')
+            ax.plot(x_center, y_center, 'g+', markersize=15, markeredgewidth=2.5,
+                    label='Tile Center')
+
+            ax.set_xlim(x_center - 20, x_center + 20)
+            ax.set_ylim(y_center - 20, y_center + 20)
+            ax.set_title(f"Two-Circle Fit (Coverage-Based): sep={sep:.2f}px, r1={r1:.2f}, r2={r2:.2f}")
+            ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.10), ncol=2,
+                      fontsize=9, framealpha=0.95)
+            # plt.colorbar(im, ax=ax, label='Saturated Pixels')
+            ax.set_aspect('equal')
+            plt.tight_layout()
+            plt.subplots_adjust(bottom=0.18)
+            plt.show()
+
+        return dx1, dy1, r1, dx2, dy2, r2, 0.0
+
+    def _fit_psf_wings(self, data, psf, saturation_mask,dx, dy, background=0):
+        """
+        Fit PSF to get PEAK value (not flux).
+        Uses only unsaturated wing pixels.
+
+        Returns
+        -------
+        peak : float
+            Peak amplitude of the PSF at its center
+        """
+        #TODO: this is not currently working. Need to fix it!
+
+        # Normalize PSF to max=1
+        mod =  ut.imshift(psf / np.nanmax(psf), [dx, dy],  method='spline', nan_reflected=False, pad_amount=0)
+
+        # Create valid pixel mask (not saturated)
+        valid = ~saturation_mask
+
+        # Linear least squares: data = peak * psf_norm
+        # Solve: peak = (data · psf) / (psf · psf)
+        numerator = np.nansum((data[valid] - background) * mod[valid])
+        denominator = np.nansum(mod[valid] ** 2)
+
+        peak = numerator / denominator if denominator > 0 else np.nan
+        if self.debug:
+            plt.imshow(data-mod, origin='lower', cmap='viridis')
+            plt.show()
+        return peak
+
     def fitpsf(self, tile_with_nans, nanmask, err_map, imaging_psf):
         """
         Fit the tile for a primary source and optionally a companion.
@@ -2160,9 +2346,6 @@ class FITPSF:
         # -----------------------------------------------------------------
 
         ny, nx = tile_with_nans.shape
-        y_indices, x_indices = np.mgrid[0:ny, 0:nx]
-
-        is_ellipse_binary = False
         center_radius = 1  # pixels
         yy, xx = np.indices(nanmask.shape)
         center_mask = ((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2) <= (center_radius + 0.5) ** 2
@@ -2171,14 +2354,9 @@ class FITPSF:
         if not np.any(np.isnan(tile_with_nans[center_mask])):
             num_sat_pixels=0
         else:
-            nanmask = np.array(nanmask, dtype=int)
+            nanmask = np.asarray(nanmask, dtype=int, copy=True)
             mask_bool = (nanmask == 1)
             labeled = label(mask_bool, connectivity=1)
-            # sizes = np.bincount(labeled.ravel())
-            # small_labels = np.where(sizes < max(sizes[1:]))[0]
-            # small_labels = small_labels[small_labels != 0]
-            # mask_bool[np.isin(labeled, small_labels)] = False
-            # labeled, sizes already computed above
             center_counts = np.bincount(labeled[center_mask].ravel(), minlength=(labeled.max() + 1))
             center_counts[0] = 0  # ignore background
             if center_counts.sum() == 0:
@@ -2186,167 +2364,29 @@ class FITPSF:
                 num_sat_pixels = 0
             else:
                 best_label = int(np.argmax(center_counts))
-                # set mask_bool True only where the chosen label is present
-                mask_bool[:] = False
+                mask_bool = np.zeros_like(mask_bool, dtype=bool)
                 mask_bool[labeled == best_label] = True
                 num_sat_pixels = np.sum(mask_bool)
 
         if num_sat_pixels > 0:
-            struct_element = np.ones((3, 3), dtype=bool)
-            dilated_mask = binary_dilation(mask_bool, structure=struct_element)
-
-            m00 = np.sum(dilated_mask)
-            m10 = np.sum(x_indices * dilated_mask)
-            m01 = np.sum(y_indices * dilated_mask)
-
-            x_b = m10 / m00
-            y_b = m01 / m00
-
-            mu20 = np.sum(((x_indices - x_b) ** 2) * dilated_mask) / m00
-            mu02 = np.sum(((y_indices - y_b) ** 2) * dilated_mask) / m00
-            mu11 = np.sum(((x_indices - x_b) * (y_indices - y_b)) * dilated_mask) / m00
-
-            theta = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
-
-            common_term = np.sqrt((mu20 - mu02) ** 2 + 4 * (mu11 ** 2))
-            lambda_max = 0.5 * (mu20 + mu02 + common_term)
-            lambda_min = 0.5 * (mu20 + mu02 - common_term)
-
-            if lambda_max > 0:
-                eccentricity = np.sqrt(1.0 - (lambda_min / lambda_max))
-            else:
-                eccentricity = 0.0
-
-            if eccentricity >= 0.3 and lambda_max > lambda_min:
-                c_cores = np.sqrt(lambda_max - lambda_min)
-
-                node_A_x = float((x_b - (nx-1) / 2) + c_cores * np.cos(theta))
-                node_A_y = float((y_b - (ny-1) / 2) + c_cores * np.sin(theta))
-                node_B_x = float((x_b - (nx-1) / 2) - c_cores * np.cos(theta))
-                node_B_y = float((y_b - (ny-1) / 2) - c_cores * np.sin(theta))
-
-                guess_sep = np.sqrt((node_A_x - node_B_x) ** 2 + (node_A_y - node_B_y) ** 2)
-                guess_sep_A = np.sqrt((node_A_x) ** 2 + (node_A_y) ** 2)
-                guess_sep_B = np.sqrt((node_B_x) ** 2 + (node_B_y) ** 2)
-                min_allowed_sep = max(self.min_separation, 2.0)# if num_sat_pixels > 0 else 1.0)
-
-                # if guess_sep >= min_allowed_sep:
-                if guess_sep_A > min_allowed_sep and guess_sep_B > min_allowed_sep:
-                    is_ellipse_binary = True
-
-                    if guess_sep_A > guess_sep_B:
-                        dx1_guess, dy1_guess = node_B_x, node_B_y
-                        dx2_guess, dy2_guess = node_A_x, node_A_y
-                    else:
-                        dx1_guess, dy1_guess = node_A_x, node_A_y
-                        dx2_guess, dy2_guess = node_B_x, node_B_y
-
-                    log.debug( f"Saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}, theta={np.degrees(theta):.3f}")
-                elif guess_sep_A > min_allowed_sep and guess_sep_B <= min_allowed_sep:
-                    is_ellipse_binary = True
-                    dx1_guess, dy1_guess = - 0.005, + 0.005
-                    dx2_guess, dy2_guess = node_A_x-node_B_x, node_A_y-node_B_y
-                    log.debug( f"Tentative saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}, theta={np.degrees(theta):.3f}")
-                elif guess_sep_B > min_allowed_sep and guess_sep_A <= min_allowed_sep:
-                    is_ellipse_binary = True
-                    dx1_guess, dy1_guess = - 0.005, + 0.005
-                    dx2_guess, dy2_guess = node_B_x-node_A_x, node_B_y-node_A_y
-                    log.debug( f"Tentative saturated ellipse blob detected eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} and sep B={guess_sep_B:.2f}, theta={np.degrees(theta):.3f}")
-                else:
-                    log.debug(f"Ellipse rejected, seeds too close: eccentricity={eccentricity:.3f}, sep A={guess_sep_A:.2f} or sep B={guess_sep_B:.2f} < {min_allowed_sep}. Considering circular blob.")
-                    dx1_guess, dy1_guess = None, None
-                    dx2_guess, dy2_guess = None, None
-                    node_A_x = None
-                    node_A_y = None
-                    node_B_x = None
-                    node_B_y = None
-                    x_b = None
-                    y_b = None
-                    mu20 = None
-                    mu02 = None
-                    theta = None
-            else:
-                log.debug(f"Saturated circular blob: eccentricity={eccentricity:.3f} < 0.3 or lambda_max {lambda_max} <= lambda_min {lambda_min}. Routing to single-source track.")
-                dx1_guess, dy1_guess = None, None
-                dx2_guess, dy2_guess = None, None
-                node_A_x = None
-                node_A_y = None
-                node_B_x = None
-                node_B_y = None
-                x_b = None
-                y_b = None
-                mu20 = None
-                mu02 = None
-                theta = None
-        # -----------------------------------------------------------------
-        # UNIFIED FALLBACK CONTROLLER (For not ellipses)
-        # -----------------------------------------------------------------
-        search_canvas1 = clean_data * weights
-        y_max_p1, x_max_p1, radius = None, None, None
-        if not is_ellipse_binary:
-            if num_sat_pixels > 0:
-                distance_map = distance_transform_edt(dilated_mask)
-                x_center = (nx - 1) / 2.0
-                y_center = (ny - 1) / 2.0
-
-                y_center_guess, x_center_guess = np.unravel_index(np.argmax(distance_map), distance_map.shape)
-                radius = float(distance_map[y_center_guess, x_center_guess])
-                dx1_guess = float(x_center_guess - x_center)
-                dy1_guess = float(y_center_guess - y_center)
-
-                # clip to limits if desired
-                dx1_guess = np.clip(dx1_guess, *self.x_limits)
-                dy1_guess = np.clip(dy1_guess, *self.y_limits)
-                x_max_p1 = x_center_guess + 0.005
-                y_max_p1 = y_center_guess - 0.005
-                dx2_guess, dy2_guess = None, None
-
-                log.debug(f"[Early Single Saturated check]")
-                log.debug(f"  primary position: ({dx1_guess}, {dy1_guess})")
-            else:
-                # 1. Primary Unsaturated Peak
-                y_max_p1, x_max_p1 = np.unravel_index(np.nanargmax(search_canvas1), (ny, nx))
-                dx1_guess = float(x_max_p1 - (nx - 1) / 2) - 0.005
-                dy1_guess = float(y_max_p1 - (ny - 1) / 2) + 0.005
-                p1_guess = search_canvas1[y_max_p1, x_max_p1]
-
-                # 2. Companion Unsaturated Peak: Mask around primary based on min_separation
-                # Use a mask radius that's slightly less than min_separation to allow close companions
-                search_canvas2 = search_canvas1.copy()
-                mask=self._get_annulus_mask_by_radius(search_canvas2.copy(), x_max_p1, y_max_p1, r_in=self.min_separation+1, r_out=self.max_separation)
-                search_canvas2[~mask] = np.nan
-                y_max_p2, x_max_p2 = np.unravel_index(np.nanargmax(search_canvas2), (ny, nx))
-                companion_peak = search_canvas2[y_max_p2, x_max_p2]
-                threshold_val = 5 * self._get_std_in_annulus(search_canvas2.copy(),x_max_p2,y_max_p2)
-
-                log.debug(f"[Early companion check]")
-                log.debug(f"  primary position: ({x_max_p1}, {y_max_p1})")
-                log.debug(f"  primary peak (search_canvas1): {p1_guess:.6f}")
-                log.debug(f"  candidate position: ({x_max_p2}, {y_max_p2})")
-                log.debug(f"  candidate peak (search_canvas2): {companion_peak:.6f}")
-                log.debug(f"  threshold (std ina annulus): {5*threshold_val:.6f}")
-                log.debug(f"  PASS? {companion_peak > threshold_val}")
-
-                if companion_peak > threshold_val:
-                    is_ellipse_binary = True
-                    dx2_guess = float(x_max_p2 - (nx - 1) / 2) - 0.005
-                    dy2_guess = float(y_max_p2 - (ny - 1) / 2) + 0.005
-                    dx1_stage_a = dx1_guess
-                    dy1_stage_a = dy1_guess
-                    log.debug(f"  >>> BINARY TRACK ACTIVATED: dx2_guess={dx2_guess:.4f}, dy2_guess={dy2_guess:.4f}")
-                else:
-                    dx2_guess, dy2_guess = None, None
-                    log.debug(f"  >>> Companion rejected (too faint)")
-
-        # -----------------------------------------------------------------
-        # Debug 2: Plot Final Saturated cores if present
-        # -----------------------------------------------------------------
-        if num_sat_pixels > 0 and self.debug:
-            self._debug_saturated_seeds(clean_data, dilated_mask, x_b=x_b, y_b=y_b, mu20=mu20, mu02=mu02, theta=theta,
-                                     dx1_guess=dx1_guess, dy1_guess=dy1_guess, dx2_guess=dx2_guess, dy2_guess=dy2_guess,
-                                     eccentricity=eccentricity, common_term=common_term, nx=nx, ny=ny,
-                                     is_ellipse_binary=is_ellipse_binary,node_A_x=node_A_x,node_A_y=node_A_y,node_B_x=node_B_x,node_B_y=node_B_y,
-                                     circle_x=x_max_p1, circle_y=y_max_p1, circle_radius=radius)
+            p1_guess = None
+            filled_mask = binary_fill_holes(mask_bool.copy())
+            dx1_guess, dy1_guess, r1, dx2_guess, dy2_guess, r2, fit_error = self._fit_two_circles_to_mask(
+                filled_mask.copy(),
+                min_separation=self.min_separation,
+                max_separation=self.max_separation,
+                debug=self.debug
+            )
+        else:
+            # 1. Primary Unsaturated Peak
+            search_canvas1 = clean_data * weights
+            y_max_p1, x_max_p1 = np.unravel_index(np.nanargmax(search_canvas1), (ny, nx))
+            dx1_guess = float(x_max_p1 - (nx - 1) / 2) - 0.005
+            dy1_guess = float(y_max_p1 - (ny - 1) / 2) + 0.005
+            p1_guess = search_canvas1[y_max_p1, x_max_p1]
+            dx2_guess, dy2_guess = None, None
+            log.debug(f"[Early Single Not Saturated check]")
+            log.debug(f"  primary position: ({dx1_guess}, {dy1_guess}), and peak: {p1_guess}")
 
         # -----------------------------------------------------------------
         # HYPOTHESIS 1: ONE SOURCE MODEL (Optimize only dx1, dy1)
@@ -2366,8 +2406,9 @@ class FITPSF:
             if not np.isfinite(p1):
                 return 1e18
             # optional bound-check relative to prior guess (keep but compare to p1_guess)
-            # if p1 > (p1_guess * 2.0) or p1 < (max(1e-6, p1_guess * 0.5)):
-            #     return 1e18
+            if p1_guess is not None:
+                if p1 > (p1_guess * 2.0) or p1 < (max(1e-6, p1_guess * 0.5)):
+                    return 1e18
 
             mod = p1 * ut.imshift(imaging_psf / np.nanmax(imaging_psf), [dx, dy],
                                   method='spline', nan_reflected=False, pad_amount=0)
@@ -2391,7 +2432,7 @@ class FITPSF:
             bic_1 = res_1.fun + len(guess_1) * np.log(num_data_points)
 
         dx1_fit, dy1_fit = res_1.x
-        p1_fit = self._solve_primary_peak_linear(clean_data, err_map, weights, imaging_psf, res_1.x, mode="single")
+        p1_fit = self._solve_primary_peak_linear(clean_data, err_map, weights, imaging_psf, res_1.x, mode="single", weighted=False)
 
         log.debug(f"  Final res_1.x: dx1={dx1_fit:.4f}, dy1={dy1_fit:.4f}. p1_fit: {p1_fit:.4f}")
         log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}")
@@ -2399,23 +2440,18 @@ class FITPSF:
         # -----------------------------------------------------------------
         # COMPANION CENTROID HEURISTIC (Conditional Vectorized Search)
         # -----------------------------------------------------------------
-        if dx2_guess is None or dy2_guess is None:
+        if (dx2_guess is None or dy2_guess is None):
             # Mild/No Saturation: Run standard residual subtraction search to catch distant companions
             s1_basis_final = ut.imshift(imaging_psf, [dx1_fit, dy1_fit], method='spline', nan_reflected=False,
                                         pad_amount=0)
-            residuals_1 = (clean_data - (p1_fit * s1_basis_final)) * weights
-
-            # star1_x_pos = (nx-1) / 2 + dx1_fit
-            # star1_y_pos = (ny-1) / 2 + dy1_fit
-            # dist_from_star1 = np.sqrt((x_indices - star1_x_pos) ** 2 + (y_indices - star1_y_pos) ** 2)
-
-            search_residuals = residuals_1.copy()
+            companion_residuals = (clean_data - (p1_fit * s1_basis_final)) * weights
+            search_residuals = companion_residuals.copy()
 
             # Dynamically drop exclusion shield to avoid zeroing out close companions
-            dynamic_shield = self.min_separation #max(self.min_separation, 2 if num_sat_pixels > 0 else 1.0)
+            dynamic_shield = np.max([self.r_sat,float(getattr(self, "min_separation", 2.0))]) #self.min_separation #max(self.min_separation, 2 if num_sat_pixels > 0 else 1.0)
             # search_residuals[dist_from_star1 < dynamic_shield] = np.nan
             mask = self._get_annulus_mask_by_radius(search_residuals, (nx - 1) / 2, (ny - 1) / 2,
-                                                    r_in=dynamic_shield + 1,
+                                                    r_in=dynamic_shield,
                                                     r_out=self.max_separation)
             search_residuals[~mask] = np.nan
             # --- companion candidate selection with robust gating --------------------
@@ -2434,24 +2470,6 @@ class FITPSF:
             log.debug(f"  Initial guess_comp: dx1={dx2_guess}, dy1={dy2_guess}")
             log.debug(f"  Candidate selection with robust gating: dx1={x_peak:.4f}, dy1={y_peak:.4f}")
             log.debug(f"  Candidate initial peak: {peak_val:.4f}")
-
-            # Robust local noise estimate (use err_map; fallback to global median)
-            local_err_patch = err_map[y_min:y_max, x_min:x_max]
-            finite_local = (np.isfinite(local_err_patch) & (local_err_patch > 0.0))
-            if np.any(finite_local):
-                # integrated noise ~ sigma * sqrt(n_pix)
-                sigma_local = float(np.nanmedian(local_err_patch[finite_local]))
-                n_pix = float(np.count_nonzero(sub_window > 0))
-                integrated_noise = sigma_local * np.sqrt(max(1.0, n_pix))
-            else:
-                # fallback
-                finite_err = (np.isfinite(err_map) & (err_map > 0.0))
-                if np.any(finite_err):
-                    sigma_global = float(np.nanmedian(err_map[finite_err]))
-                    n_pix = float(np.count_nonzero(sub_window > 0))
-                    integrated_noise = sigma_global * np.sqrt(max(1.0, n_pix))
-                else:
-                    integrated_noise = 1.0
 
             threshold_val = 5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak)
             if peak_val > threshold_val:
@@ -2474,29 +2492,26 @@ class FITPSF:
         # HYPOTHESIS 2: STAGE A - FREEZE PRIMARY, LOCK COMPANION IN WELL
         # -----------------------------------------------------------------
         if dx2_guess is not None and dy2_guess is not None:
-            p2_guess = self._solve_primary_peak_linear(clean_data, err_map, weights, imaging_psf, [dx2_guess,dy2_guess], mode="single")
-            c2_guess = np.nanmax([p2_guess/p1_fit,self.min_contrast])
+            if num_sat_pixels ==0:
+                p2_guess = self._solve_primary_peak_linear(clean_data, err_map, weights, imaging_psf, [dx2_guess,dy2_guess], mode="single")
+                c2_guess = np.nanmax([p2_guess / p1_fit, self.min_contrast])
+            else:
+                # self.min_contrast = 0.05
+                c2_guess = (self.min_contrast+self.max_contrast)/2
 
             guess_comp = [c2_guess, dx2_guess, dy2_guess]
             bounds_comp = [
                 (self.min_contrast, self.max_contrast),
-                (-self.max_separation, self.max_separation),
-                (-self.max_separation, self.max_separation)
+                (dx2_guess + self.x_limits[0], dx2_guess + self.x_limits[1]),  # Limit dx2 drift
+                (dy2_guess + self.y_limits[0], dy2_guess + self.y_limits[1])   # Limit dy2 drift
             ]
+
+            s1 = p1_fit * ut.imshift(imaging_psf, [dx1_stage_a, dy1_stage_a], method='spline', nan_reflected=False,
+                                     pad_amount=0)
 
             def chisq_companion_stage(comp_params):
                 contrast, dx2, dy2 = comp_params
-                sep = np.sqrt((dx1_stage_a - dx2) ** 2 + (dy1_stage_a - dy2) ** 2)
-
-                if sep < self.min_separation or sep > self.max_separation:
-                    return 1e18
-
-                full_coords = [dx1_stage_a, dy1_stage_a, contrast, dx2, dy2]
-                f1_opt = self._solve_primary_peak_linear(clean_data, err_map, weights, imaging_psf, full_coords,
-                                                         mode="binary")
-                s1 = f1_opt * ut.imshift(imaging_psf, [dx1_stage_a, dy1_stage_a], method='spline', nan_reflected=False,
-                                         pad_amount=0)
-                s2 = (f1_opt * contrast) * ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False,
+                s2 = (p1_fit * contrast) * ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False,
                                                       pad_amount=0)
                 chi_sq = np.sum((((clean_data - (s1 + s2)) / err_map) * weights) ** 2)
                 return chi_sq
@@ -2504,8 +2519,8 @@ class FITPSF:
             log.debug(f"[HYPOTHESIS 2: STAGE A - FREEZE PRIMARY, LOCK COMPANION IN WELL]")
             log.debug(f"  dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}")
             log.debug(f"  dx2_guess={dx2_guess:.4f}, dy2_guess={dy2_guess:.4f}")
-            log.debug(f"  Initial guess_comp: contrast={guess_comp[0]:.4f}, dx2={guess_comp[1]:.4f}, dy2={guess_comp[2]:.4f}")
             log.debug(f"  Initial separation: {np.sqrt((dx1_stage_a - dx2_guess) ** 2 + (dy1_stage_a - dy2_guess) ** 2):.4f} px")
+            log.debug(f"  Initial guess_comp: dx2={guess_comp[1]:.4f}, dy2={guess_comp[2]:.4f}, contrast={guess_comp[0]:.4f},")
             log.debug(f"  Chisq at initial guess: {chisq_companion_stage(guess_comp):.4e}")
 
             eps_vector_comp = [1e-2,1e-3, 1e-3]
@@ -2513,9 +2528,8 @@ class FITPSF:
                                 options={'eps': eps_vector_comp, 'maxiter': self.maxiter})
             contrast_seed, dx2_seed, dy2_seed = res_comp.x
 
-            log.debug(f"  Final res_comp.x: dx1={dx2_seed:.4f}, dy1={dy2_seed:.4f}")
+            log.debug(f"  Final res_comp.x: dx2={dx2_seed:.4f}, dy2={dy2_seed:.4f}, contrast={contrast_seed:.4f}")
             log.debug(f"  Chisq at final res_comp.x: {chisq_companion_stage(res_comp.x):.4e}")
-
             # -----------------------------------------------------------------
             # HYPOTHESIS 2: STAGE B - JOINT RELAXATION (5 PARAMETERS)
             # -----------------------------------------------------------------
@@ -2527,8 +2541,8 @@ class FITPSF:
                 (float(self.x_limits[0]), float(self.x_limits[1])),
                 (float(self.y_limits[0]), float(self.y_limits[1])),
                 (float(self.min_contrast), float(self.max_contrast)),
-                (-float(self.max_separation) * 1.5, float(self.max_separation) * 1.5),
-                (-float(self.max_separation) * 1.5, float(self.max_separation) * 1.5)
+                (dx2_seed + self.x_limits[0], dx2_seed + self.x_limits[1]),  # Limit dx2 drift
+                (dy2_seed + self.y_limits[0], dy2_seed + self.y_limits[1])  # Limit dy2 drift
             ]
 
             def chisq_2(params):
@@ -2537,7 +2551,7 @@ class FITPSF:
 
                 if sep < self.min_separation or sep > self.max_separation:
                     return 1e18
-
+                #TODO: find a better way to solve for p1 for saturated binaries
                 p1 = self._solve_primary_peak_linear(clean_data, err_map, weights, imaging_psf, params, mode="binary")
                 s1 = p1 * ut.imshift(imaging_psf/np.nanmax(imaging_psf), [dx1, dy1], method='spline', nan_reflected=False, pad_amount=0)
                 s2 = (p1 * contrast) * ut.imshift(imaging_psf/np.nanmax(imaging_psf), [dx2, dy2], method='spline', nan_reflected=False,
@@ -2548,9 +2562,9 @@ class FITPSF:
             log.debug(f"[HYPOTHESIS 2: STAGE B - JOINT RELAXATION (5 PARAMETERS)]")
             log.debug(f"  dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}")
             log.debug(f"  dx2_guess={dx2_seed:.4f}, dy2_guess={dy2_seed:.4f}")
-            log.debug(f"  Initial guess_2: contrast={guess_2[2]:.4f}, dx2={guess_2[3]:.4f}, dy2={guess_2[4]:.4f}")
             sep_initial = np.sqrt((dx1_stage_a - dx2_seed) ** 2 + (dy1_stage_a - dy2_seed) ** 2)
             log.debug(f"  Initial separation: {sep_initial:.4f} px")
+            log.debug(f"  Initial guess_2: dx2={guess_2[3]:.4f}, dy2={guess_2[4]:.4f}, contrast={guess_2[2]:.4f}")
             log.debug(f"  Chisq at initial guess: {chisq_2(guess_2):.4e}")
 
             eps_vector_2 = [1e-3, 1e-3, 1e-2, 1e-3, 1e-3]
@@ -2561,7 +2575,7 @@ class FITPSF:
                                                      mode="single", weighted=False)
 
             log.debug(f"  Final res_2.x: dx1={dx1_fit:.4f}, dy1={dy1_fit:.4f}")
-            log.debug(f"  Final res_2.x: dx2={dx2_fit:.4f}, dy2={dy2_fit:.4f}")
+            log.debug(f"  Final res_2.x: dx2={dx2_fit:.4f}, dy2={dy2_fit:.4f}, contrast={contrast_fit:.4f}")
             log.debug(f"  Chisq at final res_2.x: {chisq_2(res_2.x):.4e}")
 
             if not (np.isfinite(res_2.fun) and res_2.fun < LARGE_FAILURE):
