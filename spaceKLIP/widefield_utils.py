@@ -2711,8 +2711,7 @@ class FITPSF:
                                                    res_1.x, mode="single",
                                                    r_sat1=r1)
 
-        log.debug(
-            f"  Final res_1.x: dx1_stage_a={dx1_stage_a:.2f}, dy1_stage_a={dy1_stage_a:.2f}. p1_stage_a: {p1_stage_a:.2f}")
+        log.debug(f"  Final res_1.x: dx1_stage_a={dx1_stage_a:.2f}, dy1_stage_a={dy1_stage_a:.2f}. p1_stage_a: {p1_stage_a:.2f}")
         log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}")
         return p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1
 
@@ -3101,8 +3100,12 @@ class FITPSF:
         - Debug logging provides detailed information on each stage if debug=True.
 
         """
+        # TODO: implement a while loop to search for additional companions past the first until non is found.
+
         if self.debug:
             log.setLevel(logging.DEBUG)
+        else:
+            log.setLevel(logging.INFO)
 
         clean_data = np.nan_to_num(tile_with_nans, nan=0.0) - self.background
         weights = 1.0 - nanmask
