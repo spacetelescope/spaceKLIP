@@ -3845,7 +3845,6 @@ class ImageTools():
     def extract_tiles(self,
                       fov_pixels=101,
                       subdir='tiles',
-                      catdir='pretiles',
                       fwhm=2.5,
                       threshold=1.5,
                       coresat_r_max=np.inf,
@@ -3882,9 +3881,6 @@ class ImageTools():
         subdir : str, optional
             Output sub-directory under ``database.output_dir`` where tiles will be
             saved. Default is 'tiles'.
-        catdir : str, optional
-            Directory containing per-file source catalogs (CSV format).
-            Default is 'pretiles'.
         fwhm : float, optional
             Full-width at half-maximum (FWHM) of the PSF in pixels, used for
             source detection and saturation core estimation. Default is 2.5 pixels.
@@ -4201,7 +4197,7 @@ class ImageTools():
                                 errtile=np.sqrt(tile)
                                 errtile[np.isnan(errtile)] = 1e8
                                 fit_psf = FITPSF(max_separation=bin_max_separation, min_separation=bin_min_separation,r_sat=coresat,
-                                                 x_limits=x_limits, y_limits=x_limits, min_contrast=0.05, max_contrast=1.0)
+                                                 x_limits=x_limits, y_limits=y_limits, min_contrast=0.05, max_contrast=1.0)
                                 fit_psf.debug = True
                                 fit_psf.fitpsf(tile_with_nans.copy(), nantile.copy(), errtile.copy(), imaging_psf.copy())
 
