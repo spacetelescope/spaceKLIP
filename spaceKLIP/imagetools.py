@@ -3602,78 +3602,158 @@ class ImageTools():
                                      kwargs={},
                                      subdir='pretiles'):
         """
-        Detect candidate point sources and write catalogs/DS9 regions for later tile extraction.
-        This routine runs `SEP <https://sep.readthedocs.io/>`_ (a Python implementation
-        of SExtractor) on each SCI/REF FITS file in the current database to build an
-        *initial* catalog of point-source candidates.
+        Detect candidate point sources and prepare catalogs and DS9 regions for tile extraction.
+
+        This method runs point-source detection on each SCI/REF FITS file in the current
+        database to build an initial catalog of point-source candidates. Detection can
+        leverage multiple input sources: DAOStarFinder (automated detection), Gaia EDR3,
+        SIMBAD, and/or user-provided input catalogs.
+
+        The detected sources are saved as CSV catalogs and DS9 region files for visual
+        inspection and downstream tile extraction. FITS files and masks are also written
+        to the output directory with updated metadata.
+
+        **Workflow**:
+        1. Loop through all SCI/REF FITS files in the database.
+        2. Optionally query external catalogs (Gaia, SIMBAD) for the image FOV.
+        3. Run DAOStarFinder to detect point sources above threshold.
+        4. Filter detections by sharpness and roundness criteria.
+        5. Merge detections with external sources (if provided).
+        6. Apply spatial de-duplication to avoid duplicate detections.
+        7. Write output catalogs (CSV) and DS9 region files.
+        8. Update database with new file paths and metadata.
 
         Parameters
         ----------
-        fwhm: float, optional
-            DAO FWHM of the PSF in pixels. Default is 3 pixels.
-        threshold: float, optional
-            DAO threshold parameter. Default is 1.
         npix : int or list of four int, optional
-            Number of pixels to be padded around the frames. If int, the same
-            number of pixels will be padded on each side. If list of four int,
-            a different number of pixels can be padded on the [left, right,
-            bottom, top] of the frames. The default is 1.
-        fov_pix : int
-            Tile size in detector pixels.
-        use_dao : bool, optional
-            If True, use DAOStarFinder to detect point sources. The default is True.
-        use_gaia : bool, optional
-            If True, query Gaia EDR3 for sources in the image FOV and include them in the catalog and DS9 region file.
-            The default is False.
-        use_allwise : bool, optional
-            If True, queries and filters for objects with ALLWISE W2 measurements.
-            Defaults to False.
-        use_simbad : bool, optional
-            If True, query Simbad for sources in the image FOV and include them in the catalog and DS9 region file.
-            The default is True.
+            Number of pixels to pad around the frames. If int, the same number of
+            pixels will be padded on each side. If list of four int, a different
+            number can be padded on [left, right, bottom, top]. Default is 0.
+        fov_pix : int, optional
+            Nominal tile size in detector pixels (used for region file generation
+            and FOV estimation for external catalog queries). Default is 65 pixels.
+        threshold : float, optional
+            Detection threshold (in units of background sigma) for DAOStarFinder.
+            Sources below this threshold are rejected. Default is 3.
+        fwhm : float, optional
+            Full-width at half-maximum (FWHM) of the PSF in pixels, used by
+            DAOStarFinder for source detection. Default is 2 pixels.
         cat_ext : str, optional
-            Extension for the input catalog file (CSV file) of point sources to be included in the output catalog and DS9 region file.
-            If provided, the catalog must contain columns 'x' and 'y' with the pixel coordinates of the sources.
-            Must be the same file structure as fitsfile, but instead of ending with  '.fits', it ends with 'cat_ext'.
-            If None, the final star catalog will be generated only from the FITS file using DAOStarFinder.
-            The default is None
-        sharpness_range : tuple of float, optional
-            Acceptable range of ``DAOStarFinder`` sharpness values.
-        roundness_range : tuple of float, optional
-            Acceptable range of ``DAOStarFinder`` roundness values.
+            File extension for input catalog files (e.g., '.cat', '.csv').
+            If provided, catalogs with the naming pattern ``fitsfile.replace('.fits', cat_ext)``
+            are loaded and merged with detections. The catalog must contain 'x' and 'y'
+            columns for pixel coordinates. Default is None (no input catalog).
+        use_dao : bool, optional
+            If True, use DAOStarFinder to detect point sources. Default is True.
+            Set to False to use only external catalogs (Gaia/SIMBAD).
+        use_gaia : bool, optional
+            If True, query Gaia EDR3 for sources in the image FOV and include them
+            in the output catalog and DS9 region file. Default is False.
+        use_allwise : bool, optional
+            If True, query and filter for objects with ALLWISE W2 measurements when
+            accessing Gaia. Default is False.
+        use_simbad : bool, optional
+            If True, query SIMBAD for sources in the image FOV and include them in
+            the output catalog and DS9 region file. Default is True.
+        sharpness_range : tuple of (float, float), optional
+            Acceptable range [min, max] of DAOStarFinder sharpness values.
+            Detections outside this range are rejected. Default is (0.3, 0.85).
+        roundness_range : tuple of (float, float), optional
+            Acceptable range [min, max] of DAOStarFinder roundness values.
+            Detections outside this range are rejected. Default is (-1, 1).
         kwargs : dict, optional
-            Extra configuration for the diagnostic DS9 region output.
+            Extra configuration for DS9 region file output. Available keys:
 
-            Available keywords are:
+            - ``'region_shape'`` : {'circle', 'square'}
+                Neighborhood geometry used for region visualization. Default is 'square'.
+            - ``'circle_radius'`` : float
+                Radius (pixels) for circular regions. If not provided, defaults to
+                fov_pix // 2.
+            - ``'region_center'`` : {'peak', 'centroid'}
+                Coordinate convention for region centers and de-duplication.
+                Default is 'peak'.
+            - ``'color'`` : str
+                Region color for DS9 display. Default is 'green'.
+            - ``'save_inner_catalogs'`` : bool
+                If True, also write per-threshold CSV catalogs and DS9 region files.
+                The combined products are always written. Default is False.
 
-            - color : str
-                Region color. The default is ``'green'``.
-            - region_shape : {'circle', 'square'}
-                Neighborhood geometry used by :func:`spaceKLIP.widefield_utils.select_table`.
-                The default is ``'square'``.
-            - region_center : {'peak', 'centroid'}
-                Coordinate convention for region centers and for de-duplication.
-                The default is ``'peak'``.
-            - save_inner_catalogs : bool
-                If True, also write the per-threshold CSV catalogs and DS9 region
-                files. The default is False. (The combined products are always written.)
-            - circle_radius : float
-                Passed through to :func:`spaceKLIP.widefield_utils.write_ds9_regions_from_sep_objects`.
-                Overwrites fov_pixels ONLY for region shape if parsed
         subdir : str, optional
-            Name of the sub-directory (inside ``database.output_dir``) where the
-            updated FITS/mask products and catalogs/regions will be written. The
-            default is ``'pretiles'``.
+            Name of the sub-directory (inside ``database.output_dir``) where
+            updated FITS/mask files, catalogs, and DS9 region files will be written.
+            Default is 'pretiles'.
 
         Returns
         -------
         None
+            Results are written to disk in ``subdir``. The instance's ``database``
+            is updated to reference the new file paths.
 
         Notes
         -----
-        *Broadcasting*: for convenience, most scalar parameters may also be given
-        as lists with one element per entry in ``thresh_sigma``. Scalars are
-        automatically broadcast.
+        **Source Detection Priority**:
+        External catalogs (input, Gaia, SIMBAD) are merged with DAOStarFinder
+        detections. De-duplication is performed to avoid duplicate entries for the
+        same source.
+
+        **Output Files**:
+        For each FITS file, the following are created:
+
+        - ``{filename}.csv`` : Combined source catalog (CSV format) with columns:
+          'x', 'y', 'ra', 'dec', 'sharpness', 'roundness', and source metadata.
+        - ``{filename}.reg`` : DS9 region file for visual inspection.
+        - Updated FITS file with consistent metadata.
+        - Updated mask file (_mask.fits).
+        - Updated nanmask file (_nanmask.fits) if saturation pixels are present.
+
+        **External Catalogs**:
+        If ``use_gaia=True`` or ``use_simbad=True``, queries are performed using
+        the image WCS and FOV. The resulting coordinates are transformed to pixel
+        space. If ``use_allwise=True`` (with Gaia), only Gaia sources with ALLWISE
+        W2 detections are included.
+
+        **Database Update**:
+        After processing each file, the database is updated with:
+        - New FITS file path (in output_dir).
+        - New mask file path.
+        - New nanmask file path.
+        - Center shift and alignment metadata.
+
+        **Quality Filtering**:
+        DAOStarFinder detections are filtered by:
+        - Sharpness: ``sharpness_min <= sharpness <= sharpness_max``
+        - Roundness: ``roundness_min <= roundness <= roundness_max``
+
+        Examples
+        --------
+        Detect sources using DAOStarFinder with Gaia cross-check:
+
+        >>> imagetools = ImageTools(database)
+        >>> imagetools.prepare_tiles_for_extraction(
+        ...     fov_pix=101,
+        ...     fwhm=2.5,
+        ...     threshold=2.5,
+        ...     use_dao=True,
+        ...     use_gaia=True,
+        ...     use_simbad=False
+        ... )
+
+        Use only external catalogs (Gaia + SIMBAD):
+
+        >>> imagetools.prepare_tiles_for_extraction(
+        ...     use_dao=False,
+        ...     use_gaia=True,
+        ...     use_simbad=True
+        ... )
+
+        Load sources from user-provided catalog:
+
+        >>> imagetools.prepare_tiles_for_extraction(
+        ...     cat_ext='.cat',
+        ...     use_dao=False,
+        ...     use_gaia=False,
+        ...     use_simbad=False
+        ... )
 
         """
 
@@ -3768,48 +3848,134 @@ class ImageTools():
                       catdir='pretiles',
                       fwhm=2.5,
                       threshold=1.5,
-                      r_max=np.inf,
-                      max_separation=1.5,
-                      bin_max_separation=5,
-                      bin_min_separation=1.5,
+                      coresat_r_max=np.inf,
+                      single_max_separation=1.5,
+                      bin_max_separation=np.inf,
+                      bin_min_separation=2.5,
+                      x_limits=(-3,-3),
+                      y_limits=(-3,-3),
                       subtract_bkg=True,
                       method='spline',
                       showplots=False):
 
-        """Extract and write small cutouts (tiles) centered on cataloged sources.
-        Note tah this step include the equivalent of nans_back from direct imaging. The final output tile have nans
-        corresponding to the location of the nantile mask.
+        """
+        Extract and write small cutouts (tiles) centered on cataloged sources.
+
+        This step creates small field-of-view (FOV) cutouts from the full detector
+        images. Each tile is centered on a detected source and includes optional
+        companion detection. The extracted tiles have NaN values at locations marked
+        by the saturation mask (nanmask), equivalent to the ``nans_back`` step in
+        direct imaging pipelines.
+
+        The method performs the following operations:
+        1. Groups sources across multiple FITS files based on sky coordinates.
+        2. Detects potential companions using PSF fitting (FITPSF).
+        3. Extracts tiles around each source, with proper shift correction.
+        4. Computes median stacks and error maps.
+        5. Saves tiles as FITS files with comprehensive headers.
 
         Parameters
         ----------
-        fov_pixels : int
-            Tile size in detector pixels.
-        subdir : str
-            Output sub-directory under ``database.output_dir``.
-        catdir : str
-            Directory containing the per-file source catalog (CSV).
-        fwhm : float
-            DAO FWHM of the PSF in pixels. Default is 2.5 pixels.
-        threshold : float
-            DAO threshold parameter. Default is 1.5.
-        r_max : float
-            Maximum distance from center to accept a candidate in estimating coresat. Default is np.inf.
-        max_separation : float
-            Maximum separation in pixels to consider two detections as the same source. Default is 1 pixels.
-        bin_max_separation: float
-            Maximum separation in pixels to consider two detections as a same binary. Default is 5
-        bin_min_separation: float
-            Minimum separation in pixels to consider two detections as a same binary. Default is 1.5
-        subtract_bkg : bool
-            If True, subtract a median background from each extracted tile. Default is True.
+        fov_pixels : int, optional
+            Tile size in detector pixels (creates fov_pixels x fov_pixels tiles).
+            Default is 101 pixels.
+        subdir : str, optional
+            Output sub-directory under ``database.output_dir`` where tiles will be
+            saved. Default is 'tiles'.
+        catdir : str, optional
+            Directory containing per-file source catalogs (CSV format).
+            Default is 'pretiles'.
+        fwhm : float, optional
+            Full-width at half-maximum (FWHM) of the PSF in pixels, used for
+            source detection and saturation core estimation. Default is 2.5 pixels.
+        threshold : float, optional
+            Detection threshold (in units of background sigma) for saturation
+            core identification. Default is 1.5.
+        r_max : float, optional
+            Maximum distance from center to accept a candidate when estimating
+            saturation radius. Default is np.inf (no limit).
+        single_max_separation : float, optional
+            Maximum separation (pixels) to consider two detections as the same
+            source across FITS files. Used for building source groups.
+            Default is 1.5 pixels.
+        bin_max_separation : float, optional
+            Maximum separation (pixels) to consider two detections as belonging
+            to the same binary system. Default is np.inf.
+        bin_min_separation : float, optional
+            Minimum separation (pixels) to accept two detections as a binary.
+            Default is 2.5 pixels.
+        x_limits : tuple of (float, float), optional
+            Allowed bounds [x_min, x_max] for primary source positional
+            optimization during PSF fitting. Default is (-3, -3).
+        y_limits : tuple of (float, float), optional
+            Allowed bounds [y_min, y_max] for primary source positional
+            optimization during PSF fitting. Default is (-3, -3).
+        subtract_bkg : bool, optional
+            If True, subtract a median background from each extracted tile.
+            Default is True.
         method : str, optional
-            Interpolation method for shifting ('fourier' or 'spline'). Default is 'fourier'.
+            Interpolation method for shifting tiles when recentering sources
+            ('spline' or 'fourier'). Default is 'spline'.
+        showplots : bool, optional
+            If True, display diagnostic plots during tile extraction.
+            Default is False.
+
         Returns
         -------
         None
-        """
-        #TODO: Right now the PSF is one for each fitsfile. I need to investigate if it would be better to create a PSF for each star, at the coordinates of the star in the fits file, and how.
+            Results are written to FITS files in ``subdir`` and the instance's
+            ``database`` is updated to point to the newly created tiles.
 
+        Notes
+        -----
+        **Grouping Strategy**:
+        Sources are grouped into "groups" based on sky coordinates across all FITS
+        files. Sources within ``single_max_separation`` of each other are grouped
+        together. This handles multi-epoch observations where the same source
+        appears in multiple exposures.
+
+        **Companion Detection**:
+        For each source, the FITPSF class is used to:
+        - Estimate saturation radius (coresat) from NaN core.
+        - Detect potential companions.
+        - Determine if the system is single or binary based on BIC model selection.
+
+        **Header Information**:
+        Output FITS headers include:
+        - ``STARCENX``, ``STARCENY``: Tile center position (1-indexed).
+        - ``STARPEAK``: Fitted primary star peak amplitude.
+        - ``COMPCENX``, ``COMPCENY``: Companion center (if detected).
+        - ``COMPEACK``: Companion peak amplitude.
+        - ``BINTEST``: Boolean indicating binary detection.
+        - ``CORESAT``: Saturation radius estimate.
+        - Per-frame metadata: ``FILE_i``, ``STARPEAK_i``, ``BINTEST_i``, etc.
+
+        **Median Stacking**:
+        If multiple frames contribute to the same source group, a median stack
+        is created. Errors are computed as the RMS of the error maps, properly
+        accounting for masked (NaN) pixels.
+
+        **Output Files**:
+        Tiles are saved as FITS files with naming convention:
+        ``jwtile_{detector}_{group_id}_calints.fits``
+
+        Examples
+        --------
+        Extract 101x101 pixel tiles with companion detection:
+
+        >>> imagetools = ImageTools(database)
+        >>> imagetools.extract_tiles(fov_pixels=101,
+        ...                          bin_max_separation=25,
+        ...                          bin_min_separation=2.5)
+
+        Extract smaller tiles without background subtraction:
+
+        >>> imagetools.extract_tiles(fov_pixels=51,
+        ...                          subtract_bkg=False)
+
+        """
+
+        # TODO: Right now the PSF is one for each fitsfile. I need to investigate if it would be better to create a PSF for each star, at the coordinates of the star in the fits file, and how.
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
@@ -3858,7 +4024,7 @@ class ImageTools():
         idx, d2d, _ = catalog_coords.match_to_catalog_sky(catalog_coords, nthneighbor=2)
         catalog['closest_group_memebr_distance'] = d2d.to(u.arcsec)
         pixscale = self.database.obs[key]['PIXSCALE'][j]
-        max_sep = max_separation * pixscale * u.arcsec
+        max_sep = single_max_separation * pixscale * u.arcsec
         idx1, idx2, d2d, d3d = catalog_coords.search_around_sky(catalog_coords, max_sep)
         unique_pairs_mask = idx1 < idx2
 
@@ -3955,7 +4121,7 @@ class ImageTools():
         catalog['closest_neighbor_group_id'] = group_neighbor_ids_lookup[catalog['group_id']]
 
         for group_i in np.unique(catalog['group_id']):
-            for key in np.unique(catalog[(catalog['group_id']==group_i)]['key']):
+            for key in np.unique(catalog[(catalog['group_id']==group_i)]['key'])[:1]:
                 log.info(f'Working on median star: ID {group_i}, key {key}')
                 ii=0
                 template_pri_header = None
@@ -3966,8 +4132,6 @@ class ImageTools():
                 all_cat_offsets = []
                 group=catalog[(catalog['group_id']==group_i)&(catalog['key']==key)]
                 all_star_sky_coords = []
-                visit_ids = []
-                program_ids = []
 
                 for fitsfile in np.unique(group['fitsfile']):
                     data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
@@ -3992,7 +4156,6 @@ class ImageTools():
                     psf_no_coronmsk = offsetpsf_func.gen_psf([0, 0], return_oversample=False, quick=False)
                     psf_no_coronmsk /= np.nanmax(psf_no_coronmsk)
                     imaging_psf = psf_no_coronmsk.copy()
-                    # imaging_psf = psf_dict[key][fitsfile].copy()
 
                     # Fill pixels flagged by the nanmask to avoid NaNs/holes creating
                     # interpolation/Fourier artifacts during shifting. The nanmask is
@@ -4024,7 +4187,7 @@ class ImageTools():
                                     tile_with_nans[(nantile==1)&(tile>0)] = np.nan
                                 else:
                                     tile_with_nans = np.copy(tile)
-                                coresat, core_mask_x, core_mask_y, ecccore, solcore = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=r_max)
+                                coresat, core_mask_x, core_mask_y, ecccore, solcore = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=coresat_r_max)
 
                                 det_method = source['method']
                                 roundness = source['roundness']
@@ -4035,22 +4198,22 @@ class ImageTools():
                                 dilated_mask = binary_dilation(nantile.astype(bool), structure=struct_element)
                                 bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
                                 tile-=bkg
+                                errtile=np.sqrt(tile)
+                                errtile[np.isnan(errtile)] = 1e8
+                                fit_psf = FITPSF(max_separation=bin_max_separation, min_separation=bin_min_separation,r_sat=coresat,
+                                                 x_limits=x_limits, y_limits=x_limits, min_contrast=0.05, max_contrast=1.0)
+                                fit_psf.debug = True
+                                fit_psf.fitpsf(tile_with_nans.copy(), nantile.copy(), errtile.copy(), imaging_psf.copy())
 
-                                fit_psf = FITPSF(max_separation=bin_max_separation,
-                                                 min_separation=max(coresat, bin_min_separation),
-                                                 x_limits=(-1,1), y_limits=(-1,1), min_contrast=0.01,
-                                                 max_contrast=1.0)
-                                err_map=np.sqrt(tile_with_nans)
-                                fit_psf.fitpsf(tile_with_nans.copy(), nantile.copy(), err_map, imaging_psf)
                                 bintest = fit_psf.bintest
                                 shifts1 = np.array([-fit_psf.dx1, -fit_psf.dy1])
                                 if bintest:
                                     shifts2 = np.array([-fit_psf.dx2, -fit_psf.dy2])
-                                    fitted_flux2 = fit_psf.flux2
+                                    fitted_p2 = fit_psf.peak2
                                 else:
                                     shifts2 = np.array([None, None])
-                                    fitted_flux2 = None
-                                fitted_flux1 = fit_psf.flux1
+                                    fitted_p2 = None
+                                fitted_p1 = fit_psf.peak1
 
                                 log.info(f"--> Estimated shifts: {shifts1}")
                                 # Need to determine largest potential shift for padding purposes
@@ -4059,7 +4222,6 @@ class ImageTools():
                                 log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
                                 # The fit was performed on pixels centered at round(x_extract).
-                                # star_peak = center_pixel - shift
                                 starframex = round(x_extract) - shifts1[0]
                                 starframey = round(y_extract) - shifts1[1]
                                 # Save the sub-pixel offset between the CATALOG guess and the REAL star peak
@@ -4105,10 +4267,10 @@ class ImageTools():
                                 head_sci['STARFRMY'] = round(starframey+1, 4)
                                 head_sci['STARCENX'] = tile_center+1
                                 head_sci['STARCENY'] = tile_center+1
-                                head_sci['STARFLUX'] = fitted_flux1
+                                head_sci['STARPEAK'] = fitted_p1
                                 head_sci['COMPCENX'] = (fitted_x2_pos + 1) if (fitted_x2_pos is not None and isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
                                 head_sci['COMPCENY'] = (fitted_y2_pos + 1) if (fitted_y2_pos is not None and isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
-                                head_sci['COMPFLUX'] = fitted_flux2
+                                head_sci['COMPEACK'] = fitted_p2
                                 head_sci['METHOD'] = det_method
                                 head_sci['ROUNDNESS'] = roundness if (roundness is not None and not isinstance(roundness,np.ma.MaskedArray)) else None
                                 head_sci['SHARPNESS'] = sharpness if (sharpness is not None and not isinstance(sharpness,np.ma.MaskedArray)) else None
@@ -4151,7 +4313,7 @@ class ImageTools():
 
                 comp_x_list = [hdul['COMPCENX'] for hdul in sci_hdus_list if hdul.get('COMPCENX') is not None]
                 comp_y_list = [hdul['COMPCENY'] for hdul in sci_hdus_list if hdul.get('COMPCENY') is not None]
-                comp_f_list = [hdul['COMPFLUX'] for hdul in sci_hdus_list if hdul.get('COMPFLUX') is not None]
+                comp_f_list = [hdul['COMPEACK'] for hdul in sci_hdus_list if hdul.get('COMPEACK') is not None]
                 t_count = np.sum([hdul.get('BINTEST') for hdul in sci_hdus_list])
                 f_count = len(sci_hdus_list) - t_count
                 is_binary = True if t_count >= f_count else False
@@ -4159,12 +4321,12 @@ class ImageTools():
                 # sci_hdr['EXTNAME'] = 'SCI'
                 sci_hdr['STARCENX'] = np.nanmean([hdul['STARCENX'] for hdul in sci_hdus_list])
                 sci_hdr['STARCENY'] = np.nanmean([hdul['STARCENY'] for hdul in sci_hdus_list])
-                sci_hdr['STARFLUX'] = np.nanmean([hdul['STARFLUX'] for hdul in sci_hdus_list])
+                sci_hdr['STARPEAK'] = np.nanmean([hdul['STARPEAK'] for hdul in sci_hdus_list])
 
                 sci_hdr['BINTEST'] = is_binary
                 sci_hdr['COMPCENX'] = np.nanmean(comp_x_list) if (is_binary and comp_x_list) else None
                 sci_hdr['COMPCENY'] = np.nanmean(comp_y_list) if (is_binary and comp_y_list) else None
-                sci_hdr['COMPFLUX'] = np.nanmean(comp_f_list) if (is_binary and comp_f_list) else None
+                sci_hdr['COMPEACK'] = np.nanmean(comp_f_list) if (is_binary and comp_f_list) else None
                 sci_hdr['CORESAT'] = np.nanmean([hdul['CORESAT'] for hdul in sci_hdus_list])
                 # sci_hdr['SKYCHECK'] = skycheck
 
@@ -4175,10 +4337,10 @@ class ImageTools():
                     sci_hdr[f'STARFRMY_{index}'] = hdul['STARFRMY']
                     sci_hdr[f'STARCENX_{index}'] = hdul['STARCENX']
                     sci_hdr[f'STARCENY_{index}'] = hdul['STARCENY']
-                    sci_hdr[f'STARFLUX_{index}'] = hdul['STARFLUX']
+                    sci_hdr[f'STARPEAK_{index}'] = hdul['STARPEAK']
                     sci_hdr[f'COMPCENX_{index}'] = hdul['COMPCENX']
                     sci_hdr[f'COMPCENY_{index}'] = hdul['COMPCENY']
-                    sci_hdr[f'COMPFLUX_{index}'] = hdul['COMPFLUX']
+                    sci_hdr[f'COMPEACK_{index}'] = hdul['COMPEACK']
                     sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
                     sci_hdr[f'CORESAT_{index}'] = hdul['CORESAT']
                     sci_hdr[f'CND_{index}'] = hdul['CND']
