@@ -3973,6 +3973,7 @@ class ImageTools():
 
         # TODO: Right now the PSF is one for each fitsfile. I need to investigate if it would be better to create a PSF for each star, at the coordinates of the star in the fits file, and how.
         # Set output directory.
+        breathing_room = np.nanmax([np.nanmax(np.abs([x_limits])),np.nanmax(np.abs([y_limits]))])*2
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
@@ -4145,7 +4146,7 @@ class ImageTools():
                     offsetpsf_func = JWST_PSF(apername,
                                               filt,
                                               date=date,
-                                              fov_pix=fov_pixels + bin_max_separation + 1 if (fov_pixels + bin_max_separation) % 2 == 0 else fov_pixels + bin_max_separation,
+                                              fov_pix=fov_pixels + breathing_room+ 1 if fov_pixels % 2 == 0 else fov_pixels + breathing_room,
                                               oversample=2,
                                               sp=None,
                                               use_coeff=False)
@@ -4174,16 +4175,28 @@ class ImageTools():
                                 x_extract, y_extract = source['x'], source['y']
 
                                 # Extract tiles around the coordinate of the stars
-                                tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels+bin_max_separation + 1 if (fov_pixels+bin_max_separation) % 2 == 0 else fov_pixels+bin_max_separation,showplots=showplots)
+                                tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,showplots=showplots)
                                 if nanmask is not None:
-                                    nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels+bin_max_separation + 1 if (fov_pixels+bin_max_separation) % 2 == 0 else fov_pixels+bin_max_separation,showplots=showplots)
+                                    nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,showplots=showplots)
                                     nantile[np.isnan(nantile)] = 1
                                     nantile = (nantile >= 0.5).astype(np.float32)
                                     tile_with_nans = np.copy(tile)
                                     tile_with_nans[(nantile==1)&(tile>0)] = np.nan
                                 else:
                                     tile_with_nans = np.copy(tile)
+
+
+                                if subtract_bkg:
+                                    struct_element = np.ones((3, 3), dtype=bool)
+                                    dilated_mask = binary_dilation(nantile.astype(bool), structure=struct_element)
+                                    bkg, rms = estimate_bkg_and_rms(tile_with_nans, mask=dilated_mask)
+                                    log.info(f"--> Estimated median subtracted bkg before extraction: {np.median(bkg)}")
+                                    tile_with_nans-=bkg
+
                                 coresat, core_mask_x, core_mask_y, ecccore, solcore = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=coresat_r_max)
+                                if coresat>0:
+                                    x_limits = [x_limits[0]-1,x_limits[1]+1]
+                                    y_limits = [y_limits[0]-1,y_limits[1]+1]
 
                                 det_method = source['method']
                                 roundness = source['roundness']
@@ -4197,8 +4210,9 @@ class ImageTools():
                                 errtile=np.sqrt(tile)
                                 errtile[np.isnan(errtile)] = 1e8
                                 fit_psf = FITPSF(max_separation=bin_max_separation, min_separation=bin_min_separation,r_sat=coresat,
-                                                 x_limits=x_limits, y_limits=y_limits, min_contrast=0.05, max_contrast=1.0)
-                                fit_psf.debug = True
+                                                 x_limits=x_limits, y_limits=y_limits, min_contrast=0.05, max_contrast=1.0, background=0)
+                                # fit_psf.debug = True
+                                fit_psf.showplot = True
                                 fit_psf.fitpsf(tile_with_nans.copy(), nantile.copy(), errtile.copy(), imaging_psf.copy())
 
                                 bintest = fit_psf.bintest
@@ -4264,8 +4278,8 @@ class ImageTools():
                                 head_sci['STARCENX'] = tile_center+1
                                 head_sci['STARCENY'] = tile_center+1
                                 head_sci['STARPEAK'] = fitted_p1
-                                head_sci['COMPCENX'] = (fitted_x2_pos + 1) if (fitted_x2_pos is not None and isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
-                                head_sci['COMPCENY'] = (fitted_y2_pos + 1) if (fitted_y2_pos is not None and isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
+                                head_sci['COMPCENX'] = (fitted_x2_pos + 1) if (fitted_x2_pos is not None and not isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
+                                head_sci['COMPCENY'] = (fitted_y2_pos + 1) if (fitted_y2_pos is not None and not isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
                                 head_sci['COMPEACK'] = fitted_p2
                                 head_sci['METHOD'] = det_method
                                 head_sci['ROUNDNESS'] = roundness if (roundness is not None and not isinstance(roundness,np.ma.MaskedArray)) else None
@@ -4289,6 +4303,7 @@ class ImageTools():
                                 star_sky = f_wcs.pixel_to_world(tile_center, tile_center)
                                 all_star_sky_coords.append([star_sky.ra.degree, star_sky.dec.degree])
                                 ii+=1
+                                pass
 
                 #Renconstruct an ad-hoc primary header for the final tile
                 pri_hdr = template_pri_header.copy()
