@@ -765,9 +765,7 @@ def stars_extractor(data,
                     pad_amount=0,
                     shifts=None,
                     method='fourier',
-                    showplots=False,
-                    cmap='Greys_r',
-                    stretch='linear',
+                    showplot=False,
                     kwargs={}
                     ):
     """
@@ -790,7 +788,9 @@ def stars_extractor(data,
         dx = x_i - x_f
         dy = y_i - y_f
     else:
-        dx, dy = shifts[0], shifts[1]
+        dx = (x_i - x_f) + shifts[0]
+        dy = (y_i - y_f) + shifts[1]
+        # dx, dy = shifts[0], shifts[1]
 
     # 3. Check if the shift is effectively zero
     is_zero_shift = (abs(dx) < 1e-6) and (abs(dy) < 1e-6)
@@ -833,14 +833,39 @@ def stars_extractor(data,
         tile = shifteddata[c_y - fov // 2: c_y + fov // 2 + 1,
         c_x - fov // 2: c_x + fov // 2 + 1]
 
-    if showplots:
-        norm = simple_norm(tile, stretch)
-        plt.imshow(tile, origin='lower', norm=norm, cmap=cmap)
-        plt.plot(tile.shape[1] // 2, tile.shape[0] // 2, 'xr', label='Target Center')
-        plt.colorbar()
-        plt.title(f'Extracted Star (Shift: {dx:.3f}, {dy:.3f})')
-        plt.show()
+    if showplot:
+        load_plt_style(None)
+        # 1. Safely extract the data min and max bounds
+        tile_min = float(np.nanmin(tile))
+        tile_max = float(np.nanmax(tile))
 
+        # 2. FIX: Dynamically safeguard the normalization limits
+        # If the image is completely flat or invalid, provide a safe default window
+        if tile_max <= tile_min:
+            vmin, vmax = -1.0, 1.0
+        else:
+            vmin = tile_min
+            # Try your preferred 20% scaling threshold
+            vmax_trial = tile_max * 0.2
+
+            # If the scaled vmax falls below or equal to vmin (due to negative values),
+            # fall back to a safe upper bound (e.g., halfway between min and max)
+            if vmax_trial <= vmin:
+                vmax = vmin + (tile_max - vmin) * 0.5
+            else:
+                vmax = vmax_trial
+
+        # Double check to guarantee absolute safety before passing to Matplotlib
+        if vmin >= vmax:
+            vmax = vmin + 1.0
+
+        fig, ax = plt.subplots(figsize=(5, 5))
+
+        # Pass explicit, fully verified parameters to the renderer
+        ax.imshow(tile, origin='lower', vmin=vmin, vmax=vmax, cmap='viridis')
+        plt.plot(tile.shape[1] // 2, tile.shape[0] // 2, 'xr', label='Target Center')
+        ax.legend()
+        plt.show()
     return tile
 
 def write_ds9_regions_from_sep_objects(
@@ -1024,7 +1049,7 @@ class DAO():
                 catalog=None,
                 nan_lim_percent=0.75,
                 two_pass=True,
-                showplots=False,
+                showplot=False,
                 psf=None,
                 fov=31
                  ):
@@ -1061,7 +1086,7 @@ class DAO():
         two_pass : bool, optional
             If True and ``fit_radius`` is set, do a broad pass followed by a tighter
             pass when refining coordinates.
-        showplots : bool, optional
+        showplot : bool, optional
             If True, show a diagnostic plot when refining coordinates for problematic fits.
         psf : 2D-array
             PSF model image passed directly to ``fit_psf``.
@@ -1085,7 +1110,7 @@ class DAO():
         self.catalog=catalog
         self.nan_lim_percent=nan_lim_percent
         self.two_pass = two_pass
-        self.showplots = showplots
+        self.showplot = showplot
         self.psf=psf
         self.fov=fov
         pass
@@ -1489,7 +1514,7 @@ class DAO():
                     search_radius=search_radius,
                     bkg_subtract=False,
                     two_pass=self.two_pass,
-                    showplots=self.showplots,
+                    showplot=self.showplot,
                     fwhm=self.fwhm,
                 )
                 x_fit = float(fx + xlo)
@@ -1664,7 +1689,7 @@ class FITPSF:
     """
 
     def __init__(self, max_separation=25, min_separation=1, r_sat=0, x_limits=(-3, 3), y_limits=(-3, 3),
-                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0, bic_gate=10.0):
+                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0, bic_gate=10.0,debug=False, showplot=False):
                 """
                 Initialize FITPSF fitter with solver options and gating thresholds.
 
@@ -1727,6 +1752,8 @@ class FITPSF:
                 self.maxiter = maxiter
                 self.background = background
                 self.bic_gate = bic_gate
+                self.debug = debug
+                self.showplot = showplot
 
                 # Extracted parameters results containers (filled by fitpsf)
                 self.peak1 = None
@@ -1737,8 +1764,7 @@ class FITPSF:
                 self.dy2 = None
                 self.bintest = False
                 self.success = False
-                self.debug = False
-                self.showplot = False
+
 
     def _solve_star_peak_linearly(self, clean_data, err_map, weights, imaging_psf, params,
                                    mode="single", weighted=True, r_sat1=0, r_sat2=0):
@@ -1898,10 +1924,12 @@ class FITPSF:
         d_wing = (clean_data * inv_sigma_wing).flatten()
         M_wing = (psf_basis * inv_sigma_wing).flatten()[:, np.newaxis]
 
-        if np.all(M_wing == 0.0) or np.any(np.isnan(M_wing)):
+        # if np.all(M_wing == 0.0) or np.any(np.isnan(M_wing)):
+        #     return np.nan
+        try:
+            scale, _, _, _ = np.linalg.lstsq(M_wing, d_wing, rcond=None)
+        except:
             return np.nan
-
-        scale, _, _, _ = np.linalg.lstsq(M_wing, d_wing, rcond=None)
 
         # scale is the fitted amplitude such that scale * PSF matches the data wings
         # Since PSF is normalized to peak=1, scale IS the true peak
@@ -2432,7 +2460,7 @@ class FITPSF:
         if sep < min_separation or sep > max_separation:
             dx1 = x1 - x_center
             dy1 = y1 - y_center
-            log.debug(f"Circle 1: (dx1, dy1)=({dx1:.3f}, {dy1:.3f}), r1={r1:.2f}")
+            log.debug(f"Circle 1: (dx1, dy1)=({dx1:.4f}, {dy1:.4f}), r1={r1:.2f}")
             log.debug(f"Circles too close/far away: sep={sep:.2f} < min_separation={min_separation} or sep={sep:.2f} > max_separation={max_separation}. Dropping circle 2")
             dx2 = None
             dy2 = None
@@ -2452,8 +2480,8 @@ class FITPSF:
                 dx2 = x1 - x_center
                 dy2 = y1 - y_center
 
-            log.debug(f"Circle 1: (dx1, dy1)=({dx1:.3f}, {dy1:.3f}), r1={r1:.2f}")
-            log.debug(f"Circle 2: (dx2, dy2)=({dx2:.3f}, {dy2:.3f}), r2={r2:.2f}, sep={sep:.2f}")
+            log.debug(f"Circle 1: (dx1, dy1)=({dx1:.4f}, {dy1:.4f}), r1={r1:.2f}")
+            log.debug(f"Circle 2: (dx2, dy2)=({dx2:.4f}, {dy2:.4f}), r2={r2:.2f}, sep={sep:.2f}")
 
         if debug:
             load_plt_style(None)
@@ -2480,10 +2508,10 @@ class FITPSF:
                 ax.add_patch(circle2)
 
             ax.plot(dx1+x_center, dy1+y_center, 'Xr', markersize=12, markeredgewidth=2,
-                    label=f'Circle 1 Center: [{dx1+x_center:.1f}, {dy1+y_center:.1f}]')
+                    label=f'Circle 1 Center: [{dx1+x_center:.4f}, {dy1+y_center:.4f}]')
             if x2 is not None and y2 is not None:
                 ax.plot(dx2+x_center, dy2+y_center, 'X', color='orange', markersize=12, markeredgewidth=2,
-                        label=f'Circle 2 Center: [{dx2+x_center:.1f}, {dy2+y_center:.1f}]')
+                        label=f'Circle 2 Center: [{dx2+x_center:.4f}, {dy2+y_center:.4f}]')
             ax.plot(x_center, y_center, 'g+', markersize=15, markeredgewidth=2.5,
                     label='Tile Center')
 
@@ -2602,12 +2630,12 @@ class FITPSF:
                                                      [dx1_guess, dy1_guess], mode="single", r_sat1=r1)
 
             log.debug(f"[Early Double check]")
-            log.debug(f"  primary position guesses: ({dx1_guess:.2f}, {dy1_guess:.2f}), p1_guess: {p1_guess:.2f}")
+            log.debug(f"  primary position guesses: ({dx1_guess:.4f}, {dy1_guess:.4f}), p1_guess: {p1_guess:.2f}")
             if dx2_guess is not None and dy2_guess is not None:
                 p2_guess = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                      [dx2_guess,dy2_guess], mode="single", r_sat1=r2)
                 c2_guess = p2_guess/p1_guess
-                log.debug(f"  companion position guesses: ({dx2_guess:.2f}, {dy2_guess:.2f}), p2_guess: {p2_guess:.2f}, c2_guess: {c2_guess:.2f}")
+                log.debug(f"  companion position guesses: ({dx2_guess:.4f}, {dy2_guess:.4f}), p2_guess: {p2_guess:.2f}, c2_guess: {c2_guess:.2f}")
             else:
                 p2_guess, c2_guess = None, None
                 log.debug(f"  companion discarded: setting guesses to None for centroid approach")
@@ -2625,7 +2653,7 @@ class FITPSF:
                                                      [dx1_guess,dy1_guess], mode="single", r_sat1=r1)
 
             log.debug(f"[Early Single check]")
-            log.debug(f"  primary position guesses: ({dx1_guess:.2f}, {dy1_guess:.2f}), p1_guess: {p1_guess:.2f}")
+            log.debug(f"  primary position guesses: ({dx1_guess:.4f}, {dy1_guess:.4f}), p1_guess: {p1_guess:.2f}")
             log.debug(f"  no companion found: setting guesses to None for centroid approach")
 
         return p1_guess, dx1_guess, dy1_guess, r1, p2_guess, c2_guess, dx2_guess, dy2_guess, r2, labeled, mask_bool_second_bests
@@ -2698,7 +2726,7 @@ class FITPSF:
             return chi_sq
 
         log.debug(f"[STAGE A - ONE SOURCE MODEL]")
-        log.debug(f"  Initial guess_1: dx1={guess_1[0]:.2f}, dy1={guess_1[1]:.2f}")
+        log.debug(f"  Initial guess_1: dx1={guess_1[0]:.4f}, dy1={guess_1[1]:.4f}")
         test_chi = chisq_1(guess_1)
         log.debug(f"  Chisq at initial guess: {test_chi:.4e}")
 
@@ -2716,7 +2744,7 @@ class FITPSF:
                                                    res_1.x, mode="single",
                                                    r_sat1=r1)
 
-        log.debug(f"  Final res_1.x: dx1_stage_a={dx1_stage_a:.2f}, dy1_stage_a={dy1_stage_a:.2f}. p1_stage_a: {p1_stage_a:.2f}")
+        log.debug(f"  Final res_1.x: dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}. p1_stage_a: {p1_stage_a:.2f}")
         log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}")
         return p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1, success
 
@@ -2905,11 +2933,11 @@ class FITPSF:
             return chi_sq
 
         log.debug(f"[STAGE B - FREEZE PRIMARY, LOCK COMPANION IN WELL]")
-        log.debug(f"  dx1_stage_a={dx1_stage_a:.2f}, dy1_stage_a={dy1_stage_a:.2f}, p1_stage_a:{p1_stage_a:.2f}")
+        log.debug(f"  dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}, p1_stage_a:{p1_stage_a:.2f}")
         log.debug(
-            f"  dx2_stage_a={dx2_stage_a:.2f}, dy2_stage_a={dy2_stage_a:.2f}, p2_stage_a:{p2_stage_a:.2f}, c2_stage_a: {c2_stage_a:.2f}")
+            f"  dx2_stage_a={dx2_stage_a:.4f}, dy2_stage_a={dy2_stage_a:.4f}, p2_stage_a:{p2_stage_a:.2f}, c2_stage_a: {c2_stage_a:.2f}")
         log.debug(
-            f"  Initial separation: {np.sqrt((dx1_stage_a - dx2_stage_a) ** 2 + (dy1_stage_a - dy2_stage_a) ** 2):.2f} px")
+            f"  Initial separation: {np.sqrt((dx1_stage_a - dx2_stage_a) ** 2 + (dy1_stage_a - dy2_stage_a) ** 2):.4f} px")
         log.debug(f"  Chisq at initial guess: {chisq_companion_stage(guess_comp):.4e}")
 
         eps_vector_comp = [1e-2, 1e-3, 1e-3]
@@ -3017,13 +3045,13 @@ class FITPSF:
                                                    r_sat1=r1, r_sat2=r2)
 
         log.debug(f"[STAGE B - JOINT RELAXATION (5 PARAMETERS)]")
-        log.debug(f"  dx1_stage_a={dx1_stage_a:.2f}, dy1_stage_a={dy1_stage_a:.2f}, p1_stage_a:{p1_stage_a:.2f}")
-        log.debug(f"  dx2_seed={dx2_seed:.2f}, dy2_seed={dy2_seed:.2f}, c2_seed:{c2_seed:.2f}")
+        log.debug(f"  dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}, p1_stage_a:{p1_stage_a:.2f}")
+        log.debug(f"  dx2_seed={dx2_seed:.4f}, dy2_seed={dy2_seed:.4f}, c2_seed:{c2_seed:.2f}")
         sep_initial = np.sqrt((dx1_stage_a - dx2_seed) ** 2 + (dy1_stage_a - dy2_seed) ** 2)
-        log.debug(f"  Initial separation: {sep_initial:.2f} px")
+        log.debug(f"  Initial separation: {sep_initial:.4f} px")
         log.debug(f"  Chisq at initial guess: {chisq_2(guess_2):.4e}")
-        log.debug(f"  Final res_2.x: dx1_stage_b={dx1_stage_b:.2f}, dy1_stage_b={dy1_stage_b:.2f}, p1_stage_b: {p1_stage_b:.2f}")
-        log.debug(f"  Final res_2.x: dx2_stage_b={dx2_stage_b:.2f}, dy2_stage_b={dy2_stage_b:.2f}, contrast_stage_b={contrast_stage_b:.2f}")
+        log.debug(f"  Final res_2.x: dx1_stage_b={dx1_stage_b:.4f}, dy1_stage_b={dy1_stage_b:.4f}, p1_stage_b: {p1_stage_b:.2f}")
+        log.debug(f"  Final res_2.x: dx2_stage_b={dx2_stage_b:.4f}, dy2_stage_b={dy2_stage_b:.4f}, contrast_stage_b={contrast_stage_b:.2f}")
         log.debug(f"  Chisq at final res_2.x: {chisq_2(res_2.x):.4e}")
 
         if not (np.isfinite(res_2.fun) and res_2.fun < 1e16):
@@ -3150,7 +3178,7 @@ class FITPSF:
         # MODEL SELECTION & INTEGRATED SELF-SORTING GATE
         # -----------------------------------------------------------------
         delta_bic = bic_1 - bic_2
-        if delta_bic >= self.bic_gate and contrast_stage_b >= self.min_contrast and np.isfinite(bic_2):
+        if delta_bic >= self.bic_gate and contrast_stage_b >= self.min_contrast and np.isfinite(bic_2) and success_b:
             self.bintest = True
             self.success = success_b
             p1, dx1, dy1, contrast, dx2, dy2 = p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b
@@ -3165,14 +3193,14 @@ class FITPSF:
             else:
                 self.peak1, self.dx1, self.dy1 = p1, dx1, dy1
                 self.peak2, self.dx2, self.dy2 = p2, dx2, dy2
-            log.info(f"Binary-source model accepted: delta BIC={delta_bic:.2f}, (dx1,dy1)=({self.dx1:.2f},{self.dy1:.2f}), peak1: {self.peak1:.2f} |  (dx2,dy2)=({self.dx2:.2f},{self.dy2:.2f}), peak2: {self.peak2:.2f}")
+            log.info(f"Binary-source model accepted: delta BIC={delta_bic:.2f}, (dx1,dy1)=({self.dx1:.4f},{self.dy1:.4f}), peak1: {self.peak1:.2f} |  (dx2,dy2)=({self.dx2:.4f},{self.dy2:.4f}), peak2: {self.peak2:.2f}")
 
         else:
             self.bintest = False
             self.success = success_a
             self.peak1, self.dx1, self.dy1 = p1_stage_a, dx1_stage_a, dy1_stage_a
             self.peak2, self.dx2, self.dy2 = 0.0, None, None
-            log.info(f"Single-source model accepted: delta BIC={delta_bic:.2f}, (dx,dy)=({self.dx1:.2f},{self.dy1:.2f}), peak: {self.peak1:.2f}")
+            log.info(f"Single-source model accepted: delta BIC={delta_bic:.2f}, (dx,dy)=({self.dx1:.4f},{self.dy1:.4f}), peak: {self.peak1:.2f}")
 
         if self.showplot or self.debug:
             self._plot_final_fit(tile_with_nans.copy())
