@@ -2715,7 +2715,7 @@ class FITPSF:
         log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}")
         return p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1
 
-    def _companion_centroid_search(self, clean_data, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_best):
+    def _companion_centroid_search(self, clean_data, nanmask, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_best):
         """
         Search residuals for companion candidate using centroid approach.
 
@@ -2732,6 +2732,8 @@ class FITPSF:
         ----------
         clean_data : ndarray of shape (ny, nx)
             Background-subtracted data tile.
+        nanmask : ndarray of shape (ny, nx)
+           Binary mask (1 for saturated, 0 for valid).
         err_map : ndarray of shape (ny, nx)
             Per-pixel uncertainties.
         weights : ndarray of shape (ny, nx)
@@ -2767,17 +2769,18 @@ class FITPSF:
 
         """
         ny, nx = clean_data.shape
+        nan_data=clean_data.copy()
+        nan_data[nanmask==1] = np.nan
         # Mild/No Saturation: Run standard residual subtraction search to catch distant companions
         s1_basis_final = ut.imshift(imaging_psf, [dx1_stage_a, dy1_stage_a], method='spline', nan_reflected=False,
                                     pad_amount=0)
-        companion_residuals = (clean_data - (p1_stage_a * s1_basis_final)) * weights
+        companion_residuals = (nan_data - (p1_stage_a * s1_basis_final)) * weights
         search_residuals = companion_residuals.copy()
-
         dynamic_shield = np.max([r1, float(getattr(self, "min_separation", 2.5))])
         mask = self._get_annulus_mask_by_radius(search_residuals, (nx - 1) / 2, (ny - 1) / 2,
                                                 r_in=dynamic_shield,
                                                 r_out=np.inf)
-        search_residuals[~mask] = 0
+        search_residuals[~mask] = np.nan
         y_peak, x_peak = np.unravel_index(np.nanargmax(search_residuals), (ny, nx))
 
         log.debug(f"[STAGE A - COMPANION CENTROID SEARCH]")
@@ -2797,7 +2800,7 @@ class FITPSF:
             r2 = np.mean(distances)
             dx2_guess = float(x_peak - ((nx - 1) / 2.0))
             dy2_guess = float(y_peak - ((ny - 1) / 2.0))
-            peak_guess = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+            peak_guess = self._solve_star_peak_linearly(nan_data, err_map, weights, imaging_psf,
                                                [dy2_guess, dx2_guess], mode="single",
                                                r_sat1=r2)
             threshold_val = None
@@ -2805,7 +2808,7 @@ class FITPSF:
         else:
             y_min, y_max = max(0, y_peak - 2), min(ny, y_peak + 3)
             x_min, x_max = max(0, x_peak - 2), min(nx, x_peak + 3)
-            sub_window = np.maximum(search_residuals[y_min:y_max, x_min:x_max], 0.0)
+            sub_window = np.fmax(search_residuals[y_min:y_max, x_min:x_max], 0.0)
             sub_sum = float(np.nansum(sub_window))
             dx2_guess = float(x_peak - ((nx - 1) / 2.0))
             dy2_guess = float(y_peak - ((ny - 1) / 2.0))
@@ -2814,7 +2817,7 @@ class FITPSF:
 
         log.debug(f"  Initial guess_comp: dx2_guess={dx2_guess:.2f}, dy2_guess={dy2_guess:.2f}")
         log.debug(f"  Candidate selection with robust gating: x2={x_peak:.2f}, y2={y_peak:.2f}")
-        log.debug(f"  Candidate initial peak: {peak_guess:.2f}")
+        log.debug(f"  Candidate initial peak: {peak_guess:.2f}. Estimated threshold (5-sigma): {threshold_val:.2f}")
         if threshold_val is None:
             dx2_stage_a = dx2_guess
             dy2_stage_a = dy2_guess
@@ -2828,7 +2831,7 @@ class FITPSF:
             cy = float(np.nansum(y_mesh * sub_window) / sub_sum)
             dx2_stage_a = float(cx - ((nx - 1) / 2.0))
             dy2_stage_a = float(cy - ((ny - 1) / 2.0))
-            p2_stage_a = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+            p2_stage_a = self._solve_star_peak_linearly(nan_data, err_map, weights, imaging_psf,
                                                        [dx2_stage_a, dy2_stage_a], mode="single", r_sat1=r2)
             c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
             log.debug(f"[Companion accepted]")
@@ -3122,7 +3125,7 @@ class FITPSF:
         #  STAGE A - COMPANION CENTROID SEARCH (if guesses not provided)
         # -----------------------------------------------------------------
         if (dx2_guess is None or dy2_guess is None):
-            p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = self._companion_centroid_search(clean_data, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_bests)
+            p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = self._companion_centroid_search(clean_data, nanmask, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_bests)
             searched=True
         else:
             p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = p2_guess, c2_guess, dx2_guess, dy2_guess
