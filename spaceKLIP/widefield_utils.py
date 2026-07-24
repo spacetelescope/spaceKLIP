@@ -1736,6 +1736,7 @@ class FITPSF:
                 self.dx2 = None
                 self.dy2 = None
                 self.bintest = False
+                self.success = False
                 self.debug = False
                 self.showplot = False
 
@@ -2288,7 +2289,7 @@ class FITPSF:
         plt.show()
 
     def _fit_two_circles_to_mask(self, dilated_mask, min_separation=1.0, max_separation=25.0,
-                                 min_radius=1.0, max_radius=30.0, debug=False):
+                                 min_radius=1.0, max_radius=30.0, clamp_value =1, debug=False):
         """
         Fit two circles sequentially to maximize coverage of saturated blob mask.
 
@@ -2315,6 +2316,9 @@ class FITPSF:
             Minimum allowed circle radius (pixels). Default is 1.0.
         max_radius : float, optional
             Maximum allowed circle radius (pixels). Default is 30.0.
+        clamp_value: float, optional
+            Fraction of maximum distance to boundary used to clamp Circle 1 and 2 radius.
+            Default is 0.98 (i.e., 98% of max distance).
         debug : bool, optional
             If True, display diagnostic plot showing fitted circles and mask.
             Default is False.
@@ -2356,7 +2360,7 @@ class FITPSF:
         r1_max = distance_map[y_max, x_max]
 
         # Clamp to valid range
-        r1 = min(r1_max * 0.98, max_radius)  # 98% to add small margin
+        r1 = min(r1_max * clamp_value, max_radius)  # 98% to add small margin
         r1 = max(r1, min_radius)
 
 
@@ -2420,7 +2424,7 @@ class FITPSF:
         r2_max = distance_map[y_max_2, x_max_2]
 
         # Clamp to valid range
-        r2 = min(r2_max * 0.98, max_radius)
+        r2 = min(r2_max * clamp_value, max_radius)
         r2 = max(r2, min_radius)
 
         # Check separation constraint
@@ -2701,7 +2705,8 @@ class FITPSF:
         eps_vector_1 = [1e-3, 1e-3]
         res_1 = minimize(chisq_1, guess_1, method='L-BFGS-B', bounds=bounds_1,
                          options={'eps': eps_vector_1, 'maxiter': self.maxiter, 'ftol': 1e-12})
-        if not (np.isfinite(res_1.fun) and res_1.fun < 1e16):
+        success = res_1.success
+        if not (np.isfinite(res_1.fun) and res_1.fun < 1e16 and not success):
             bic_1 = np.inf
         else:
             bic_1 = res_1.fun + len(guess_1) * np.log(num_data_points)
@@ -2713,7 +2718,7 @@ class FITPSF:
 
         log.debug(f"  Final res_1.x: dx1_stage_a={dx1_stage_a:.2f}, dy1_stage_a={dy1_stage_a:.2f}. p1_stage_a: {p1_stage_a:.2f}")
         log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}")
-        return p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1
+        return p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1, success
 
     def _companion_centroid_search(self, clean_data, nanmask, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_best):
         """
@@ -2843,7 +2848,7 @@ class FITPSF:
 
         return p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a
 
-    def _companion_search_frozen_primary(self, clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a):
+    def _companion_search_frozen_primary(self, clean_data, nanmask, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a):
         """
         Optimize companion parameters with primary position frozen (Stage B).
 
@@ -2910,11 +2915,12 @@ class FITPSF:
         eps_vector_comp = [1e-2, 1e-3, 1e-3]
         res_comp = minimize(chisq_companion_stage, guess_comp, method='L-BFGS-B', bounds=bounds_comp,
                             options={'eps': eps_vector_comp, 'maxiter': self.maxiter})
+        success = res_comp.success
         c2_seed, dx2_seed, dy2_seed = res_comp.x
 
         log.debug(f"  Final res_comp.x: dx2_seed={dx2_seed:.2f}, dy2_seed={dy2_seed:.2f}, c2_seed={c2_seed:.2f}")
         log.debug(f"  Chisq at final res_comp.x: {chisq_companion_stage(res_comp.x):.4e}")
-        return c2_seed, dx2_seed, dy2_seed
+        return c2_seed, dx2_seed, dy2_seed, success
 
     def _companion_search_joint_relaxation(self, clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, c2_seed, dx2_seed, dy2_seed, num_data_points, r1, r2):
         """
@@ -3004,7 +3010,7 @@ class FITPSF:
         res_2 = minimize(chisq_2, guess_2, method='L-BFGS-B',
                          bounds=bounds_2,
                          options={'eps': eps_vector_2_pos, 'maxiter': self.maxiter, 'ftol': 1e-12})
-
+        success = res_2.success
         dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b = res_2.x
         p1_stage_b = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                    res_2.x, mode="binary",
@@ -3016,17 +3022,15 @@ class FITPSF:
         sep_initial = np.sqrt((dx1_stage_a - dx2_seed) ** 2 + (dy1_stage_a - dy2_seed) ** 2)
         log.debug(f"  Initial separation: {sep_initial:.2f} px")
         log.debug(f"  Chisq at initial guess: {chisq_2(guess_2):.4e}")
-        log.debug(
-            f"  Final res_2.x: dx1_stage_b={dx1_stage_b:.2f}, dy1_stage_b={dy1_stage_b:.2f}, p1_stage_b: {p1_stage_b:.2f}")
-        log.debug(
-            f"  Final res_2.x: dx2_stage_b={dx2_stage_b:.2f}, dy2_stage_b={dy2_stage_b:.2f}, contrast_stage_b={contrast_stage_b:.2f}")
+        log.debug(f"  Final res_2.x: dx1_stage_b={dx1_stage_b:.2f}, dy1_stage_b={dy1_stage_b:.2f}, p1_stage_b: {p1_stage_b:.2f}")
+        log.debug(f"  Final res_2.x: dx2_stage_b={dx2_stage_b:.2f}, dy2_stage_b={dy2_stage_b:.2f}, contrast_stage_b={contrast_stage_b:.2f}")
         log.debug(f"  Chisq at final res_2.x: {chisq_2(res_2.x):.4e}")
 
         if not (np.isfinite(res_2.fun) and res_2.fun < 1e16):
             bic_2 = np.inf
         else:
             bic_2 = res_2.fun + len(guess_2) * np.log(num_data_points)
-        return p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, bic_2
+        return p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, bic_2, success
 
     def fitpsf(self, tile_with_nans, nanmask, err_map, imaging_psf):
         """
@@ -3119,28 +3123,26 @@ class FITPSF:
         # -----------------------------------------------------------------
         # STAGE A - ONE SOURCE MODEL (Optimize only dx1, dy1)
         # -----------------------------------------------------------------
-        p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1 = self._one_source_model(clean_data, nanmask, err_map, weights, imaging_psf, p1_guess, dx1_guess, dy1_guess, num_data_points, r1)
+        p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1, success_a = self._one_source_model(clean_data, nanmask, err_map, weights, imaging_psf, p1_guess, dx1_guess, dy1_guess, num_data_points, r1)
 
         # -----------------------------------------------------------------
         #  STAGE A - COMPANION CENTROID SEARCH (if guesses not provided)
         # -----------------------------------------------------------------
         if (dx2_guess is None or dy2_guess is None):
             p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = self._companion_centroid_search(clean_data, nanmask, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_bests)
-            searched=True
         else:
             p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = p2_guess, c2_guess, dx2_guess, dy2_guess
-            searched=False
 
         if dx2_stage_a is not None and dy2_stage_a is not None:
             # -----------------------------------------------------------------
             # STAGE B - FREEZE PRIMARY, LOCK COMPANION IN WELL
             # -----------------------------------------------------------------
-            c2_seed, dx2_seed, dy2_seed = self._companion_search_frozen_primary(clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a)
+            c2_seed, dx2_seed, dy2_seed, _ = self._companion_search_frozen_primary(clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a)
 
             # -----------------------------------------------------------------
             # STAGE B - JOINT RELAXATION (5 PARAMETERS)
             # -----------------------------------------------------------------
-            p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, bic_2 = self._companion_search_joint_relaxation(clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, c2_seed, dx2_seed, dy2_seed, num_data_points, r1, r2)
+            p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, bic_2, success_b = self._companion_search_joint_relaxation(clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, c2_seed, dx2_seed, dy2_seed, num_data_points, r1, r2)
         else:
             bic_2 = np.inf
 
@@ -3150,6 +3152,7 @@ class FITPSF:
         delta_bic = bic_1 - bic_2
         if delta_bic >= self.bic_gate and contrast_stage_b >= self.min_contrast and np.isfinite(bic_2):
             self.bintest = True
+            self.success = success_b
             p1, dx1, dy1, contrast, dx2, dy2 = p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b
             p2 = p1 * contrast
 
@@ -3166,6 +3169,7 @@ class FITPSF:
 
         else:
             self.bintest = False
+            self.success = success_a
             self.peak1, self.dx1, self.dy1 = p1_stage_a, dx1_stage_a, dy1_stage_a
             self.peak2, self.dx2, self.dy2 = 0.0, None, None
             log.info(f"Single-source model accepted: delta BIC={delta_bic:.2f}, (dx,dy)=({self.dx1:.2f},{self.dy1:.2f}), peak: {self.peak1:.2f}")
