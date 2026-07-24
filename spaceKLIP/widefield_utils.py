@@ -2856,13 +2856,12 @@ class FITPSF:
 
         log.debug(f"  Initial guess_comp: dx2_guess={dx2_guess:.2f}, dy2_guess={dy2_guess:.2f}")
         log.debug(f"  Candidate selection with robust gating: x2={x_peak:.2f}, y2={y_peak:.2f}")
-        log.debug(f"  Candidate initial peak: {peak_guess:.2f}. Estimated threshold (5-sigma): {threshold_val:.2f}")
         if threshold_val is None:
             dx2_stage_a = dx2_guess
             dy2_stage_a = dy2_guess
             p2_stage_a =peak_guess
             c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
-            log.debug(f"[Companion accepted]")
+            log.debug(f"[Companion rejected]")
             log.debug(f"  Sigma threshold skipped, plausible saturated patch detected")
         elif peak_guess > threshold_val:
             y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
@@ -2874,10 +2873,10 @@ class FITPSF:
                                                        [dx2_stage_a, dy2_stage_a], mode="single", r_sat1=r2)
             c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
             log.debug(f"[Companion accepted]")
-            log.debug(f"  above 5-sigma annulus: {peak_guess:.2f}>{threshold_val:.2f}")
+            log.debug(f"  Candidate initial peak: {peak_guess:.2f} > {threshold_val:.2f} (5-sigma)")
         else:
             log.debug(f"[Companion rejected]")
-            log.debug(f"  below 5-sigma annulus: {peak_guess:.2f}<={threshold_val:.2f}")
+            log.debug(f"  Candidate initial peak: {peak_guess:.2f} <= {threshold_val:.2f} (5-sigma)")
             p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = None, None, None, None
 
         return p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a
