@@ -1,29 +1,36 @@
-import logging,os
-from pathlib import Path
-from typing import Literal
-import matplotlib.pylab as plt
+import logging,os, requests
+
+import numpy as np
+
+from spaceKLIP import utils as ut
+from spaceKLIP.plotting import load_plt_style
+
+from photutils.detection import DAOStarFinder,StarFinder
+from photutils.aperture import CircularAperture, aperture_photometry
+from photutils.background import Background2D, MedianBackground
+
+from scipy.ndimage import binary_fill_holes, distance_transform_edt, center_of_mass, binary_dilation
+from scipy.optimize import minimize
+from scipy.spatial import KDTree
+
+import astropy.io.fits as pyfits
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+from astropy.stats import SigmaClip
 from astropy.visualization import simple_norm
 from astropy.table import Table, vstack
 from astropy.wcs import WCS
-from photutils.detection import DAOStarFinder,StarFinder
-from astropy.stats import SigmaClip
-from photutils.background import Background2D, MedianBackground
-from astropy import units as u
-from astropy.coordinates import SkyCoord
-import requests
-from skimage.measure import label, regionprops
-from scipy.ndimage import binary_dilation
-from photutils.aperture import CircularAperture, aperture_photometry
-from scipy.spatial import KDTree
+
 from skimage.color import label2rgb
-import astropy.io.fits as pyfits
-import numpy as np
-from spaceKLIP import utils as ut
-from scipy.optimize import minimize
-from spaceKLIP.plotting import load_plt_style
+from skimage.measure import label, regionprops
+
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-from scipy.ndimage import binary_fill_holes
+
+from typing import Literal
+
+from pathlib import Path
+
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -1622,7 +1629,7 @@ class FITPSF:
         Maximum allowed separation (pixels) between primary and companion.
     min_separation : float
         Minimum allowed separation (pixels) between primary and companion.
-    x_limits, y_limits : tuple
+    x_limits, y_limits : tuple of (float, float)
         Bounds for positional fits in x and y (in pixels, relative to stamp center).
     min_contrast, max_contrast : float
         Allowed contrast ratio bounds for a companion relative to primary.
@@ -1632,63 +1639,83 @@ class FITPSF:
         Maximum iterations for nonlinear minimizer.
     background : float
         Scalar background level subtracted from tiles prior to fitting.
+    r_sat : float
+        Saturation radius (pixels). If > 0, saturated sources are handled via
+        wing-matching instead of standard linear least-squares.
+    debug : bool
+        If True, enables verbose debug prints and diagnostic plots.
+    showplot : bool
+        If True, show final diagnostic plot after fit completion.
 
-    Result attributes (populated by `fitpsf`)
-    ----------------------------------------
-    peak1, dx1, dy1 : float
-        Peak and (x,y) position of the brightest (primary) fitted source.
-        Positions are offsets in pixels relative to the tile center.
-    peak2, dx2, dy2 : float or None
-        Peak and position of the secondary/companion if detected. If no companion
-        is detected, `peak2` will be 0.0 and `dx2`, `dy2` are None (or NaN
-        depending on caller preferences).
+    Result Attributes
+    -----------------
+    peak1 : float
+        Peak amplitude of the brightest (primary) fitted source.
+    dx1, dy1 : float
+        Position of primary source (offsets in pixels relative to the tile center).
+    peak2 : float or 0.0
+        Peak amplitude of the secondary/companion if detected. If no companion is
+        detected, this is 0.0.
+    dx2, dy2 : float or None
+        Position of companion if detected. None if no companion is accepted.
     bintest : bool
         True if binary (two-source) model was preferred by selection criteria.
+
     """
 
     def __init__(self, max_separation=25, min_separation=1, r_sat=0, x_limits=(-3, 3), y_limits=(-3, 3),
-                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0):
+                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0, bic_gate=10.0):
                 """
                 Initialize FITPSF fitter with solver options and gating thresholds.
 
                 Parameters
                 ----------
                 max_separation : float, optional
-                    Maximum companion separation to consider (pixels). Default 25.
+                    Maximum companion separation to consider (pixels). Default is 25.
                 min_separation : float, optional
-                    Minimum companion separation to accept (pixels). Default 1.
-                x_limits, y_limits : tuple, optional
-                    Allowed bounds for x and y positional optimization (relative to stamp center).
+                    Minimum companion separation to accept (pixels). Default is 1.
+                r_sat : float, optional
+                    Saturation radius (pixels). If > 0, sources within this radius are
+                    treated as saturated and fitted via wing-matching. Default is 0.
+                x_limits : tuple of (float, float), optional
+                    Allowed bounds [x_min, x_max] for x positional optimization relative
+                    to stamp center. Default is (-3, 3).
+                y_limits : tuple of (float, float), optional
+                    Allowed bounds [y_min, y_max] for y positional optimization relative
+                    to stamp center. Default is (-3, 3).
                 min_contrast : float, optional
-                    Minimum contrast (f2 / f1) required to accept a companion. Default 0.01.
+                    Minimum contrast (f2 / f1) required to accept a companion. Default is 0.05.
                 max_contrast : float, optional
-                    Maximum allowed contrast. Default 1.0.
+                    Maximum allowed contrast. Default is 1.0.
                 eps : float, optional
-                    Step tolerance passed to the nonlinear optimizer. Default 1e-3.
+                    Step tolerance passed to the nonlinear optimizer (L-BFGS-B).
+                    Default is 1e-3.
                 maxiter : int, optional
-                    Maximum iterations for nonlinear minimizer. Default 1000.
+                    Maximum iterations for nonlinear minimizer. Default is 1000.
                 background : float, optional
                     Constant background to subtract from tiles prior to fitting.
+                    Default is 0.
 
-                Attributes (initialized)
-                ------------------------
+                Attributes Initialized
+                ----------------------
                 peak1, dx1, dy1 : None
                     Primary fit results (populated after calling `fitpsf`).
                 peak2, dx2, dy2 : None
                     Secondary/companion fit results or None if no companion accepted.
                 bintest : bool
-                    True if binary model accepted.
+                    False initially; set to True if binary model is accepted.
                 debug : bool
-                    If True, enables verbose debug prints and diagnostic plots.
+                    False initially; set to True to enable verbose diagnostics.
                 showplot : bool
-                    If True, show final diagnostic plot after fit completion.
+                    False initially; set to True to display final diagnostic plot.
 
                 Notes
                 -----
                 This constructor only configures the fitter. The actual fitting is performed by
                 calling `fitpsf(...)`, which will populate the result attributes on success.
+
                 """
-                
+
                 self.max_separation = max_separation
                 self.min_separation = min_separation
                 self.x_limits = x_limits
@@ -1699,6 +1726,7 @@ class FITPSF:
                 self.r_sat = r_sat
                 self.maxiter = maxiter
                 self.background = background
+                self.bic_gate = bic_gate
 
                 # Extracted parameters results containers (filled by fitpsf)
                 self.peak1 = None
@@ -1711,64 +1739,7 @@ class FITPSF:
                 self.debug = False
                 self.showplot = False
 
-    def _solve_primary_peak_linear(self, clean_data, err_map, weights, imaging_psf, params, mode="single", weighted=True):
-        """
-        Analytical linear least-squares solver for the primary peak amplitude.
-
-        Builds the appropriate basis (single-source or combined primary+contrast*secondary)
-        and solves the 1-parameter linear least squares problem for the primary scaling f1.
-
-        Parameters
-        ----------
-        clean_data : 2D ndarray
-            Data tile with NaNs converted (or masked) appropriately.
-        err_map : 2D ndarray
-            Per-pixel uncertainties (same shape as tile).
-        weights : 2D ndarray
-            Mask/weights array (1 for valid pixels, 0 for masked).
-        imaging_psf : 2D ndarray
-            PSF template image used for shifting/scaling.
-        params : sequence
-            If mode == 'single' : [dx1, dy1]
-            If mode == 'binary' : [dx1, dy1, contrast, dx2, dy2]
-        mode : {'single', 'binary'}, optional
-            Whether to form the single-source basis or the combined-binary basis.
-        weighted : bool, optional
-            If True, weight data by inv-sigma (weights/err_map) otherwise uses `weights` only.
-
-        Returns
-        -------
-        f1_opt : float
-            Optimal fitted primary peak amplitude. Returns np.nan if the design vector
-            is numerically invalid (all zeros, contains NaN/Inf).
-        """
-        imaging_psf = imaging_psf / np.nanmax(imaging_psf)  # <-- ADD THIS LINE, normalize PSF
-
-        if weighted:
-            inv_sigma = weights / err_map
-            d_flat = (clean_data * inv_sigma).flatten()
-        else:
-            inv_sigma = weights
-            d_flat = (clean_data * weights).flatten()
-
-        if mode == "single":
-            dx1, dy1 = params
-            s1_basis = ut.imshift(imaging_psf, [dx1, dy1], method='spline', nan_reflected=False, pad_amount=0)
-            M = (s1_basis * inv_sigma).flatten()[:, np.newaxis]
-        else:
-            dx1, dy1, contrast, dx2, dy2 = params
-            s1_basis = ut.imshift(imaging_psf, [dx1, dy1], method='spline', nan_reflected=False, pad_amount=0)
-            s2_basis = ut.imshift(imaging_psf, [dx2, dy2], method='spline', nan_reflected=False, pad_amount=0)
-            combined_basis = s1_basis + contrast * s2_basis
-            M = (combined_basis * inv_sigma).flatten()[:, np.newaxis]
-
-        if np.all(M == 0.0) or np.any(np.isnan(M)) or np.any(np.isinf(M)):
-            return np.nan
-
-        f1_opt, _, _, _ = np.linalg.lstsq(M, d_flat, rcond=None)
-        return float(f1_opt)
-
-    def solve_star_peak_linearly(self, clean_data, err_map, weights, imaging_psf, params,
+    def _solve_star_peak_linearly(self, clean_data, err_map, weights, imaging_psf, params,
                                    mode="single", weighted=True, r_sat1=0, r_sat2=0):
         """
         Analytical linear least-squares solver for peak amplitude.
@@ -1778,29 +1749,43 @@ class FITPSF:
 
         Parameters
         ----------
-        clean_data : 2D ndarray
+        clean_data : ndarray of shape (ny, nx)
             Background-subtracted data tile.
-        err_map : 2D ndarray
-            Per-pixel uncertainties.
-        weights : 2D ndarray
-            Mask/weights array (1 for valid, 0 for masked/NaN).
-        imaging_psf : 2D ndarray
+        err_map : ndarray of shape (ny, nx)
+            Per-pixel uncertainties (standard deviations).
+        weights : ndarray of shape (ny, nx)
+            Mask/weights array (1 for valid, 0 for masked/NaN/saturated).
+        imaging_psf : ndarray of shape (ny, nx)
             PSF template (normalized to peak=1).
-        params : sequence
-            [dx1, dy1] for single or [dx1, dy1, contrast, dx2, dy2] for binary.
-        mode : {'single', 'binary'}
-            Fitting mode.
-        weighted : bool
-            If True, weight by inverse variance.
-        r_sat1 : float
-            Saturation radius for primary. If > 0, use wing-matching.
-        r_sat2 : float
-            Saturation radius for companion (binary mode).
+        params : sequence of float
+            [dx1, dy1] for single-source mode or
+            [dx1, dy1, contrast, dx2, dy2] for binary mode.
+        mode : {'single', 'binary'}, optional
+            Fitting mode. Default is 'single'.
+        weighted : bool, optional
+            If True, weight by inverse variance (1/err_map²). If False, use
+            binary weights only. Default is True.
+        r_sat1 : float, optional
+            Saturation radius for primary source. If > 0, use wing-matching
+            instead of standard linear solve. Default is 0.
+        r_sat2 : float, optional
+            Saturation radius for companion (binary mode only). Default is 0.
 
         Returns
         -------
         f1_opt : float
-            Fitted primary peak amplitude (true peak, not just scaling).
+            Fitted primary peak amplitude (true peak, not just scaling factor).
+            Returns np.nan if fit fails or no valid data available.
+
+        Notes
+        -----
+        - For saturated sources, the wing-matching strategy masks the saturated
+          core and fits only the PSF wings to data wings, then extrapolates to
+          the true peak.
+        - The PSF is normalized to peak=1, so the returned scale factor directly
+          equals the true peak amplitude.
+        - Binary mode handles two sources with contrast ratio constraint.
+
         """
         imaging_psf_norm = imaging_psf / np.nanmax(imaging_psf)  # Normalize to peak=1
 
@@ -1854,10 +1839,36 @@ class FITPSF:
         """
         Fit single saturated source by matching PSF wings to data wings.
 
-        Strategy:
-        1. Mask saturated core (r < r_sat)
-        2. Fit PSF wings to data wings to find scaling
-        3. Return scaled peak (accounting for PSF normalization)
+        Strategy
+        --------
+        1. Mask saturated core (r < r_sat).
+        2. Extract wing pixels where both PSF and data have signal.
+        3. Fit PSF wings to data wings using linear least-squares.
+        4. Return scaled peak (accounting for PSF normalization).
+
+        Parameters
+        ----------
+        clean_data : ndarray of shape (ny, nx)
+            Background-subtracted data tile.
+        err_map : ndarray of shape (ny, nx)
+            Per-pixel uncertainties.
+        weights : ndarray of shape (ny, nx)
+            Mask/weights array (1 for valid, 0 for masked).
+        psf_basis : ndarray of shape (ny, nx)
+            Shifted PSF template (already shifted to source position).
+        r_sat : float
+            Saturation radius (pixels). Pixels within this radius are masked out.
+        dx1, dy1 : float
+            Source center offset (pixels) relative to tile center.
+        weighted : bool
+            If True, apply inverse-variance weighting.
+
+        Returns
+        -------
+        f1_opt : float
+            Fitted peak amplitude of the primary source.
+            Returns np.nan if wing mask is empty or fit fails.
+
         """
         ny, nx = clean_data.shape
         y_c, x_c = (ny - 1) / 2, (nx - 1) / 2
@@ -1899,12 +1910,49 @@ class FITPSF:
                                  psf_basis1, psf_basis2, contrast,
                                  r_sat1, r_sat2, dx1, dy1, dx2, dy2, weighted):
         """
-        Fit binary saturated sources sequentially for better accuracy.
+        Fit binary saturated sources sequentially for improved accuracy.
 
-        Strategy:
-        1. Fit primary alone (using wings, excluding companion saturation)
-        2. Subtract primary model from data
-        3. Fit companion from residuals (using wings, excluding primary saturation)
+        Strategy
+        --------
+        1. Fit primary alone using wings (exclude companion saturation).
+        2. Subtract primary model from data.
+        3. Fit companion from residuals using wings (exclude primary saturation).
+        4. Apply consistency check and return refined primary amplitude.
+
+        This sequential approach improves accuracy for saturated binaries by
+        reducing cross-talk between sources.
+
+        Parameters
+        ----------
+        clean_data : ndarray of shape (ny, nx)
+            Background-subtracted data tile.
+        err_map : ndarray of shape (ny, nx)
+            Per-pixel uncertainties.
+        weights : ndarray of shape (ny, nx)
+            Mask/weights array (1 for valid, 0 for masked).
+        psf_basis1, psf_basis2 : ndarray of shape (ny, nx)
+            Shifted PSF templates for primary and companion (already at source positions).
+        contrast : float
+            Contrast ratio (f2 / f1) used for companion model.
+        r_sat1, r_sat2 : float
+            Saturation radii for primary and companion (pixels).
+        dx1, dy1, dx2, dy2 : float
+            Source center offsets (pixels) relative to tile center.
+        weighted : bool
+            If True, apply inverse-variance weighting.
+
+        Returns
+        -------
+        f1_opt : float
+            Refined fitted peak amplitude of the primary source.
+            Returns np.nan if primary wing mask is empty or fits fail.
+
+        Notes
+        -----
+        A consistency check compares the primary amplitude fitted directly vs.
+        fitted from companion residuals. If they differ by > 30%, the direct
+        primary fit is preferred. Otherwise, a weighted average is returned.
+
         """
         ny, nx = clean_data.shape
         y_c, x_c = (ny - 1) / 2, (nx - 1) / 2
@@ -1983,27 +2031,37 @@ class FITPSF:
 
     def _get_annulus_mask_by_comp_pos(self, tile, x_peak, y_peak, dr=5):
         """
-        Construct an annulus mask computed relative to the image center where the inner and outer annulus radius
-        are a de the distance of the companion ± dr.
+        Construct an annulus mask centered on a companion candidate.
 
-        Pixels are included if their unit pixel-square intersects the annulus [r_in, r_out]
+        The annulus radius is computed from the distance of the candidate to
+        the tile center. Inner and outer radii are set to r ± dr. Pixels are
+        included if their unit pixel-square intersects the annulus
         (i.e., partially-touching pixels are counted).
 
         Parameters
         ----------
-        tile : 2D ndarray
-            Reference image whose shape defines the mask size.
+        tile : ndarray of shape (ny, nx)
+            Reference image (only its shape is used).
         x_peak : float
-            Column index (x) of the companion/candidate used to compute the annulus radius.
+            Column index (x) of the companion/candidate in pixel coordinates.
         y_peak : float
-            Row index (y) of the companion/candidate used to compute the annulus radius.
+            Row index (y) of the companion/candidate in pixel coordinates.
         dr : float, optional
-            Half-width of the annulus in pixels used to set r_in/r_out around the candidate radius.
+            Half-width of the annulus around the candidate radius (pixels).
+            Default is 5.
 
         Returns
         -------
-        ann_mask : 2D bool ndarray
-            Boolean mask selecting pixels whose pixel-square intersects the annulus region.
+        ann_mask : bool ndarray of shape (ny, nx)
+            Boolean mask selecting pixels whose pixel-square intersects
+            the annulus region.
+
+        Notes
+        -----
+        The annulus is centered on the tile center and has inner radius r_in
+        and outer radius r_out computed from the candidate distance. If debug
+        mode is enabled, a diagnostic plot is displayed.
+
         """
         ny, nx = tile.shape
         x_center = (nx - 1) / 2.0
@@ -2051,30 +2109,39 @@ class FITPSF:
 
     def _get_annulus_mask_by_radius(self, tile, x_peak, y_peak, r_in=None, r_out=None, dr=5.0):
         """
-        Construct an annulus boolean mask around a given center (x_peak, y_peak).
+        Construct an annulus boolean mask around a given center.
 
-        Pixels are included if their unit pixel-square intersects the annulus [r_in, r_out]
-        (i.e., partially-touching pixels are counted).
+        Pixels are included if their unit pixel-square intersects the annulus
+        [r_in, r_out] (i.e., partially-touching pixels are counted).
 
         Parameters
         ----------
-        tile : 2D ndarray
+        tile : ndarray of shape (ny, nx)
             Tile used to determine mask shape (only its shape is used).
         x_peak : float
             Column index (x) of the annulus center in pixel coordinates.
         y_peak : float
             Row index (y) of the annulus center in pixel coordinates.
         r_in : float or None, optional
-            Inner radius of annulus (pixels). If None, uses `self.min_separation`.
+            Inner radius of annulus (pixels). If None, defaults to
+            max(r_sat, min_separation). Default is None.
         r_out : float or None, optional
-            Outer radius of annulus (pixels). If None, uses `self.max_separation` or r_in+dr.
+            Outer radius of annulus (pixels). If None, defaults to
+            max_separation or r_in + dr. Default is None.
         dr : float, optional
-            Half-width fallback used when r_in/r_out unspecified.
+            Half-width fallback used when r_in/r_out unspecified (pixels).
+            Default is 5.0.
 
         Returns
         -------
-        ann_mask : 2D bool ndarray
+        ann_mask : bool ndarray of shape (ny, nx)
             True for pixels whose pixel-square intersects the annulus region.
+
+        Notes
+        -----
+        The annulus region is defined as pixels where the minimal distance
+        to the annulus center is >= r_in and the maximal distance is <= r_out.
+
         """
         ny, nx = tile.shape
         if r_in is None:
@@ -2122,24 +2189,27 @@ class FITPSF:
 
     def _get_std_in_annulus(self,tile,x_peak,y_peak,dr=5):
         """
-        Compute a robust local standard deviation using pixel values inside an annulus.
+        Compute robust local standard deviation using pixel values in an annulus.
 
         Parameters
         ----------
-        tile : 2D ndarray
+        tile : ndarray of shape (ny, nx)
             Input image (or residual map) from which the annulus sample is drawn.
         x_peak : float
-            Column index (x) of the annulus center.
+            Column index (x) of the annulus center in pixel coordinates.
         y_peak : float
-            Row index (y) of the annulus center.
+            Row index (y) of the annulus center in pixel coordinates.
         dr : float, optional
-            Half-width used to build the annulus when r_in/r_out not explicitly provided.
+            Half-width used to build the annulus when r_in/r_out not
+            explicitly provided (pixels). Default is 5.
 
         Returns
         -------
         ann_std : float
-            Sample standard deviation of finite pixels inside the annulus (ddof=1).
+            Sample standard deviation of finite pixels inside the annulus
+            (using ddof=1 for sample statistics).
             Returns np.nan if the annulus contains no finite pixels.
+
         """
         ann_mask = self._get_annulus_mask_by_comp_pos(tile, x_peak, y_peak, dr=dr)
         ann_values = tile.copy()
@@ -2155,120 +2225,23 @@ class FITPSF:
 
         return ann_std
 
-    def _debug_saturated_seeds(self, clean_data, nanmask, x_b=None, y_b=None, mu20=None, mu02=None, theta=None,
-                    dx1_guess=None, dy1_guess=None, dx2_guess=None, dy2_guess=None, eccentricity=None, common_term=None, nx=None, ny=None,
-                    is_ellipse_binary=True,node_A_x=None,a_sem=None,b_sem=None,node_A_y=None,node_B_x=None,node_B_y=None,circle_x=None, circle_y=None, circle_radius=None):
-        """
-        Interactive diagnostic plot for saturated-core seed proposals.
-
-        This routine visualizes the data, the saturated mask contour, the moment
-        ellipse or inscribing circle, the seed nodes proposed for primary/companion and
-        additional diagnostics useful during development.
-
-        Parameters
-        ----------
-        clean_data : 2D ndarray
-            Background-subtracted tile used for diagnostics.
-        nanmask : 2D array-like
-            Binary mask marking saturated/NaN pixels (True/1 for masked).
-        x_b, y_b : float or None
-            Centroid of the saturated blob (pixel coordinates) if available.
-        mu20, mu02, theta : float or None
-            Second moments and orientation used to compute the moment ellipse.
-        dx1_guess, dy1_guess : float or None
-            Seed offsets for the primary (relative to tile center).
-        dx2_guess, dy2_guess : float or None
-            Seed offsets for the proposed companion (relative to tile center).
-        eccentricity : float or None
-            Computed eccentricity of the blob (from moments).
-        common_term : float or None
-            Derived moment term used to compute ellipse axes.
-        nx, ny : int or None
-            Tile dimensions (columns, rows).
-        is_ellipse_binary : bool
-            True if the moment-based ellipse suggests a binary core.
-        node_A_x, node_A_y, node_B_x, node_B_y : float or None
-            Node coordinates computed from moments (relative to tile center).
-        circle_x, circle_y, circle_radius : float or None
-            Inscribing circle center and radius (if a circular fallback was used).
-
-        Returns
-        -------
-        None
-        """
-
-        load_plt_style(None)
-
-        # FIX: Extract data range and force a non-zero color scale window
-        # to prevent Matplotlib from crashing on flat or uniform data canvases.
-        d_min = float(np.nanmin(clean_data))
-        d_max = float(np.nanmax(clean_data))
-        if d_min == d_max:
-            # If the image is completely flat, expand the bounds symmetrically
-            vmin, vmax = d_min - 1.0, d_max + 1.0
-        else:
-            vmin, vmax = d_min, d_max
-
-        fig, ax = plt.subplots(figsize=(9, 9))
-
-        x_c, y_c = (nx - 1) / 2.0, (ny - 1) / 2.0
-        # Pass explicit vmin and vmax parameters to safeguard color normalisation
-        im = ax.imshow(clean_data, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
-
-        ax.contour(nanmask, levels=[0.5], colors='red', linewidths=5, linestyles='dashed',label='Blob Area')
-        ax.plot(x_c, y_c, '+g', markersize=15, markeredgewidth=3, label='Figure Center')
-
-
-        if is_ellipse_binary:
-            patch = patches.Ellipse((x_b, y_b),
-                                    width=2.0 * a_sem,  # full major axis
-                                    height=2.0 * b_sem,  # full minor axis
-                                    angle=np.degrees(theta),
-                                    linewidth=5, fill=False, edgecolor='lightgray', linestyle='--',
-                                    label='Moment Ellipse')
-            title_text = f"Saturated target/s Diagnostics (ecc={eccentricity:.3f})\nTracking decoupled cores"
-            if node_A_x is not None and node_A_y is not None:
-                ax.plot(x_c + node_A_x, y_c + node_A_y, 'Xr', markersize=12, alpha=0.25,
-                        label=f'Primary Node: [{node_A_x:.3f}, {node_A_y:.3f}]')
-            if node_B_x is not None and node_B_y is not None:
-                ax.plot(x_c + node_B_x, y_c + node_B_y, 'X', color='orange', markersize=12, alpha=0.25,
-                        label=f'Companion Node: [{node_B_x:.3f}, {node_B_y:.3f}]')
-        else:
-            patch = patches.Circle((circle_x, circle_y), radius=circle_radius, linewidth=5,
-                                   fill=False, edgecolor='lightgray', linestyle='--',
-                                   label='Inscribing Circle')
-            ax.plot(circle_x,  circle_y, 'Xr', markersize=12, alpha=0.25,
-                    label=f'Primary Node: [{circle_x:.3f}, {circle_y:.3f}]')
-            title_text = f"Saturated target/s Diagnostics (ecc={eccentricity:.3f})\nEllipse Collapsed -> Best Inscribing Circle"
-        ax.add_patch(patch)
-        ax.plot(x_c + dx1_guess, y_c + dy1_guess, 'Xr', markersize=12,
-                label=f'Primary Seed: [{dx1_guess:.3f}, {dy1_guess:.3f}]')
-
-        if dx2_guess is not None and dy2_guess is not None:
-            ax.plot(x_c + dx2_guess, y_c + dy2_guess, 'X', color='orange', markersize=12,
-                    label=f'Companion Seed: [{dx2_guess:.3f}, {dy2_guess:.3f}]')
-
-        ax.set_xlim(x_c - 15, x_c + 15)
-        ax.set_ylim(y_c - 15, y_c + 15)
-        ax.set_title(title_text)
-        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.14), ncol=2)
-        plt.colorbar(im, ax=ax, label='Counts')
-        plt.tight_layout()
-        plt.subplots_adjust(bottom=0.2)  # increase if legend clipped
-        plt.show()
-
     def _plot_final_fit(self, tile):
         """
-        Final-fit plot showing fitted positions over the tile.
+        Generate and display diagnostic plot of fitted positions over the tile.
+
+        Shows the input tile with fitted primary (red X) and optional companion
+        (blue X) positions overlaid.
 
         Parameters
         ----------
-        tile : 2D ndarray
+        tile : ndarray of shape (ny, nx)
             Input tile used for final diagnostic overlay.
 
-        Returns
-        -------
-        None
+        Notes
+        -----
+        Display is skipped if showplot is False. The plot uses dynamic vmin/vmax
+        scaling to safely handle flat or negative-valued tiles.
+
         """
         load_plt_style(None)
 
@@ -2319,12 +2292,56 @@ class FITPSF:
         """
         Fit two circles sequentially to maximize coverage of saturated blob mask.
 
-        1. Find the largest circle that fits entirely inside the mask
-        2. Find the largest second circle that maximizes coverage of uncovered areas
-           (allows overlap with Circle 1, but maximizes new coverage)
-        Both circles must stay fully enclosed within the mask.
+        Strategy
+        --------
+        1. Compute distance transform of the saturated blob mask.
+        2. Find the largest circle (Circle 1) that fits entirely inside the mask.
+        3. Find the largest second circle (Circle 2) that maximizes coverage of
+           uncovered areas (allows overlap with Circle 1, but prioritizes new coverage).
+        4. Check separation constraint; if violated, drop Circle 2.
+        5. Ensure Circle 1 is the larger/more central one.
+
+        Parameters
+        ----------
+        dilated_mask : bool ndarray of shape (ny, nx)
+            Binary mask of saturated region (1 = saturated, 0 = valid).
+        min_separation : float, optional
+            Minimum allowed separation between circle centers (pixels).
+            Default is 1.0.
+        max_separation : float, optional
+            Maximum allowed separation between circle centers (pixels).
+            Default is 25.0.
+        min_radius : float, optional
+            Minimum allowed circle radius (pixels). Default is 1.0.
+        max_radius : float, optional
+            Maximum allowed circle radius (pixels). Default is 30.0.
+        debug : bool, optional
+            If True, display diagnostic plot showing fitted circles and mask.
+            Default is False.
+
+        Returns
+        -------
+        dx1, dy1 : float
+            Center offset of Circle 1 relative to tile center (pixels).
+        r1 : float
+            Radius of Circle 1 (pixels).
+        dx2, dy2 : float or None
+            Center offset of Circle 2 relative to tile center (pixels).
+            Set to None if separation constraint violated or single circle sufficient.
+        r2 : float
+            Radius of Circle 2 (pixels). Undefined if dx2, dy2 are None.
+        fit_error : float
+            Fit error metric (currently always 0.0).
+
+        Notes
+        -----
+        - Circles are constrained to stay fully within the mask.
+        - Circle 1 center is chosen as the point with maximum distance to mask boundary.
+        - Circle 2 center is selected to maximize coverage of mask areas not covered by Circle 1.
+        - Tie-breaking for Circle 2: among pixels with equal coverage score, the one
+          farthest from Circle 1 is chosen.
+
         """
-        from scipy.ndimage import binary_erosion, distance_transform_edt
 
         ny, nx = dilated_mask.shape
         x_center, y_center = (nx - 1) / 2.0, (ny - 1) / 2.0
@@ -2479,12 +2496,187 @@ class FITPSF:
 
         return dx1, dy1, r1, dx2, dy2, r2, 0.0
 
+    def _make_educated_guesses(self, tile_with_nans, clean_data, err_map, weights, imaging_psf, nanmask):
+        """
+        Generate initial guesses for primary and companion positions/amplitudes.
+
+        Strategy
+        --------
+        - If saturated pixels present in tile center: use two-circle fit on saturated mask.
+        - Otherwise: search for brightest pixel in valid data as primary guess.
+        - Search residuals for companion candidate at minimum distance.
+
+        Parameters
+        ----------
+        tile_with_nans : ndarray of shape (ny, nx)
+           Original tile with NaN values marking saturated/invalid pixels.
+        clean_data : ndarray of shape (ny, nx)
+           Background-subtracted data (NaN replaced with 0).
+        err_map : ndarray of shape (ny, nx)
+           Per-pixel uncertainties.
+        weights : ndarray of shape (ny, nx)
+           Mask/weights array (1 for valid, 0 for saturated/masked).
+        imaging_psf : ndarray of shape (ny, nx)
+           PSF template for peak estimation.
+        nanmask : ndarray of shape (ny, nx)
+           Binary mask (1 for saturated, 0 for valid).
+
+        Returns
+        -------
+        p1_guess : float
+           Estimated primary peak amplitude.
+        dx1_guess, dy1_guess : float
+           Estimated primary center offset (pixels).
+        r1 : float
+           Estimated primary saturation radius (pixels).
+        p2_guess, c2_guess : float or None
+           Estimated companion peak amplitude and contrast. None if no companion detected.
+        dx2_guess, dy2_guess : float or None
+           Estimated companion center offset. None if no companion detected.
+        r2 : float
+           Estimated companion saturation radius.
+        labeled : ndarray
+           Connected component labels of saturated mask (for debugging).
+        mask_bool_second_bests : bool ndarray
+           Mask of secondary saturated components (useful for tie-breaking).
+
+        Notes
+        -----
+        - If center of tile is saturated, identifies the largest connected component.
+        - Secondary components are tracked for companion initialization.
+
+        """
+        ny, nx = tile_with_nans.shape
+        center_radius = 1  # pixels
+        yy, xx = np.indices(nanmask.shape)
+        center_mask = ((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2) <= (center_radius + 0.5) ** 2
+
+        if not np.any(np.isnan(tile_with_nans[center_mask])):
+            num_sat_pixels=0
+            mask_bool = (nanmask == 1)
+            labeled = label(mask_bool, connectivity=1)
+            mask_bool_second_bests = np.zeros_like(mask_bool, dtype=bool)
+            second_best_labels = (labeled != 0)
+            mask_bool_second_bests[second_best_labels] = True
+            pass
+        else:
+            mask_bool = (nanmask == 1)
+            labeled = label(mask_bool, connectivity=1)
+            center_counts = np.bincount(labeled[center_mask].ravel(), minlength=(labeled.max() + 1))
+            center_counts[0] = 0  # ignore background
+            if center_counts.sum() == 0:
+                # no component touches the center -> clear everything
+                num_sat_pixels = 0
+            else:
+                best_label = int(np.argmax(center_counts))
+                mask_bool = np.zeros_like(mask_bool, dtype=bool)
+                mask_bool[labeled == best_label] = True
+                num_sat_pixels = np.sum(mask_bool)
+
+                # Get counts for all labels
+                all_counts = np.bincount(labeled.ravel(), minlength=(labeled.max() + 1))
+
+                # Find the second largest (excluding background 0 and the best_label)
+                all_counts[0] = 0  # ignore background
+                all_counts[best_label] = 0  # ignore best_label
+
+                # Find the next largest
+                # second_best_labels = int(np.argmax(all_counts))
+                mask_bool_second_bests = np.zeros_like(mask_bool, dtype=bool)
+                second_best_labels = (labeled != 0) & (labeled != best_label)
+                mask_bool_second_bests[second_best_labels] = True
+
+        if num_sat_pixels > 0:
+            filled_mask = binary_fill_holes(mask_bool.copy())
+            dx1_guess, dy1_guess, r1, dx2_guess, dy2_guess, r2, fit_error = self._fit_two_circles_to_mask(
+                filled_mask.copy(),
+                min_separation=self.min_separation,
+                max_separation=np.inf,
+                debug=self.debug
+            )
+            p1_guess = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                                     [dx1_guess, dy1_guess], mode="single", r_sat1=r1)
+
+            log.debug(f"[Early Double check]")
+            log.debug(f"  primary position guesses: ({dx1_guess:.2f}, {dy1_guess:.2f}), p1_guess: {p1_guess:.2f}")
+            if dx2_guess is not None and dy2_guess is not None:
+                p2_guess = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                                     [dx2_guess,dy2_guess], mode="single", r_sat1=r2)
+                c2_guess = p2_guess/p1_guess
+                log.debug(f"  companion position guesses: ({dx2_guess:.2f}, {dy2_guess:.2f}), p2_guess: {p2_guess:.2f}, c2_guess: {c2_guess:.2f}")
+            else:
+                p2_guess, c2_guess = None, None
+                log.debug(f"  companion discarded: setting guesses to None for centroid approach")
+
+        else:
+            search_canvas1 = clean_data * weights
+            y_max_p1, x_max_p1 = np.unravel_index(np.nanargmax(search_canvas1), (ny, nx))
+            dx1_guess = float(x_max_p1 - (nx - 1) / 2) - 0.005
+            dy1_guess = float(y_max_p1 - (ny - 1) / 2) + 0.005
+            dx2_guess, dy2_guess = None, None
+            p2_guess, c2_guess = None, None
+            r1, r2 = 0 , 0
+
+            p1_guess = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                                     [dx1_guess,dy1_guess], mode="single", r_sat1=r1)
+
+            log.debug(f"[Early Single check]")
+            log.debug(f"  primary position guesses: ({dx1_guess:.2f}, {dy1_guess:.2f}), p1_guess: {p1_guess:.2f}")
+            log.debug(f"  no companion found: setting guesses to None for centroid approach")
+
+        return p1_guess, dx1_guess, dy1_guess, r1, p2_guess, c2_guess, dx2_guess, dy2_guess, r2, labeled, mask_bool_second_bests
+
     def _one_source_model(self, clean_data, nanmask, err_map, weights, imaging_psf, p1_guess, dx1_guess, dy1_guess, num_data_points, r1):
+        """
+        Fit single-source model (optimize dx1, dy1; solve f1 analytically).
+
+        Minimizes chi-squared for position parameters while solving peak
+        amplitude linearly at each iteration.
+
+        Parameters
+        ----------
+        clean_data : ndarray of shape (ny, nx)
+           Background-subtracted data tile.
+        nanmask : ndarray of shape (ny, nx)
+           Binary mask (1 for saturated, 0 for valid).
+        err_map : ndarray of shape (ny, nx)
+           Per-pixel uncertainties.
+        weights : ndarray of shape (ny, nx)
+           Mask/weights array (1 for valid, 0 for masked).
+        imaging_psf : ndarray of shape (ny, nx)
+           PSF template (normalized to peak=1).
+        p1_guess : float
+           Initial guess for primary peak amplitude (used for gating).
+        dx1_guess, dy1_guess : float
+           Initial guess for primary center offset (pixels).
+        num_data_points : int
+           Number of valid (non-masked) pixels (used for BIC calculation).
+        r1 : float
+           Saturation radius of primary source (pixels).
+
+        Returns
+        -------
+        p1_stage_a : float
+           Fitted primary peak amplitude.
+        dx1_stage_a, dy1_stage_a : float
+           Fitted primary center offset (pixels).
+        bic_1 : float
+           Bayesian Information Criterion for single-source model.
+           Set to np.inf if fit fails.
+
+        Notes
+        -----
+        - Uses L-BFGS-B optimizer with bounds [x_limits, y_limits].
+        - Peak amplitude is constrained to stay within 75%-135% of initial guess
+         (if guess is available) to prevent runaway fits.
+        - Chi-squared is computed only on non-saturated pixels.
+
+        """
         bounds_1 = [self.x_limits, self.y_limits]
         guess_1 = [dx1_guess, dy1_guess]
 
         def chisq_1(params):
-            p1 = self.solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+            p1 = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                params, mode="single",
                                                r_sat1=r1)
 
@@ -2515,7 +2707,7 @@ class FITPSF:
             bic_1 = res_1.fun + len(guess_1) * np.log(num_data_points)
 
         dx1_stage_a, dy1_stage_a = res_1.x
-        p1_stage_a = self.solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+        p1_stage_a = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                    res_1.x, mode="single",
                                                    r_sat1=r1)
 
@@ -2524,7 +2716,57 @@ class FITPSF:
         log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}")
         return p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1
 
-    def _companion_centroid_search(self, clean_data, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1):
+    def _companion_centroid_search(self, clean_data, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_best):
+        """
+        Search residuals for companion candidate using centroid approach.
+
+        Strategy
+        --------
+        1. Subtract fitted primary from data to get residuals.
+        2. Mask annulus around primary (excluding primary and companion saturation).
+        3. Find brightest residual pixel (companion peak).
+        4. If nearby saturated blob detected: use blob centroid.
+        5. Else: use weighted centroid in small window around peak.
+        6. Gate companion by 5-sigma noise threshold (annulus std).
+
+        Parameters
+        ----------
+        clean_data : ndarray of shape (ny, nx)
+            Background-subtracted data tile.
+        err_map : ndarray of shape (ny, nx)
+            Per-pixel uncertainties.
+        weights : ndarray of shape (ny, nx)
+            Mask/weights array (1 for valid, 0 for masked).
+        imaging_psf : ndarray of shape (ny, nx)
+            PSF template.
+        p1_stage_a : float
+            Fitted primary peak amplitude from stage A.
+        dx1_stage_a, dy1_stage_a : float
+            Fitted primary center offset (pixels).
+        r1, r2 : float
+            Saturation radii of primary and companion candidates (pixels).
+        labeled : ndarray
+            Connected component labels of saturated mask.
+        mask_bool_second_best : bool ndarray
+            Mask of secondary saturated components.
+
+        Returns
+        -------
+        p2_stage_a : float or None
+            Estimated companion peak amplitude. None if rejected.
+        c2_stage_a : float or None
+            Estimated companion contrast (f2/f1). None if rejected.
+        dx2_stage_a, dy2_stage_a : float or None
+            Estimated companion center offset (pixels). None if rejected.
+
+        Notes
+        -----
+        - Two gating mechanisms:
+          1. If nearby saturated patch detected (within 2 pixels): accept companion.
+          2. Otherwise: require peak > 5-sigma annulus noise.
+        - Contrast is floored at min_contrast to ensure physical plausibility.
+
+        """
         ny, nx = clean_data.shape
         # Mild/No Saturation: Run standard residual subtraction search to catch distant companions
         s1_basis_final = ut.imshift(imaging_psf, [dx1_stage_a, dy1_stage_a], method='spline', nan_reflected=False,
@@ -2539,29 +2781,56 @@ class FITPSF:
         search_residuals[~mask] = 0
         y_peak, x_peak = np.unravel_index(np.nanargmax(search_residuals), (ny, nx))
 
-        y_min, y_max = max(0, y_peak - 2), min(ny, y_peak + 3)
-        x_min, x_max = max(0, x_peak - 2), min(nx, x_peak + 3)
-        sub_window = np.maximum(search_residuals[y_min:y_max, x_min:x_max], 0.0)
-        sub_sum = float(np.nansum(sub_window))
-
-        peak_guess = float(search_residuals[y_peak, x_peak])
-        dx2_guess = float(x_peak - ((nx - 1) / 2.0))
-        dy2_guess = float(y_peak - ((ny - 1) / 2.0))
-
         log.debug(f"[STAGE A - COMPANION CENTROID SEARCH]")
-        log.debug(f"  Initial guess_comp: dx1={dx2_guess:.2f}, dy1={dy2_guess:.2f}")
-        log.debug(f"  Candidate selection with robust gating: dx1={x_peak:.2f}, dy1={y_peak:.2f}")
-        log.debug(f"  Candidate initial peak: {peak_guess:.2f}")
+        y_coords, x_coords = np.where(mask_bool_second_best)
+        distances = np.sqrt((x_coords - x_peak) ** 2 + (y_coords - y_peak) ** 2)
+        X=2
+        if np.min(distances) <= X:
+            closest_idx = np.argmin(distances)
+            selected_patch_label = labeled[y_coords[closest_idx], x_coords[closest_idx]]
+            log.debug(f"Closest patch within {X} px is labeled {selected_patch_label}")
+            mask_bool = np.zeros_like(labeled, dtype=bool)
+            mask_bool[labeled == selected_patch_label] = True
 
-        threshold_val = 5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak, dr=3)
-        if peak_guess > threshold_val:
+            y_peak, x_peak = center_of_mass(mask_bool)
+            y_coords, x_coords = np.where(mask_bool)
+            distances = np.sqrt((x_coords - x_peak) ** 2 + (y_coords - y_peak) ** 2)
+            r2 = np.mean(distances)
+            dx2_guess = float(x_peak - ((nx - 1) / 2.0))
+            dy2_guess = float(y_peak - ((ny - 1) / 2.0))
+            peak_guess = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                               [dy2_guess, dx2_guess], mode="single",
+                                               r_sat1=r2)
+            threshold_val = None
+
+        else:
+            y_min, y_max = max(0, y_peak - 2), min(ny, y_peak + 3)
+            x_min, x_max = max(0, x_peak - 2), min(nx, x_peak + 3)
+            sub_window = np.maximum(search_residuals[y_min:y_max, x_min:x_max], 0.0)
+            sub_sum = float(np.nansum(sub_window))
+            dx2_guess = float(x_peak - ((nx - 1) / 2.0))
+            dy2_guess = float(y_peak - ((ny - 1) / 2.0))
+            peak_guess = float(search_residuals[y_peak, x_peak])
+            threshold_val = 5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak, dr=3)
+
+        log.debug(f"  Initial guess_comp: dx2_guess={dx2_guess:.2f}, dy2_guess={dy2_guess:.2f}")
+        log.debug(f"  Candidate selection with robust gating: x2={x_peak:.2f}, y2={y_peak:.2f}")
+        log.debug(f"  Candidate initial peak: {peak_guess:.2f}")
+        if threshold_val is None:
+            dx2_stage_a = dx2_guess
+            dy2_stage_a = dy2_guess
+            p2_stage_a =peak_guess
+            c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
+            log.debug(f"[Companion accepted]")
+            log.debug(f"  Sigma threshold skipped, plausible saturated patch detected")
+        elif peak_guess > threshold_val:
             y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
             cx = float(np.nansum(x_mesh * sub_window) / sub_sum)
             cy = float(np.nansum(y_mesh * sub_window) / sub_sum)
             dx2_stage_a = float(cx - ((nx - 1) / 2.0))
             dy2_stage_a = float(cy - ((ny - 1) / 2.0))
-            p2_stage_a = self.solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
-                                                       [dx2_stage_a, dy2_stage_a], mode="single", r_sat1=r1)
+            p2_stage_a = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                                       [dx2_stage_a, dy2_stage_a], mode="single", r_sat1=r2)
             c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
             log.debug(f"[Companion accepted]")
             log.debug(f"  above 5-sigma annulus: {peak_guess:.2f}>{threshold_val:.2f}")
@@ -2572,7 +2841,43 @@ class FITPSF:
 
         return p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a
 
-    def _companion_search_freezed_primary(self, clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a):
+    def _companion_search_frozen_primary(self, clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a):
+        """
+        Optimize companion parameters with primary position frozen (Stage B).
+
+        Minimizes chi-squared over (contrast, dx2, dy2) while keeping the
+        primary position and amplitude fixed.
+
+        Parameters
+        ----------
+        clean_data : ndarray of shape (ny, nx)
+            Background-subtracted data tile.
+        nanmask : ndarray of shape (ny, nx)
+            Binary mask (1 for saturated, 0 for valid).
+        err_map : ndarray of shape (ny, nx)
+            Per-pixel uncertainties.
+        weights : ndarray of shape (ny, nx)
+            Mask/weights array (1 for valid, 0 for masked).
+        imaging_psf : ndarray of shape (ny, nx)
+            PSF template (normalized to peak=1).
+        p1_stage_a, dx1_stage_a, dy1_stage_a : float
+            Fitted primary parameters from stage A (held fixed).
+        p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a : float
+            Initial guesses for companion parameters.
+
+        Returns
+        -------
+        c2_seed : float
+            Optimized companion contrast.
+        dx2_seed, dy2_seed : float
+            Optimized companion center offset (pixels).
+
+        Notes
+        -----
+        - Companion position is allowed to drift within [dx2_guess ± x_limits].
+        - Uses L-BFGS-B optimizer with bounds on contrast and position.
+
+        """
         guess_comp = [c2_stage_a, dx2_stage_a, dy2_stage_a]
         bounds_comp = [
             (self.min_contrast, self.max_contrast),
@@ -2610,6 +2915,54 @@ class FITPSF:
         return c2_seed, dx2_seed, dy2_seed
 
     def _companion_search_joint_relaxation(self, clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, c2_seed, dx2_seed, dy2_seed, num_data_points, r1, r2):
+        """
+        Joint optimization of all parameters (5-parameter relaxation in Stage B).
+
+        Minimizes chi-squared over (dx1, dy1, contrast, dx2, dy2) jointly,
+        solving for f1 analytically at each iteration.
+
+        Parameters
+        ----------
+        clean_data : ndarray of shape (ny, nx)
+            Background-subtracted data tile.
+        nanmask : ndarray of shape (ny, nx)
+            Binary mask (1 for saturated, 0 for valid).
+        err_map : ndarray of shape (ny, nx)
+            Per-pixel uncertainties.
+        weights : ndarray of shape (ny, nx)
+            Mask/weights array (1 for valid, 0 for masked).
+        imaging_psf : ndarray of shape (ny, nx)
+            PSF template (normalized to peak=1).
+        p1_stage_a, dx1_stage_a, dy1_stage_a : float
+            Primary parameters from stage A (used as seed/constraint).
+        c2_seed, dx2_seed, dy2_seed : float
+            Companion seeds from frozen primary stage.
+        num_data_points : int
+            Number of valid pixels (for BIC calculation).
+        r1, r2 : float
+            Saturation radii of primary and companion (pixels).
+
+        Returns
+        -------
+        p1_stage_b : float
+            Fitted primary peak amplitude.
+        dx1_stage_b, dy1_stage_b : float
+            Fitted primary center offset (pixels).
+        contrast_stage_b : float
+            Fitted companion contrast.
+        dx2_stage_b, dy2_stage_b : float
+            Fitted companion center offset (pixels).
+        bic_2 : float
+            Bayesian Information Criterion for binary model.
+            Set to np.inf if fit fails.
+
+        Notes
+        -----
+        - Enforces separation constraint: min_separation <= sep <= max_separation.
+        - Primary peak constrained to stay within 75%-135% of initial stage A estimate.
+        - Uses L-BFGS-B optimizer with tight tolerances (ftol=1e-12).
+
+        """
         guess_2 = [float(dx1_stage_a), float(dy1_stage_a), float(c2_seed), float(dx2_seed), float(dy2_seed)]
         bounds_2 = [
             (float(self.x_limits[0]), float(self.x_limits[1])),
@@ -2626,7 +2979,7 @@ class FITPSF:
             if sep < self.min_separation or sep > self.max_separation:
                 return 1e18
 
-            p1 = self.solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+            p1 = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                params, mode="binary",
                                                r_sat1=r1,
                                                r_sat2=r2)
@@ -2651,7 +3004,7 @@ class FITPSF:
                          options={'eps': eps_vector_2_pos, 'maxiter': self.maxiter, 'ftol': 1e-12})
 
         dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b = res_2.x
-        p1_stage_b = self.solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+        p1_stage_b = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                    res_2.x, mode="binary",
                                                    r_sat1=r1, r_sat2=r2)
 
@@ -2676,35 +3029,77 @@ class FITPSF:
     def fitpsf(self, tile_with_nans, nanmask, err_map, imaging_psf):
         """
         Fit the tile for a primary source and optionally a companion.
-        Both can be or not saturating.
 
-        Algorithm
-        ---------
-        1. Fit a one-source model (optimize dx1, dy1 non-linearly; solve f1 analytically).
-        2. Compute residuals and run a heuristic residual-ring / centroid search to find a
-           candidate companion peak (or use saturated moments to propose seeds).
-        3. Stage A companion fit: freeze primary position and optimize companion
-           parameters (contrast, dx2, dy2).
-        4. Stage B joint relaxation: optimize dx1, dy1, contrast, dx2, dy2 jointly.
-        5. Model selection via BIC: accept binary if delta_BIC >= threshold and
-           other gates (contrast, separation) pass.
+        Both can be saturated or non-saturated. Implements a two-stage algorithm:
+        (1) single-source model, (2) companion search (early residual + stages A & B),
+        and (3) model selection via BIC with configurable gates.
 
         Parameters
         ----------
-        tile_with_nans : 2D ndarray
-            Input tile; NaNs may mark saturated or invalid pixels.
-        nanmask : 2D array-like
-            Binary mask with 1 for masked/saturated pixels and 0 for valid pixels.
-        err_map : 2D ndarray
-            Per-pixel uncertainties used for chi-square computations.
-        imaging_psf : 2D ndarray
-            PSF stamp used as the template (should be normalized consistently).
+        tile_with_nans : ndarray of shape (ny, nx)
+            Input tile; NaNs mark saturated or invalid pixels.
+        nanmask : ndarray of shape (ny, nx) with dtype int
+            Binary mask with 1 for masked/saturated/invalid pixels and
+            0 for valid pixels.
+        err_map : ndarray of shape (ny, nx)
+            Per-pixel uncertainties (standard deviations) used for chi-square
+            computations and weighting.
+        imaging_psf : ndarray of shape (ny, nx)
+            PSF stamp used as the fitting template. Should be normalized to
+            peak=1 for consistency.
 
         Returns
         -------
         None
-            Results are saved to the instance attributes: `peak1`, `dx1`, `dy1`,
+            Results are saved to instance attributes: `peak1`, `dx1`, `dy1`,
             `peak2`, `dx2`, `dy2`, and `bintest`.
+
+        Attributes Set
+        ---------------
+        peak1 : float
+            Peak amplitude of the primary (or only) fitted source.
+        dx1, dy1 : float
+            Position offset of primary source relative to tile center (pixels).
+        peak2 : float
+            Peak amplitude of companion (0.0 if no companion detected).
+        dx2, dy2 : float or None
+            Position offset of companion relative to tile center (pixels).
+            Set to None if no companion detected.
+        bintest : bool
+            True if binary model was selected; False for single-source model.
+
+        Algorithm Overview
+        -------------------
+        1. **Stage A (Single-Source)**:
+           - Fit single-source model, optimizing position (dx1, dy1).
+           - Solve peak amplitude (f1) analytically.
+
+        2. **Companion Search**:
+           - Subtract fitted primary model from data.
+           - Search residuals for companion candidate (early search).
+           - For each candidate: estimate position and peak via centroid.
+
+        3. **Stage B (Companion Optimization)**:
+           - **Frozen Primary**: Optimize companion (contrast, dx2, dy2) with
+             primary held fixed.
+           - **Joint Relaxation**: Optimize all 5 parameters (dx1, dy1, contrast,
+             dx2, dy2) jointly while solving f1 analytically.
+
+        4. **Model Selection**:
+           - Compute BIC for single and binary models.
+           - Accept binary if delta_BIC >= 10 and contrast >= min_contrast.
+           - Ensure separation is within [min_separation, max_separation].
+
+        Notes
+        -----
+        - Saturated sources (if r_sat > 0) are handled via wing-matching instead
+          of standard linear least-squares.
+        - Results attributes are always set (peak2 = 0.0, dx2/dy2 = None for
+          single-source models).
+        - Diagnostic plots (if showplot=True) display fitted positions overlaid
+          on the input tile.
+        - Debug logging provides detailed information on each stage if debug=True.
+
         """
         if self.debug:
             log.setLevel(logging.DEBUG)
@@ -2713,77 +3108,7 @@ class FITPSF:
         weights = 1.0 - nanmask
         num_data_points = np.sum(weights)
 
-        ny, nx = tile_with_nans.shape
-        center_radius = 1  # pixels
-        yy, xx = np.indices(nanmask.shape)
-        center_mask = ((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2) <= (center_radius + 0.5) ** 2
-
-        if not np.any(np.isnan(tile_with_nans[center_mask])):
-            num_sat_pixels=0
-        else:
-            nanmask = np.asarray(nanmask, dtype=int, copy=True)
-            mask_bool = (nanmask == 1)
-            labeled = label(mask_bool, connectivity=1)
-            center_counts = np.bincount(labeled[center_mask].ravel(), minlength=(labeled.max() + 1))
-            center_counts[0] = 0  # ignore background
-            if center_counts.sum() == 0:
-                # no component touches the center -> clear everything
-                num_sat_pixels = 0
-            else:
-                best_label = int(np.argmax(center_counts))
-                mask_bool = np.zeros_like(mask_bool, dtype=bool)
-                mask_bool[labeled == best_label] = True
-                num_sat_pixels = np.sum(mask_bool)
-
-                # Get counts for all labels
-                all_counts = np.bincount(labeled.ravel(), minlength=(labeled.max() + 1))
-
-                # Find the second largest (excluding background 0 and the best_label)
-                all_counts[0] = 0  # ignore background
-                all_counts[best_label] = 0  # ignore best_label
-
-                # Find the next largest
-                second_best_label = int(np.argmax(all_counts))
-                mask_bool_second_best = np.zeros_like(mask_bool, dtype=bool)
-                mask_bool_second_best[labeled == second_best_label] = True
-
-        if num_sat_pixels > 0:
-            p1_guess = None
-            filled_mask = binary_fill_holes(mask_bool.copy())
-            dx1_guess, dy1_guess, r1, dx2_guess, dy2_guess, r2, fit_error = self._fit_two_circles_to_mask(
-                filled_mask.copy(),
-                min_separation=self.min_separation,
-                max_separation=np.inf,
-                debug=self.debug
-            )
-            p1_guess = self.solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
-                                                     [dx1_guess, dy1_guess], mode="single", r_sat1=r1)
-
-            log.debug(f"[Early Double check]")
-            log.debug(f"  primary position guesses: ({dx1_guess:.2f}, {dy1_guess:.2f}), p1_guess: {p1_guess:.2f}")
-            if dx2_guess is not None and dy2_guess is not None:
-                p2_guess = self.solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
-                                                     [dx2_guess,dy2_guess], mode="single", r_sat1=r2)
-                c2_guess = p2_guess/p1_guess
-                log.debug(f"  companion position guesses: ({dx2_guess:.2f}, {dy2_guess:.2f}), p2_guess: {p2_guess:.2f}, c2_guess: {c2_guess:.2f}")
-            else:
-                p2_guess, c2_guess = None, None
-                log.debug(f"  companion discarded: setting guesses to None for centroid approach")
-
-        else:
-            search_canvas1 = clean_data * weights
-            y_max_p1, x_max_p1 = np.unravel_index(np.nanargmax(search_canvas1), (ny, nx))
-            dx1_guess = float(x_max_p1 - (nx - 1) / 2) - 0.005
-            dy1_guess = float(y_max_p1 - (ny - 1) / 2) + 0.005
-            dx2_guess, dy2_guess = None, None
-            r1, r2 = 0 , 0
-
-            p1_guess = self.solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
-                                                     [dx1_guess,dy1_guess], mode="single", r_sat1=r1)
-
-            log.debug(f"[Early Single check]")
-            log.debug(f"  primary position guesses: ({dx1_guess:.2f}, {dy1_guess:.2f}), p1_guess: {p1_guess:.2f}")
-            log.debug(f"  no companion found: setting guesses to None for centroid approach")
+        p1_guess, dx1_guess, dy1_guess, r1, p2_guess, c2_guess, dx2_guess, dy2_guess, r2, labeled, mask_bool_second_bests = self._make_educated_guesses(tile_with_nans, clean_data, err_map, weights, imaging_psf, nanmask)
 
         # -----------------------------------------------------------------
         # STAGE A - ONE SOURCE MODEL (Optimize only dx1, dy1)
@@ -2794,7 +3119,7 @@ class FITPSF:
         #  STAGE A - COMPANION CENTROID SEARCH (if guesses not provided)
         # -----------------------------------------------------------------
         if (dx2_guess is None or dy2_guess is None):
-            p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = self._companion_centroid_search(clean_data, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1)
+            p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = self._companion_centroid_search(clean_data, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_bests)
             searched=True
         else:
             p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = p2_guess, c2_guess, dx2_guess, dy2_guess
@@ -2804,7 +3129,7 @@ class FITPSF:
             # -----------------------------------------------------------------
             # STAGE B - FREEZE PRIMARY, LOCK COMPANION IN WELL
             # -----------------------------------------------------------------
-            c2_seed, dx2_seed, dy2_seed = self._companion_search_freezed_primary(clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a)
+            c2_seed, dx2_seed, dy2_seed = self._companion_search_frozen_primary(clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a)
 
             # -----------------------------------------------------------------
             # STAGE B - JOINT RELAXATION (5 PARAMETERS)
@@ -2817,7 +3142,7 @@ class FITPSF:
         # MODEL SELECTION & INTEGRATED SELF-SORTING GATE
         # -----------------------------------------------------------------
         delta_bic = bic_1 - bic_2
-        if delta_bic >= 10.0 and contrast_stage_b >= self.min_contrast and np.isfinite(bic_2):
+        if delta_bic >= self.bic_gate and contrast_stage_b >= self.min_contrast and np.isfinite(bic_2):
             self.bintest = True
             p1, dx1, dy1, contrast, dx2, dy2 = p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b
             p2 = p1 * contrast
