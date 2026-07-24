@@ -12,12 +12,12 @@ from photutils.background import Background2D, MedianBackground
 from scipy.ndimage import binary_fill_holes, distance_transform_edt, center_of_mass, binary_dilation
 from scipy.optimize import minimize
 from scipy.spatial import KDTree
+from scipy.ndimage import map_coordinates
 
 import astropy.io.fits as pyfits
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.stats import SigmaClip
-from astropy.visualization import simple_norm
 from astropy.table import Table, vstack
 from astropy.wcs import WCS
 
@@ -770,68 +770,89 @@ def stars_extractor(data,
                     ):
     """
     Extract a sub-image (tile) centered on specific coordinates, optionally applying a sub-pixel shift.
-
+    Use nearest-neighbor for nanmask!
     If no shifts are provided, it automatically calculates the sub-pixel shift required to
     bring the floating-point 'coords' to the exact center of the tile.
     If the shift is zero, it avoids interpolation to prevent artifacts.
     """
 
-    # 1. Determine the integer pixel center for the crop
-    x_f, y_f = float(coords[0]), float(coords[1])
-    x_i, y_i = int(round(x_f)), int(round(y_f))
+    if method !='nearest-neighbor':
+        # 1. Determine the integer pixel center for the crop
+        x_f, y_f = float(coords[0]), float(coords[1])
+        x_i, y_i = int(round(x_f)), int(round(y_f))
 
-    # 2. Determine the sub-pixel shift
-    if shifts is None:
-        # Calculate shift required to move the star from its float position
-        # to the center of the integer-pixel crop.
-        # Example: star at 100.2, crop at 100. Shift needed: 100 - 100.2 = -0.2
-        dx = x_i - x_f
-        dy = y_i - y_f
+        # 2. Determine the sub-pixel shift
+        if shifts is None:
+            # Calculate shift required to move the star from its float position
+            # to the center of the integer-pixel crop.
+            # Example: star at 100.2, crop at 100. Shift needed: 100 - 100.2 = -0.2
+            dx = x_i - x_f
+            dy = y_i - y_f
+        else:
+            dx = (x_i - x_f) + shifts[0]
+            dy = (y_i - y_f) + shifts[1]
+            # dx, dy = shifts[0], shifts[1]
+
+        # 3. Check if the shift is effectively zero
+        is_zero_shift = (abs(dx) < 1e-6) and (abs(dy) < 1e-6)
+
+        if is_zero_shift:
+            # NO SHIFT: Perform a direct crop to avoid interpolation artifacts
+            y_start, y_end = y_i - fov // 2, y_i + fov // 2 + 1
+            x_start, x_end = x_i - fov // 2, x_i + fov // 2 + 1
+
+            # Guard against edge of frame indexing
+            tile = data[max(0, y_start):y_end, max(0, x_start):x_end]
+
+            if tile.shape != (fov, fov):
+                tile = np.pad(tile,
+                              ((max(0, -y_start), max(0, y_end - data.shape[0])),
+                               (max(0, -x_start), max(0, x_end - data.shape[1]))),
+                              mode='constant', constant_values=0)
+        else:
+            # SHIFT REQUIRED: Pad, shift, and then crop
+            # Extract a slightly larger tile to accommodate padding for shifting
+            total_pad = fov // 2 + pad_amount
+            y_low, y_high = y_i - total_pad, y_i + total_pad + 1
+            x_low, x_high = x_i - total_pad, x_i + total_pad + 1
+
+            preshifttile = data[max(0, y_low):y_high, max(0, x_low):x_high]
+
+            # Apply padding if crop was near the detector edge
+            preshifttile = np.pad(preshifttile,
+                                  ((max(0, -y_low), max(0, y_high - data.shape[0])),
+                                   (max(0, -x_low), max(0, x_high - data.shape[1]))), mode='constant', constant_values=0)
+                                  # mode='reflect')
+
+            # Apply the sub-pixel shift using spaceKLIP utility
+            # Note: ut.imshift takes [dx, dy]
+            shifteddata = ut.imshift(preshifttile, [dx, dy], pad_amount=0, method=method, kwargs=kwargs, nan_reflected=False)
+
+            # Crop the shifted tile back to the desired FOV
+            # The star is now centered in shifteddata
+            c_y, c_x = shifteddata.shape[0] // 2, shifteddata.shape[1] // 2
+            tile = shifteddata[c_y - fov // 2: c_y + fov // 2 + 1,
+            c_x - fov // 2: c_x + fov // 2 + 1]
     else:
-        dx = (x_i - x_f) + shifts[0]
-        dy = (y_i - y_f) + shifts[1]
-        # dx, dy = shifts[0], shifts[1]
+        # Get the extraction region
+        x_i, y_i = int(round(coords[0])), int(round(coords[1]))
+        dx = (x_i - coords[0])
+        dy = (y_i - coords[1])
 
-    # 3. Check if the shift is effectively zero
-    is_zero_shift = (abs(dx) < 1e-6) and (abs(dy) < 1e-6)
+        # Calculate coordinates with shift applied
+        y_indices = np.arange(fov) - fov // 2 - dy
+        x_indices = np.arange(fov) - fov // 2 - dx
 
-    if is_zero_shift:
-        # NO SHIFT: Perform a direct crop to avoid interpolation artifacts
-        y_start, y_end = y_i - fov // 2, y_i + fov // 2 + 1
-        x_start, x_end = x_i - fov // 2, x_i + fov // 2 + 1
+        xx, yy = np.meshgrid(x_indices + x_i, y_indices + y_i)
 
-        # Guard against edge of frame indexing
-        tile = data[max(0, y_start):y_end, max(0, x_start):x_end]
-
-        if tile.shape != (fov, fov):
-            tile = np.pad(tile,
-                          ((max(0, -y_start), max(0, y_end - data.shape[0])),
-                           (max(0, -x_start), max(0, x_end - data.shape[1]))),
-                          mode='constant', constant_values=0)
-    else:
-        # SHIFT REQUIRED: Pad, shift, and then crop
-        # Extract a slightly larger tile to accommodate padding for shifting
-        total_pad = fov // 2 + pad_amount
-        y_low, y_high = y_i - total_pad, y_i + total_pad + 1
-        x_low, x_high = x_i - total_pad, x_i + total_pad + 1
-
-        preshifttile = data[max(0, y_low):y_high, max(0, x_low):x_high]
-
-        # Apply padding if crop was near the detector edge
-        preshifttile = np.pad(preshifttile,
-                              ((max(0, -y_low), max(0, y_high - data.shape[0])),
-                               (max(0, -x_low), max(0, x_high - data.shape[1]))), mode='constant', constant_values=0)
-                              # mode='reflect')
-
-        # Apply the sub-pixel shift using spaceKLIP utility
-        # Note: ut.imshift takes [dx, dy]
-        shifteddata = ut.imshift(preshifttile, [dx, dy], pad_amount=0, method=method, kwargs=kwargs, nan_reflected=False)
-
-        # Crop the shifted tile back to the desired FOV
-        # The star is now centered in shifteddata
-        c_y, c_x = shifteddata.shape[0] // 2, shifteddata.shape[1] // 2
-        tile = shifteddata[c_y - fov // 2: c_y + fov // 2 + 1,
-        c_x - fov // 2: c_x + fov // 2 + 1]
+        # Use nearest-neighbor interpolation (order=0) to preserve discrete values
+        tile = map_coordinates(
+            data,
+            [yy, xx],
+            order=0,  # Nearest-neighbor interpolation
+            cval=1,  # Fill value (1 = bad pixel)
+            prefilter=False
+        ).astype(np.float32)
 
     if showplot:
         load_plt_style(None)
@@ -862,7 +883,8 @@ def stars_extractor(data,
         fig, ax = plt.subplots(figsize=(5, 5))
 
         # Pass explicit, fully verified parameters to the renderer
-        ax.imshow(tile, origin='lower', vmin=vmin, vmax=vmax, cmap='viridis')
+        im=ax.imshow(tile, origin='lower', vmin=vmin, vmax=vmax, cmap='viridis')
+        plt.colorbar(im, ax=ax)
         plt.plot(tile.shape[1] // 2, tile.shape[0] // 2, 'xr', label='Target Center')
         ax.legend()
         plt.show()
@@ -2837,63 +2859,69 @@ class FITPSF:
                                                 r_out=np.inf)
         search_residuals[~mask] = np.nan
         y_peak, x_peak = np.unravel_index(np.nanargmax(search_residuals), (ny, nx))
-
         log.debug(f"[STAGE A - COMPANION CENTROID SEARCH]")
+
+        # check for possible not saturate companion
+        y_min, y_max = max(0, y_peak - 2), min(ny, y_peak + 3)
+        x_min, x_max = max(0, x_peak - 2), min(nx, x_peak + 3)
+        sub_window = np.fmax(search_residuals[y_min:y_max, x_min:x_max], 0.0)
+        sub_sum = float(np.nansum(sub_window))
+        peak_guess_not_sat = float(search_residuals[y_peak, x_peak])
+        threshold_val_not_sat = 5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak, dr=3)
+        if peak_guess_not_sat > threshold_val_not_sat:
+            accept_not_sat = True
+        else:
+            accept_not_sat = False
+
         y_coords, x_coords = np.where(mask_bool_second_best)
         distances = np.sqrt((x_coords - x_peak) ** 2 + (y_coords - y_peak) ** 2)
-        X=2
-        if len(distances > 0) and np.min(distances) <= X:
+        # X=2
+        # if len(distances > 0) and np.min(distances) <= X:
+        #check for possible saturate companion
+        if len(distances > 0):
             closest_idx = np.argmin(distances)
             selected_patch_label = labeled[y_coords[closest_idx], x_coords[closest_idx]]
-            log.debug(f"Closest patch within {X} px is labeled {selected_patch_label}")
+            # log.debug(f"Closest patch within {X} px is labeled {selected_patch_label}")
             mask_bool = np.zeros_like(labeled, dtype=bool)
             mask_bool[labeled == selected_patch_label] = True
 
-            y_peak, x_peak = center_of_mass(mask_bool)
+            y_peak_sat, x_peak_sat = center_of_mass(mask_bool)
             y_coords, x_coords = np.where(mask_bool)
-            distances = np.sqrt((x_coords - x_peak) ** 2 + (y_coords - y_peak) ** 2)
+            distances = np.sqrt((x_coords - x_peak_sat) ** 2 + (y_coords - y_peak_sat) ** 2)
             r2 = np.mean(distances)
-            dx2_guess = float(x_peak - ((nx - 1) / 2.0))
-            dy2_guess = float(y_peak - ((ny - 1) / 2.0))
-            peak_guess = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
-                                               [dx2_guess, dy2_guess], mode="single",
+            dx2_guess_sat = float(x_peak_sat - ((nx - 1) / 2.0))
+            dy2_guess_sat = float(y_peak_sat - ((ny - 1) / 2.0))
+            peak_guess_sat = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                               [dx2_guess_sat, dy2_guess_sat], mode="single",
                                                r_sat1=r2)
-            threshold_val =  5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak, dr=r2*2)
-            accept_guess = True
-        else:
-            y_min, y_max = max(0, y_peak - 2), min(ny, y_peak + 3)
-            x_min, x_max = max(0, x_peak - 2), min(nx, x_peak + 3)
-            sub_window = np.fmax(search_residuals[y_min:y_max, x_min:x_max], 0.0)
-            sub_sum = float(np.nansum(sub_window))
-            dx2_guess = float(x_peak - ((nx - 1) / 2.0))
-            dy2_guess = float(y_peak - ((ny - 1) / 2.0))
-            peak_guess = float(search_residuals[y_peak, x_peak])
-            threshold_val = 5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak, dr=3)
-            accept_guess = False
-
-        log.debug(f"  Initial guess_comp: dx2_guess={dx2_guess:.2f}, dy2_guess={dy2_guess:.2f}")
-        log.debug(f"  Candidate selection with robust gating: x2={x_peak:.2f}, y2={y_peak:.2f}")
-
-        if peak_guess > threshold_val:
-            if accept_guess:
-                dx2_stage_a = dx2_guess
-                dy2_stage_a = dy2_guess
-                p2_stage_a = peak_guess
-                c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
+            threshold_val_sat =  5 * self._get_std_in_annulus(search_residuals, x_peak_sat, y_peak_sat, dr=r2*2)
+            if peak_guess_sat > threshold_val_sat and peak_guess_sat > peak_guess_not_sat:
+                accept_sat = True
             else:
-                y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
-                cx = float(np.nansum(x_mesh * sub_window) / sub_sum)
-                cy = float(np.nansum(y_mesh * sub_window) / sub_sum)
-                dx2_stage_a = float(cx - ((nx - 1) / 2.0))
-                dy2_stage_a = float(cy - ((ny - 1) / 2.0))
-                p2_stage_a = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
-                                                           [dx2_stage_a, dy2_stage_a], mode="single", r_sat1=r2)
-                c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
+                accept_sat = False
+        else:
+            accept_sat = False
+
+        if accept_sat:
+            dx2_stage_a = dx2_guess_sat
+            dy2_stage_a = dy2_guess_sat
+            p2_stage_a = peak_guess_sat
+            c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
             log.debug(f"[Companion accepted]")
-            log.debug(f"  Candidate initial peak: {peak_guess:.2f} > {threshold_val:.2f} (5-sigma)")
+            log.debug(f"  Sat Candidate initial coords: {[dx2_stage_a,dy2_stage_a]}, peak: {p2_stage_a:.2f} > {threshold_val_sat:.2f} (5-sigma)")
+        elif accept_not_sat:
+            y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
+            cx = float(np.nansum(x_mesh * sub_window) / sub_sum)
+            cy = float(np.nansum(y_mesh * sub_window) / sub_sum)
+            dx2_stage_a = float(cx - ((nx - 1) / 2.0))
+            dy2_stage_a = float(cy - ((ny - 1) / 2.0))
+            p2_stage_a = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                                       [dx2_stage_a, dy2_stage_a], mode="single", r_sat1=r2)
+            c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
+            log.debug(f"[Companion accepted]")
+            log.debug(f"  Non-Sat Candidate initial coords: {[dx2_stage_a,dy2_stage_a]}, peak: {p2_stage_a:.2f} > {threshold_val_not_sat:.2f} (5-sigma)")
         else:
             log.debug(f"[Companion rejected]")
-            log.debug(f"  Candidate initial peak: {peak_guess:.2f} <= {threshold_val:.2f} (5-sigma)")
             p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = None, None, None, None
 
         return p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a
@@ -3079,6 +3107,33 @@ class FITPSF:
             bic_2 = res_2.fun + len(guess_2) * np.log(num_data_points)
         return p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, bic_2, success
 
+    def _model_selection(self, bic_1, bic_2, p1_stage_a, dx1_stage_a, dy1_stage_a, success_a, p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, success_b):
+        delta_bic = bic_1 - bic_2
+        if delta_bic >= self.bic_gate and contrast_stage_b >= self.min_contrast and np.isfinite(bic_2) and success_b:
+            self.bintest = True
+            self.success = success_b
+            p1, dx1, dy1, contrast, dx2, dy2 = p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b
+            p2 = p1 * contrast
+
+            dist1 = np.sqrt(dx1 ** 2 + dy1 ** 2)
+            dist2 = np.sqrt(dx2 ** 2 + dy2 ** 2)
+
+            if dist1 > dist2:
+                self.peak1, self.dx1, self.dy1 = p2, dx2, dy2
+                self.peak2, self.dx2, self.dy2 = p1, dx1, dy1
+            else:
+                self.peak1, self.dx1, self.dy1 = p1, dx1, dy1
+                self.peak2, self.dx2, self.dy2 = p2, dx2, dy2
+            log.info(f"Binary-source model accepted: delta BIC={delta_bic:.2f}, (dx1,dy1)=({self.dx1:.4f},{self.dy1:.4f}), peak1: {self.peak1:.2f} |  (dx2,dy2)=({self.dx2:.4f},{self.dy2:.4f}), peak2: {self.peak2:.2f}")
+
+        else:
+            self.bintest = False
+            self.success = success_a
+            self.peak1, self.dx1, self.dy1 = p1_stage_a, dx1_stage_a, dy1_stage_a
+            self.peak2, self.dx2, self.dy2 = 0.0, None, None
+            log.info("Single-source model accepted: delta BIC={delta_bic:.2f}, (dx,dy)=({self.dx1:.4f},{self.dy1:.4f}), peak: {self.peak1:.2f}")
+
+
     def fitpsf(self, tile_with_nans, nanmask, err_map, imaging_psf):
         """
         Fit the tile for a primary source and optionally a companion.
@@ -3176,8 +3231,10 @@ class FITPSF:
         #  STAGE A - COMPANION CENTROID SEARCH (if guesses not provided)
         # -----------------------------------------------------------------
         if (dx2_guess is None or dy2_guess is None):
+            searched = True
             p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = self._companion_centroid_search(clean_data, nanmask, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_bests)
         else:
+            searched = False
             p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = p2_guess, c2_guess, dx2_guess, dy2_guess
 
         if dx2_stage_a is not None and dy2_stage_a is not None:
@@ -3196,30 +3253,46 @@ class FITPSF:
         # -----------------------------------------------------------------
         # MODEL SELECTION & INTEGRATED SELF-SORTING GATE
         # -----------------------------------------------------------------
-        delta_bic = bic_1 - bic_2
-        if delta_bic >= self.bic_gate and contrast_stage_b >= self.min_contrast and np.isfinite(bic_2) and success_b:
-            self.bintest = True
-            self.success = success_b
-            p1, dx1, dy1, contrast, dx2, dy2 = p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b
-            p2 = p1 * contrast
+        self._model_selection(bic_1, bic_2, p1_stage_a, dx1_stage_a, dy1_stage_a, success_a, p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, success_b)
 
-            dist1 = np.sqrt(dx1 ** 2 + dy1 ** 2)
-            dist2 = np.sqrt(dx2 ** 2 + dy2 ** 2)
+        if success_b and not self.bintest and not searched:
+            dx2_guess = None
+            dy2_guess = None
+            # -----------------------------------------------------------------
+            #  STAGE A - COMPANION CENTROID SEARCH (if guesses not provided)
+            # -----------------------------------------------------------------
+            p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a = self._companion_centroid_search(clean_data, nanmask,
+                                                                                               err_map, weights,
+                                                                                               imaging_psf,
+                                                                                               p1_stage_a,
+                                                                                               dx1_stage_a,
+                                                                                               dy1_stage_a, r1, r2,
+                                                                                               labeled,
+                                                                                               mask_bool_second_bests)
+            if dx2_stage_a is not None and dy2_stage_a is not None:
+                # -----------------------------------------------------------------
+                # STAGE B - FREEZE PRIMARY, LOCK COMPANION IN WELL
+                # -----------------------------------------------------------------
+                c2_seed, dx2_seed, dy2_seed, _ = self._companion_search_frozen_primary(clean_data, nanmask, err_map,
+                                                                                       weights, imaging_psf, p1_stage_a,
+                                                                                       dx1_stage_a, dy1_stage_a,
+                                                                                       p2_stage_a, c2_stage_a,
+                                                                                       dx2_stage_a, dy2_stage_a)
 
-            if dist1 > dist2:
-                self.peak1, self.dx1, self.dy1 = p2, dx2, dy2
-                self.peak2, self.dx2, self.dy2 = p1, dx1, dy1
+                # -----------------------------------------------------------------
+                # STAGE B - JOINT RELAXATION (5 PARAMETERS)
+                # -----------------------------------------------------------------
+                p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, bic_2, success_b = self._companion_search_joint_relaxation(
+                    clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, c2_seed,
+                    dx2_seed, dy2_seed, num_data_points, r1, r2)
             else:
-                self.peak1, self.dx1, self.dy1 = p1, dx1, dy1
-                self.peak2, self.dx2, self.dy2 = p2, dx2, dy2
-            log.info(f"Binary-source model accepted: delta BIC={delta_bic:.2f}, (dx1,dy1)=({self.dx1:.4f},{self.dy1:.4f}), peak1: {self.peak1:.2f} |  (dx2,dy2)=({self.dx2:.4f},{self.dy2:.4f}), peak2: {self.peak2:.2f}")
+                bic_2 = np.inf
 
-        else:
-            self.bintest = False
-            self.success = success_a
-            self.peak1, self.dx1, self.dy1 = p1_stage_a, dx1_stage_a, dy1_stage_a
-            self.peak2, self.dx2, self.dy2 = 0.0, None, None
-            log.info(f"Single-source model accepted: delta BIC={delta_bic:.2f}, (dx,dy)=({self.dx1:.4f},{self.dy1:.4f}), peak: {self.peak1:.2f}")
+            # -----------------------------------------------------------------
+            # MODEL SELECTION & INTEGRATED SELF-SORTING GATE
+            # -----------------------------------------------------------------
+            self._model_selection(bic_1, bic_2, p1_stage_a, dx1_stage_a, dy1_stage_a, success_a, p1_stage_b,
+                                  dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, success_b)
 
         if self.showplot or self.debug:
             self._plot_final_fit(tile_with_nans.copy())
