@@ -2848,7 +2848,7 @@ class FITPSF:
 
         return p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a
 
-    def _companion_search_frozen_primary(self, clean_data, nanmask, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a):
+    def _companion_search_frozen_primary(self, clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, p2_stage_a, c2_stage_a, dx2_stage_a, dy2_stage_a):
         """
         Optimize companion parameters with primary position frozen (Stage B).
 
