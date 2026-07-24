@@ -1855,10 +1855,11 @@ class FITPSF:
             psf_basis = psf_basis1 + contrast * psf_basis2
             M = (psf_basis * inv_sigma).flatten()[:, np.newaxis]
 
-        if np.all(M == 0.0) or np.any(np.isnan(M)) or np.any(np.isinf(M)):
-            return np.nan
+        try:
+            f1_opt, _, _, _ = np.linalg.lstsq(M, d_flat, rcond=None)
+        except:
+            f1_opt = np.nan
 
-        f1_opt, _, _, _ = np.linalg.lstsq(M, d_flat, rcond=None)
         return float(f1_opt)
 
     def _solve_peak_wings_single(self, clean_data, err_map, weights, psf_basis,
@@ -1914,7 +1915,7 @@ class FITPSF:
         # Build weighting for wings only
         if weighted:
             inv_sigma_wing = (weights.copy() / err_map)
-            inv_sigma_wing[np.isnan(inv_sigma_wing)] = 0
+            inv_sigma_wing[~np.isfinite(inv_sigma_wing)] = 0
         else:
             inv_sigma_wing = weights.copy()
 
@@ -1929,7 +1930,7 @@ class FITPSF:
         try:
             scale, _, _, _ = np.linalg.lstsq(M_wing, d_wing, rcond=None)
         except:
-            return np.nan
+            scale =  np.nan
 
         # scale is the fitted amplitude such that scale * PSF matches the data wings
         # Since PSF is normalized to peak=1, scale IS the true peak
@@ -2004,7 +2005,7 @@ class FITPSF:
 
         if weighted:
             inv_sigma_wing = weights.copy() / err_map
-            inv_sigma_wing[np.isnan(inv_sigma_wing)] = 0
+            inv_sigma_wing[~np.isfinite(inv_sigma_wing)] = 0
         else:
             inv_sigma_wing = weights.copy()
 
@@ -2017,7 +2018,11 @@ class FITPSF:
         if np.all(M_primary == 0.0) or np.any(np.isnan(M_primary)):
             return np.nan
 
-        f1_opt, _, _, _ = np.linalg.lstsq(M_primary, d_primary, rcond=None)
+        try:
+            f1_opt, _, _, _ = np.linalg.lstsq(M_primary, d_primary, rcond=None)
+        except:
+            f1_opt =  np.nan
+
         f1_opt = float(f1_opt)
 
         # ========== STEP 2: Subtract Primary & Fit Companion ==========
@@ -2743,9 +2748,10 @@ class FITPSF:
         p1_stage_a = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                    res_1.x, mode="single",
                                                    r_sat1=r1)
-
+        if not np.isfinite(p1_stage_a):
+            success = False
         log.debug(f"  Final res_1.x: dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}. p1_stage_a: {p1_stage_a:.2f}")
-        log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}")
+        log.debug(f"  Chisq at final res_1.x: {chisq_1(res_1.x):.4e}. Success: {success}")
         return p1_stage_a, dx1_stage_a, dy1_stage_a, bic_1, success
 
     def _companion_centroid_search(self, clean_data, nanmask, err_map, weights, imaging_psf ,p1_stage_a, dx1_stage_a, dy1_stage_a, r1, r2, labeled, mask_bool_second_best):
@@ -3043,7 +3049,8 @@ class FITPSF:
         p1_stage_b = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                    res_2.x, mode="binary",
                                                    r_sat1=r1, r_sat2=r2)
-
+        if not np.isfinite(p1_stage_b):
+            success = False
         log.debug(f"[STAGE B - JOINT RELAXATION (5 PARAMETERS)]")
         log.debug(f"  dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}, p1_stage_a:{p1_stage_a:.2f}")
         log.debug(f"  dx2_seed={dx2_seed:.4f}, dy2_seed={dy2_seed:.4f}, c2_seed:{c2_seed:.2f}")
@@ -3052,7 +3059,7 @@ class FITPSF:
         log.debug(f"  Chisq at initial guess: {chisq_2(guess_2):.4e}")
         log.debug(f"  Final res_2.x: dx1_stage_b={dx1_stage_b:.4f}, dy1_stage_b={dy1_stage_b:.4f}, p1_stage_b: {p1_stage_b:.2f}")
         log.debug(f"  Final res_2.x: dx2_stage_b={dx2_stage_b:.4f}, dy2_stage_b={dy2_stage_b:.4f}, contrast_stage_b={contrast_stage_b:.2f}")
-        log.debug(f"  Chisq at final res_2.x: {chisq_2(res_2.x):.4e}")
+        log.debug(f"  Chisq at final res_2.x: {chisq_2(res_2.x):.4e}. Success: {success}")
 
         if not (np.isfinite(res_2.fun) and res_2.fun < 1e16):
             bic_2 = np.inf
