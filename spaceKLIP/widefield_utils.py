@@ -2785,7 +2785,7 @@ class FITPSF:
         y_coords, x_coords = np.where(mask_bool_second_best)
         distances = np.sqrt((x_coords - x_peak) ** 2 + (y_coords - y_peak) ** 2)
         X=2
-        if np.min(distances) <= X:
+        if len(distances > 0) and np.min(distances) <= X:
             closest_idx = np.argmin(distances)
             selected_patch_label = labeled[y_coords[closest_idx], x_coords[closest_idx]]
             log.debug(f"Closest patch within {X} px is labeled {selected_patch_label}")
@@ -3164,6 +3164,6 @@ class FITPSF:
             self.peak2, self.dx2, self.dy2 = 0.0, None, None
             log.info(f"Single-source model accepted: delta BIC={delta_bic:.2f}, (dx,dy)=({self.dx1:.2f},{self.dy1:.2f}), peak: {self.peak1:.2f}")
 
-        if self.showplot:
+        if self.showplot or self.debug:
             self._plot_final_fit(tile_with_nans.copy())
         pass
