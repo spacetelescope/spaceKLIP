@@ -3847,7 +3847,7 @@ class ImageTools():
                       subdir='tiles',
                       fwhm=2.5,
                       threshold=1.5,
-                      coresat_r_max=np.inf,
+                      coresat_r_max=5,
                       single_max_separation=1.5,
                       bin_max_separation=np.inf,
                       bin_min_separation=2.5,
