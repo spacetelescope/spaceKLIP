@@ -1818,7 +1818,7 @@ class FITPSF:
 
         if weighted:
             inv_sigma = weights / err_map
-            inv_sigma[np.isnan(inv_sigma)] = 0
+            inv_sigma[~np.isfinite(inv_sigma)] = 0
             d_flat = (clean_data * inv_sigma).flatten()
         else:
             inv_sigma = weights
@@ -1857,8 +1857,14 @@ class FITPSF:
 
         try:
             f1_opt, _, _, _ = np.linalg.lstsq(M, d_flat, rcond=None)
+            if not np.isfinite(f1_opt):
+                # lstsq returned nan, fall back to pseudoinverse
+                f1_opt = np.linalg.pinv(M) @ d_flat
         except:
-            f1_opt = np.nan
+            try:
+                f1_opt = np.linalg.pinv(M) @ d_flat
+            except:
+                f1_opt = np.nan
 
         return float(f1_opt)
 
@@ -1903,7 +1909,6 @@ class FITPSF:
         y, x = np.ogrid[:ny, :nx]
 
         # Distance from source center
-        # r_from_source = np.sqrt((x - x_c) ** 2 + (y - y_c) ** 2)
         r_from_source = np.sqrt((x - (x_c + dx1)) ** 2 + (y - (y_c + dy1)) ** 2)
 
         # Wing mask: outside saturated core, AND where PSF has signal
@@ -1925,13 +1930,18 @@ class FITPSF:
         d_wing = (clean_data * inv_sigma_wing).flatten()
         M_wing = (psf_basis * inv_sigma_wing).flatten()[:, np.newaxis]
 
-        # if np.all(M_wing == 0.0) or np.any(np.isnan(M_wing)):
-        #     return np.nan
         try:
             scale, _, _, _ = np.linalg.lstsq(M_wing, d_wing, rcond=None)
+            if not np.isfinite(scale):
+                # lstsq returned nan, fall back to pseudoinverse
+                scale = np.linalg.pinv(M_wing) @ d_wing
         except:
-            scale =  np.nan
-
+            try:
+                scale = np.linalg.pinv(M_wing) @ d_wing
+            except:
+                scale =  np.nan
+        if np.isnan(scale):
+            pass
         # scale is the fitted amplitude such that scale * PSF matches the data wings
         # Since PSF is normalized to peak=1, scale IS the true peak
         return float(scale)
@@ -2020,8 +2030,14 @@ class FITPSF:
 
         try:
             f1_opt, _, _, _ = np.linalg.lstsq(M_primary, d_primary, rcond=None)
+            if not np.isfinite(f1_opt):
+                # lstsq returned nan, fall back to pseudoinverse
+                f1_opt = np.linalg.pinv(M_primary) @ d_primary
         except:
-            f1_opt =  np.nan
+            try:
+                f1_opt = np.linalg.pinv(M_primary) @ d_primary
+            except:
+                f1_opt = np.nan
 
         f1_opt = float(f1_opt)
 
@@ -2048,18 +2064,21 @@ class FITPSF:
             # Companion fit failed, return primary estimate
             return f1_opt
 
-        try:
-            f1_companion_check, _, _, _ = np.linalg.lstsq(M_companion, d_companion, rcond=None)
-            f1_companion_check = float(f1_companion_check)
-
-            # Consistency check: companion fit should give similar primary amplitude
-            # (within reasonable tolerance since it's fitted from residuals)
-            if abs(f1_companion_check - f1_opt) / f1_opt < 0.3:  # Allow 30% difference
-                # Use weighted average: primary fit more reliable
-                f1_refined = 0.7 * f1_opt + 0.3 * f1_companion_check
-                return f1_refined
-        except:
-            pass
+        # try:
+        #     f1_companion_check, _, _, _ = np.linalg.lstsq(M_companion, d_companion, rcond=None)
+        #     if not np.isfinite(f1_companion_check):
+        #         # lstsq returned nan, fall back to pseudoinverse
+        #         f1_companion_check = np.linalg.pinv(M_companion) @ d_companion
+        #     f1_companion_check = float(f1_companion_check)
+        #
+        #     # Consistency check: companion fit should give similar primary amplitude
+        #     # (within reasonable tolerance since it's fitted from residuals)
+        #     if abs(f1_companion_check - f1_opt) / f1_opt < 0.3:  # Allow 30% difference
+        #         # Use weighted average: primary fit more reliable
+        #         f1_refined = 0.7 * f1_opt + 0.3 * f1_companion_check
+        #         return f1_refined
+        # except:
+        #     pass
 
         return f1_opt
 
@@ -2717,11 +2736,8 @@ class FITPSF:
                                                params, mode="single",
                                                r_sat1=r1)
 
-            if not np.isfinite(p1):
+            if p1/p1_guess >  2 or p1/p1_guess < 0.95 and not np.isfinite(p1):
                 return 1e18
-            if p1_guess is not None:
-                if p1 > (p1_guess * 1.35) or p1 < (max(1e-6, p1_guess * 0.75)):
-                    return 1e18
 
             mod = p1 * ut.imshift(imaging_psf / np.nanmax(imaging_psf), params,
                                   method='spline', nan_reflected=False, pad_amount=0)
@@ -2839,11 +2855,11 @@ class FITPSF:
             r2 = np.mean(distances)
             dx2_guess = float(x_peak - ((nx - 1) / 2.0))
             dy2_guess = float(y_peak - ((ny - 1) / 2.0))
-            peak_guess = self._solve_star_peak_linearly(nan_data, err_map, weights, imaging_psf,
-                                               [dy2_guess, dx2_guess], mode="single",
+            peak_guess = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                               [dx2_guess, dy2_guess], mode="single",
                                                r_sat1=r2)
-            threshold_val = None
-
+            threshold_val =  5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak, dr=r2*2)
+            accept_guess = True
         else:
             y_min, y_max = max(0, y_peak - 2), min(ny, y_peak + 3)
             x_min, x_max = max(0, x_peak - 2), min(nx, x_peak + 3)
@@ -2853,25 +2869,26 @@ class FITPSF:
             dy2_guess = float(y_peak - ((ny - 1) / 2.0))
             peak_guess = float(search_residuals[y_peak, x_peak])
             threshold_val = 5 * self._get_std_in_annulus(search_residuals, x_peak, y_peak, dr=3)
+            accept_guess = False
 
         log.debug(f"  Initial guess_comp: dx2_guess={dx2_guess:.2f}, dy2_guess={dy2_guess:.2f}")
         log.debug(f"  Candidate selection with robust gating: x2={x_peak:.2f}, y2={y_peak:.2f}")
-        if threshold_val is None:
-            dx2_stage_a = dx2_guess
-            dy2_stage_a = dy2_guess
-            p2_stage_a =peak_guess
-            c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
-            log.debug(f"[Companion rejected]")
-            log.debug(f"  Sigma threshold skipped, plausible saturated patch detected")
-        elif peak_guess > threshold_val:
-            y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
-            cx = float(np.nansum(x_mesh * sub_window) / sub_sum)
-            cy = float(np.nansum(y_mesh * sub_window) / sub_sum)
-            dx2_stage_a = float(cx - ((nx - 1) / 2.0))
-            dy2_stage_a = float(cy - ((ny - 1) / 2.0))
-            p2_stage_a = self._solve_star_peak_linearly(nan_data, err_map, weights, imaging_psf,
-                                                       [dx2_stage_a, dy2_stage_a], mode="single", r_sat1=r2)
-            c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
+
+        if peak_guess > threshold_val:
+            if accept_guess:
+                dx2_stage_a = dx2_guess
+                dy2_stage_a = dy2_guess
+                p2_stage_a = peak_guess
+                c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
+            else:
+                y_mesh, x_mesh = np.mgrid[y_min:y_max, x_min:x_max]
+                cx = float(np.nansum(x_mesh * sub_window) / sub_sum)
+                cy = float(np.nansum(y_mesh * sub_window) / sub_sum)
+                dx2_stage_a = float(cx - ((nx - 1) / 2.0))
+                dy2_stage_a = float(cy - ((ny - 1) / 2.0))
+                p2_stage_a = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
+                                                           [dx2_stage_a, dy2_stage_a], mode="single", r_sat1=r2)
+                c2_stage_a = np.nanmax([p2_stage_a / p1_stage_a, self.min_contrast])
             log.debug(f"[Companion accepted]")
             log.debug(f"  Candidate initial peak: {peak_guess:.2f} > {threshold_val:.2f} (5-sigma)")
         else:
@@ -2939,10 +2956,8 @@ class FITPSF:
 
         log.debug(f"[STAGE B - FREEZE PRIMARY, LOCK COMPANION IN WELL]")
         log.debug(f"  dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}, p1_stage_a:{p1_stage_a:.2f}")
-        log.debug(
-            f"  dx2_stage_a={dx2_stage_a:.4f}, dy2_stage_a={dy2_stage_a:.4f}, p2_stage_a:{p2_stage_a:.2f}, c2_stage_a: {c2_stage_a:.2f}")
-        log.debug(
-            f"  Initial separation: {np.sqrt((dx1_stage_a - dx2_stage_a) ** 2 + (dy1_stage_a - dy2_stage_a) ** 2):.4f} px")
+        log.debug(f"  dx2_stage_a={dx2_stage_a:.4f}, dy2_stage_a={dy2_stage_a:.4f}, p2_stage_a:{p2_stage_a:.2f}, c2_stage_a: {c2_stage_a:.2f}")
+        log.debug(f"  Initial separation: {np.sqrt((dx1_stage_a - dx2_stage_a) ** 2 + (dy1_stage_a - dy2_stage_a) ** 2):.4f} px")
         log.debug(f"  Chisq at initial guess: {chisq_companion_stage(guess_comp):.4e}")
 
         eps_vector_comp = [1e-2, 1e-3, 1e-3]
@@ -3024,11 +3039,8 @@ class FITPSF:
                                                params, mode="binary",
                                                r_sat1=r1,
                                                r_sat2=r2)
-            if not np.isfinite(p1):
+            if p1/p1_stage_a >  2 or p1/p1_stage_a <  0.95 or not np.isfinite(p1):
                 return 1e18
-            if p1_stage_a is not None:
-                if p1 > (p1_stage_a * 1.35) or p1 < (max(1e-6, p1_stage_a * 0.75)):
-                    return 1e18
 
             s1 = p1 * ut.imshift(imaging_psf / np.nanmax(imaging_psf), [dx1, dy1], method='spline', nan_reflected=False,
                                  pad_amount=0)
@@ -3050,6 +3062,7 @@ class FITPSF:
                                                    r_sat1=r1, r_sat2=r2)
         if not np.isfinite(p1_stage_b):
             success = False
+
         log.debug(f"[STAGE B - JOINT RELAXATION (5 PARAMETERS)]")
         log.debug(f"  dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}, p1_stage_a:{p1_stage_a:.2f}")
         log.debug(f"  dx2_seed={dx2_seed:.4f}, dy2_seed={dy2_seed:.4f}, c2_seed:{c2_seed:.2f}")
