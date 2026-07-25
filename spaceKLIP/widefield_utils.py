@@ -1711,7 +1711,8 @@ class FITPSF:
     """
 
     def __init__(self, max_separation=25, min_separation=1, r_sat=0, x_limits=(-3, 3), y_limits=(-3, 3),
-                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0, bic_gate=10.0,debug=False, showplot=False):
+                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0, bic_gate=10.0,
+                 ftol=1e-4, gtol = 1e-4, debug=False, showplot=False):
                 """
                 Initialize FITPSF fitter with solver options and gating thresholds.
 
@@ -1776,6 +1777,8 @@ class FITPSF:
                 self.bic_gate = bic_gate
                 self.debug = debug
                 self.showplot = showplot
+                self.ftol = ftol
+                self.gtol = gtol
 
                 # Extracted parameters results containers (filled by fitpsf)
                 self.peak1 = None
@@ -2501,11 +2504,22 @@ class FITPSF:
         r2 = min(r2_max * clamp_value, max_radius)
         r2 = max(r2, min_radius)
 
+        dx1 = x1 - x_center
+        dy1 = y1 - y_center
+        dx2 = x2 - x_center
+        dy2 = y2 - y_center
+        if np.sqrt(dx1 ** 2 + dy1 ** 2) > np.sqrt(dx2 ** 2 + dy2 ** 2):
+            r2_temp = np.copy(r2)
+            r2 = r1
+            r1 = r2_temp
+            dx1 = x2 - x_center
+            dy1 = y2 - y_center
+            dx2 = x1 - x_center
+            dy2 = y1 - y_center
+
         # Check separation constraint
         sep = np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
         if sep < min_separation or sep > max_separation:
-            dx1 = x1 - x_center
-            dy1 = y1 - y_center
             log.debug(f"Circle 1: (dx1, dy1)=({dx1:.4f}, {dy1:.4f}), r1={r1:.2f}")
             log.debug(f"Circles too close/far away: sep={sep:.2f} < min_separation={min_separation} or sep={sep:.2f} > max_separation={max_separation}. Dropping circle 2")
             dx2 = None
@@ -2513,19 +2527,6 @@ class FITPSF:
             x2 = None
             y2 = None
         else:
-            dx1 = x1 - x_center
-            dy1 = y1 - y_center
-            dx2 = x2 - x_center
-            dy2 = y2 - y_center
-            if np.sqrt(dx1 ** 2 + dy1 ** 2) > np.sqrt(dx2 ** 2 + dy2 ** 2):
-                r2_temp=np.copy(r2)
-                r2=r1
-                r1=r2_temp
-                dx1 = x2 - x_center
-                dy1 = y2 - y_center
-                dx2 = x1 - x_center
-                dy2 = y1 - y_center
-
             log.debug(f"Circle 1: (dx1, dy1)=({dx1:.4f}, {dy1:.4f}), r1={r1:.2f}")
             log.debug(f"Circle 2: (dx2, dy2)=({dx2:.4f}, {dy2:.4f}), r2={r2:.2f}, sep={sep:.2f}")
 
@@ -2775,7 +2776,7 @@ class FITPSF:
 
         eps_vector_1 = [1e-3, 1e-3]
         res_1 = minimize(chisq_1, guess_1, method='L-BFGS-B', bounds=bounds_1,
-                         options={'eps': eps_vector_1, 'maxiter': self.maxiter, 'ftol': 1e-12})
+                         options={'eps': eps_vector_1, 'maxiter': self.maxiter, 'ftol': self.ftol, 'gtol': self.gtol})
         success = res_1.success
         if not (np.isfinite(res_1.fun) and res_1.fun < 1e16 and not success):
             bic_1 = np.inf
@@ -2894,7 +2895,7 @@ class FITPSF:
             peak_guess_sat = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
                                                [dx2_guess_sat, dy2_guess_sat], mode="single",
                                                r_sat1=r2)
-            threshold_val_sat =  5 * self._get_std_in_annulus(search_residuals, x_peak_sat, y_peak_sat, dr=r2*2)
+            threshold_val_sat =  5 * self._get_std_in_annulus(search_residuals, x_peak_sat, y_peak_sat, dr=np.nanmax([3,r2*2]))
             if peak_guess_sat > threshold_val_sat and peak_guess_sat > peak_guess_not_sat:
                 accept_sat = True
             else:
@@ -2990,7 +2991,7 @@ class FITPSF:
 
         eps_vector_comp = [1e-2, 1e-3, 1e-3]
         res_comp = minimize(chisq_companion_stage, guess_comp, method='L-BFGS-B', bounds=bounds_comp,
-                            options={'eps': eps_vector_comp, 'maxiter': self.maxiter})
+                            options={'eps': eps_vector_comp, 'maxiter': self.maxiter, 'ftol': self.ftol, 'gtol': self.gtol})
         success = res_comp.success
         c2_seed, dx2_seed, dy2_seed = res_comp.x
 
@@ -3044,7 +3045,7 @@ class FITPSF:
         -----
         - Enforces separation constraint: min_separation <= sep <= max_separation.
         - Primary peak constrained to stay within 75%-135% of initial stage A estimate.
-        - Uses L-BFGS-B optimizer with tight tolerances (ftol=1e-12).
+        - Uses L-BFGS-B optimizer with tight tolerances (ftol=self.ftol, gtol=self.gtol).
 
         """
         guess_2 = [float(dx1_stage_a), float(dy1_stage_a), float(c2_seed), float(dx2_seed), float(dy2_seed)]
@@ -3082,7 +3083,7 @@ class FITPSF:
         eps_vector_2_pos = [1e-3, 1e-3, 1e-2, 1e-3, 1e-3]
         res_2 = minimize(chisq_2, guess_2, method='L-BFGS-B',
                          bounds=bounds_2,
-                         options={'eps': eps_vector_2_pos, 'maxiter': self.maxiter, 'ftol': 1e-12})
+                         options={'eps': eps_vector_2_pos, 'maxiter': self.maxiter, 'ftol': self.ftol, 'gtol': self.gtol})
         success = res_2.success
         dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b = res_2.x
         p1_stage_b = self._solve_star_peak_linearly(clean_data, err_map, weights, imaging_psf,
