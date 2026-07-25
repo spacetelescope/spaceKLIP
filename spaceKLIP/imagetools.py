@@ -3856,7 +3856,8 @@ class ImageTools():
                       subtract_bkg=True,
                       method='spline',
                       npix=0,
-                      showplot=False):
+                      showplot=False,
+                      debug=False):
 
         """
         Extract and write small cutouts (tiles) centered on cataloged sources.
@@ -4335,7 +4336,7 @@ class ImageTools():
                         tile_with_nans[tile_with_nans <= 0] = 1e-2
                         fit_psf = FITPSF(max_separation=bin_max_separation, min_separation=bin_min_separation,r_sat=coresat,
                                          x_limits=x_limits, y_limits=y_limits, min_contrast=0.1, max_contrast=1.0,
-                                         background=0, maxiter=75,debug=False)
+                                         background=0, maxiter=75,debug=debug)
                         fit_psf.fitpsf(tile_with_nans.copy(), nantile.copy(), errtile.copy(), imaging_psf.copy())
                         success = fit_psf.success
                         bintest = fit_psf.bintest
@@ -4365,19 +4366,24 @@ class ImageTools():
                         all_cat_offsets.append([catalog_offset_x, catalog_offset_y])
 
                         # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                        datatile = stars_extractor(data_filled[k], [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplot=False)
-                        errotile = stars_extractor(erro[k], [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplot=False)
-                        pxdqtile = stars_extractor(pxdq[k], [x_extract, y_extract],method='fourier', pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplot=False)
+                        datatile = stars_extractor(data_filled[k], [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels + 1 if (fov_pixels) % 2 == 0 else fov_pixels, showplot=False)
+                        errotile = stars_extractor(erro[k], [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels + 1 if (fov_pixels) % 2 == 0 else fov_pixels, showplot=False)
+                        pxdqtile = stars_extractor(pxdq[k], [x_extract, y_extract],method='fourier', pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels + 1 if (fov_pixels) % 2 == 0 else fov_pixels, showplot=False)
                         datatile = np.array(datatile)
                         err_list.append(errotile)
                         dq_list.append(pxdqtile.astype(np.uint32))
+                        tile_center = (fov_pixels - 1) / 2.0
                         if ~np.all([s is None for s in shifts2]):
-                            fitted_x2_pos, fitted_y2_pos =datatile.shape[1] // 2 - shifts2[0],  datatile.shape[1] // 2 - shifts2[1]
+                            # fitted_x2_pos, fitted_y2_pos =tile_center - shifts2[0],  tile_center - shifts2[1]
+                            # shifts1 and shifts2 are both relative to the original tile center
+                            # After extracting with shifts1, we need to adjust shifts2 relative to the new center
+                            adjusted_shifts2 = [shifts2[0] - shifts1[0], shifts2[1] - shifts1[1]]
+                            fitted_x2_pos, fitted_y2_pos = tile_center - adjusted_shifts2[0], tile_center - adjusted_shifts2[1]
                         else:
                             fitted_x2_pos, fitted_y2_pos = None, None
 
                         if nanmask is not None:
-                            nanmasktile = stars_extractor(nanmask, [x_extract, y_extract], pad_amount = shiftpad ,fov=fov_pixels + 1 if (fov_pixels) % 2 == 0 else fov_pixels,method='nearest-neighbor',showplot=False)
+                            nanmasktile = stars_extractor(nanmask, [x_extract, y_extract], pad_amount = shiftpad, shifts = shifts1 ,fov=fov_pixels + 1 if (fov_pixels) % 2 == 0 else fov_pixels,method='nearest-neighbor',showplot=False)
                             datatile[nanmasktile.astype(np.bool)] = np.nan
 
                         if subtract_bkg:
@@ -4388,7 +4394,6 @@ class ImageTools():
                             datatile-=bkg
 
                         # Write FITS file and update header.
-                        tile_center = (fov_pixels - 1) / 2.0
                         head_sci['CRPIX1'] -= (starframex - tile_center)
                         head_sci['CRPIX2'] -= (starframey - tile_center)
                         head_sci['STARFRMX'] = round(starframex+1, 2)
@@ -4446,6 +4451,9 @@ class ImageTools():
                 sci_hdr.pop('METHOD')
                 sci_hdr.pop('ROUND')
                 sci_hdr.pop('SHARP')
+                sci_hdr.pop('CND')
+                sci_hdr.pop('CNG')
+                sci_hdr.pop('OTYPE')
 
                 sci_hdr['CRVAL1'] = target_ra
                 sci_hdr['CRVAL2'] = target_dec
@@ -4498,9 +4506,9 @@ class ImageTools():
                 sci_hdr['CORESAT'] = round(np.nanmean([hdul['CORESAT'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['CORESAT'] is not None]), 2)
                 # sci_hdr['ROUND'] = round(np.nanmean([hdul['ROUND'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['ROUND'] is not None]), 2)
                 # sci_hdr['SHARP'] = round(np.nanmean([hdul['SHARP'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['SHARP'] is not None]), 2)
-                sci_hdr['CND'] = ', '.join([str(hdul['CND']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['CND'] is not None])
-                sci_hdr['CNG'] = ', '.join([str(hdul['CNG']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['CNG'] is not None])
-                sci_hdr['OTYPE'] = ', '.join([str(hdul['OTYPE']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['OTYPE'] is not None])
+                # sci_hdr['CND'] = ', '.join([str(hdul['CND']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['CND'] is not None])
+                # sci_hdr['CNG'] = ', '.join([str(hdul['CNG']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['CNG'] is not None])
+                # sci_hdr['OTYPE'] = ', '.join([str(hdul['OTYPE']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['OTYPE'] is not None])
 
                 file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
                 for index, hdul in enumerate(sci_hdus_list):
