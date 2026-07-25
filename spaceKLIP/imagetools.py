@@ -3855,7 +3855,8 @@ class ImageTools():
                       y_limits=(-3,-3),
                       subtract_bkg=True,
                       method='spline',
-                      showplots=False):
+                      npix=0,
+                      showplot=False):
 
         """
         Extract and write small cutouts (tiles) centered on cataloged sources.
@@ -3912,8 +3913,8 @@ class ImageTools():
         method : str, optional
             Interpolation method for shifting tiles when recentering sources
             ('spline' or 'fourier'). Default is 'spline'.
-        showplots : bool, optional
-            If True, display diagnostic plots during tile extraction.
+        showplot : bool, optional
+            If True, display final diagnostic plots for the tile extraction.
             Default is False.
 
         Returns
@@ -3970,10 +3971,40 @@ class ImageTools():
         ...                          subtract_bkg=False)
 
         """
+        #TODO: This should be part of the prepare_tiles step: setting the border of the nantile to a different vlaue so we can keep trak of it
+        def create_border_mask(shape, npix):
+            """
+            Create a mask that isolates all pixels within npx distance from the border.
+
+            Parameters
+            ----------
+            shape : tuple
+                Shape of the FITS array (height, width)
+            npx : int
+                Distance in pixels from the border
+
+            Returns
+            -------
+            border_mask : np.ndarray
+                Boolean mask. True where pixels are within npx distance from border,
+                False in the interior.
+            """
+            if isinstance(npix, int):
+                npix = [npix, npix, npix, npix]  # left, right, bottom, top
+            else:
+                npix = npix
+
+            height, width = shape
+            y, x = np.indices(shape)
+
+            # Create mask: True if pixel is within npx from any border
+            border_mask = (x < npix[0]) | (x >= width - npix[1]) | (y < npix[2]) | (y >= height - npix[3])
+
+            return border_mask
 
         # TODO: Right now the PSF is one for each fitsfile. I need to investigate if it would be better to create a PSF for each star, at the coordinates of the star in the fits file, and how.
         # Set output directory.
-        breathing_room = np.nanmax([np.nanmax(np.abs([x_limits])),np.nanmax(np.abs([y_limits]))])*2
+        breathing_room = 0# np.nanmax([np.nanmax(np.abs([x_limits])),np.nanmax(np.abs([y_limits]))])*2
         output_dir = os.path.join(self.database.output_dir, subdir)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
@@ -4117,23 +4148,30 @@ class ImageTools():
         catalog['closest_neighbor_distance'] = group_distances_lookup[catalog['group_id']]
         catalog['closest_neighbor_group_id'] = group_neighbor_ids_lookup[catalog['group_id']]
 
-        for group_i in np.unique(catalog['group_id']):
-            for key in np.unique(catalog[(catalog['group_id']==group_i)]['key'])[:1]:
+        for key in np.unique(catalog['key']):
+            for group_i in np.unique(catalog[(catalog['key']==key)]['group_id']):
                 log.info(f'Working on median star: ID {group_i}, key {key}')
                 ii=0
-                template_pri_header = None
-                template_sci_header = None
+                group=catalog[(catalog['group_id']==group_i)&(catalog['key']==key)]
+
                 pri_hdus_list = []
                 sci_hdus_list = []
                 all_shifts = []
                 all_cat_offsets = []
-                group=catalog[(catalog['group_id']==group_i)&(catalog['key']==key)]
                 all_star_sky_coords = []
+                tile_list = []
+                err_list = []
+                dq_list = []
+                success_list = []
+                template_pri_header_list = []
+                template_sci_header_list = []
 
                 for fitsfile in np.unique(group['fitsfile']):
                     data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                     nanmaskfile = group[group['fitsfile']==fitsfile]['nanmaskfile'][0]
                     nanmask = ut.read_msk(nanmaskfile)
+                    mask = create_border_mask(nanmask.shape, npix)
+                    nanmask[mask] = 2
 
                     # Recenter frames. Use different algorithms based on data type.
                     head, tail = os.path.split(fitsfile)
@@ -4158,9 +4196,7 @@ class ImageTools():
                     # interpolation/Fourier artifacts during shifting. The nanmask is
                     # preserved separately for downstream masking.
                     data_filled = data.copy()
-                    tile_list = []
-                    err_list = []
-                    dq_list = []
+
                     for source in group[group['fitsfile']==fitsfile]:
                         for k in range(data.shape[0]):
                             if k == 0:
@@ -4175,16 +4211,15 @@ class ImageTools():
                                 x_extract, y_extract = source['x'], source['y']
 
                                 # Extract tiles around the coordinate of the stars
-                                tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,showplots=showplots)
+                                tile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,method=method,showplot=False)
                                 if nanmask is not None:
-                                    nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,showplots=showplots)
-                                    nantile[np.isnan(nantile)] = 1
-                                    nantile = (nantile >= 0.5).astype(np.float32)
+                                    nantile = stars_extractor(nanmask.copy(), [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,method='nearest-neighbor',showplot=False)
                                     tile_with_nans = np.copy(tile)
-                                    tile_with_nans[(nantile==1)&(tile>0)] = np.nan
+                                    tile_with_nans[(nantile==1)] = np.nan
                                 else:
                                     tile_with_nans = np.copy(tile)
 
+                                errtile=np.sqrt(tile_with_nans)
 
                                 if subtract_bkg:
                                     struct_element = np.ones((3, 3), dtype=bool)
@@ -4194,27 +4229,19 @@ class ImageTools():
                                     tile_with_nans-=bkg
 
                                 coresat, core_mask_x, core_mask_y, ecccore, solcore = inspect_region_for_best_prop(tile_with_nans, fwhm=fwhm, threshold=threshold, margin=0,r_max=coresat_r_max)
-                                if coresat>0:
-                                    x_limits = [x_limits[0]-1,x_limits[1]+1]
-                                    y_limits = [y_limits[0]-1,y_limits[1]+1]
 
                                 det_method = source['method']
                                 roundness = source['roundness']
                                 sharpness = source['sharpness']
                                 log.info(f"--> Estimated NaN core saturation radius (detector px): {coresat}")
 
-                                struct_element = np.ones((3, 3), dtype=bool)
-                                dilated_mask = binary_dilation(nantile.astype(bool), structure=struct_element)
-                                bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
-                                tile-=bkg
-                                errtile=np.sqrt(tile)
-                                errtile[np.isnan(errtile)] = 1e8
+                                tile_with_nans[tile_with_nans <= 0] = 1e-2
                                 fit_psf = FITPSF(max_separation=bin_max_separation, min_separation=bin_min_separation,r_sat=coresat,
-                                                 x_limits=x_limits, y_limits=y_limits, min_contrast=0.05, max_contrast=1.0, background=0)
+                                                 x_limits=x_limits, y_limits=y_limits, min_contrast=0.1, max_contrast=1.0, background=0)
                                 # fit_psf.debug = True
-                                fit_psf.showplot = True
+                                # fit_psf.showplot = True
                                 fit_psf.fitpsf(tile_with_nans.copy(), nantile.copy(), errtile.copy(), imaging_psf.copy())
-
+                                success = fit_psf.success
                                 bintest = fit_psf.bintest
                                 shifts1 = np.array([-fit_psf.dx1, -fit_psf.dy1])
                                 if bintest:
@@ -4242,9 +4269,9 @@ class ImageTools():
                                 all_cat_offsets.append([catalog_offset_x, catalog_offset_y])
 
                                 # Apply shift between guess coordinates and fitted coordinates to recenter the star at the center of the tile
-                                datatile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=showplots)
-                                errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
-                                pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],method='fourier', pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplots=False)
+                                datatile = stars_extractor(data_filled[k].copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplot=False)
+                                errotile = stars_extractor(erro[k].copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplot=False)
+                                pxdqtile = stars_extractor(pxdq[k].copy(), [x_extract, y_extract],method='fourier', pad_amount = shiftpad, shifts = shifts1, fov=fov_pixels, showplot=False)
                                 datatile = np.array(datatile)
                                 err_list.append(errotile)
                                 dq_list.append(pxdqtile.astype(np.uint32))
@@ -4254,10 +4281,7 @@ class ImageTools():
                                     fitted_x2_pos, fitted_y2_pos = None, None
 
                                 if nanmask is not None:
-                                    nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract],method=method, pad_amount = shiftpad, shifts=shifts1, fov=fov_pixels, kwargs={'mode':'constant'},showplots=showplots)
-                                    nanmasktile[np.isnan(nanmasktile)] = 1
-                                    nanmasktile = (nanmasktile >= 0.5).astype(np.float32)
-                                    nanmasktile = np.array(nanmasktile)
+                                    nanmasktile = stars_extractor(nanmask.copy(), [x_extract, y_extract], pad_amount = shiftpad ,fov=fov_pixels + 1 if (fov_pixels) % 2 == 0 else fov_pixels,method='nearest-neighbor',showplot=False)
                                     datatile[nanmasktile.astype(np.bool)] = np.nan
 
                                 if subtract_bkg:
@@ -4269,77 +4293,114 @@ class ImageTools():
 
                                 # Write FITS file and update header.
                                 tile_center = (fov_pixels - 1) / 2.0
-
-                                tile_list.append(datatile)
                                 head_sci['CRPIX1'] -= (starframex - tile_center)
                                 head_sci['CRPIX2'] -= (starframey - tile_center)
-                                head_sci['STARFRMX'] = round(starframex+1, 4)
-                                head_sci['STARFRMY'] = round(starframey+1, 4)
-                                head_sci['STARCENX'] = tile_center+1
-                                head_sci['STARCENY'] = tile_center+1
-                                head_sci['STARPEAK'] = fitted_p1
-                                head_sci['COMPCENX'] = (fitted_x2_pos + 1) if (fitted_x2_pos is not None and not isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
-                                head_sci['COMPCENY'] = (fitted_y2_pos + 1) if (fitted_y2_pos is not None and not isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
-                                head_sci['COMPEACK'] = fitted_p2
+                                head_sci['STARFRMX'] = round(starframex+1, 2)
+                                head_sci['STARFRMY'] = round(starframey+1, 2)
+                                head_sci['STARCENX'] = round(tile_center+1, 2)
+                                head_sci['STARCENY'] = round(tile_center+1, 2)
+                                head_sci['STARPEAK'] = round(fitted_p1, 2) if not np.isnan(fitted_p1) else None
+                                head_sci['COMPCENX'] = round(fitted_x2_pos + 1, 2) if (fitted_x2_pos is not None and not isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
+                                head_sci['COMPCENY'] = round(fitted_y2_pos + 1, 2) if (fitted_y2_pos is not None and not isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
+                                head_sci['COMPEACK'] = round(fitted_p2, 2)  if (fitted_p2 is not None and not isinstance(fitted_p2,np.ma.MaskedArray)) else None
                                 head_sci['METHOD'] = det_method
-                                head_sci['ROUNDNESS'] = roundness if (roundness is not None and not isinstance(roundness,np.ma.MaskedArray)) else None
-                                head_sci['SHARPNESS'] = sharpness if (sharpness is not None and not isinstance(sharpness,np.ma.MaskedArray)) else None
-                                head_sci['CORESAT'] = coresat if (coresat is not None and not isinstance(coresat,np.ma.MaskedArray)) else None
-                                head_sci['ECCCORE'] = ecccore if (ecccore is not None and not isinstance(ecccore,np.ma.MaskedArray)) else None
-                                head_sci['SOLCORE'] = solcore if (solcore is not None and not isinstance(solcore,np.ma.MaskedArray)) else None
+                                head_sci['ROUND'] = round(roundness, 2) if (roundness is not None and not isinstance(roundness,np.ma.MaskedArray)) else None
+                                head_sci['SHARP'] = round(sharpness, 2) if (sharpness is not None and not isinstance(sharpness,np.ma.MaskedArray)) else None
+                                head_sci['CORESAT'] = round(coresat, 2) if (coresat is not None and not isinstance(coresat,np.ma.MaskedArray)) else None
+                                head_sci['ECCCORE'] = round(ecccore, 2) if (ecccore is not None and not isinstance(ecccore,np.ma.MaskedArray)) else None
+                                head_sci['SOLCORE'] = round(solcore, 2) if (solcore is not None and not isinstance(solcore,np.ma.MaskedArray)) else None
                                 head_sci['BINTEST'] = bintest
-                                head_sci['CND'] = source['closest_neighbor_distance'] if not np.isnan(source['closest_neighbor_distance']) else -1
-                                head_sci['CNG'] = source['closest_neighbor_group_id']
+                                head_sci['SUCCESS'] = success
+                                head_sci['CND'] = round(source['closest_neighbor_distance'] ,2) if not np.isnan(source['closest_neighbor_distance']) else -1
+                                head_sci['CNG'] = int(source['closest_neighbor_group_id']) if (source['closest_neighbor_group_id'] is not None and not isinstance(source['closest_neighbor_group_id'], np.ma.MaskedArray)) else None
                                 head_sci['OTYPE'] = source['OTYPE'] if (source['OTYPE'] is not None and not isinstance(source['OTYPE'],np.ma.MaskedArray)) else 'UKNOWN'
-                                if template_pri_header is None or template_sci_header is None:
-                                    template_pri_header = head_pri.copy()
-                                    template_sci_header = head_sci.copy()
+
+                                template_pri_header_list.append(head_pri.copy())
+                                template_sci_header_list.append(head_sci.copy())
 
                                 pri_hdus_list.append(head_pri)
                                 sci_hdus_list.append(head_sci)
+                                tile_list.append(datatile)
                                 all_shifts.append(shifts1)
                                 all_shifts.append(shifts1)
                                 f_wcs = WCS(head_sci, naxis=2)
                                 star_sky = f_wcs.pixel_to_world(tile_center, tile_center)
                                 all_star_sky_coords.append([star_sky.ra.degree, star_sky.dec.degree])
+                                if success:
+                                    success_list.append(ii)
                                 ii+=1
                                 pass
 
-                #Renconstruct an ad-hoc primary header for the final tile
-                pri_hdr = template_pri_header.copy()
+
+                if len(success_list)==0:
+                    success_list = [i for i in range(len(tile_list))]
+
+                pri_hdr = template_pri_header_list[success_list[0]].copy()
                 tile_fitsfile = f"jwtile_{pri_hdus_list[0]['DETECTOR'].lower()}_{group_i}_calints.fits"
                 pri_hdr['FILENAME'] = tile_fitsfile
 
                 #Renconstruct an ad-hoc sci header for the final tile
                 tile_center = (fov_pixels - 1) / 2.0
-                star_array = np.array(all_star_sky_coords)
+                star_array = np.array([all_star_sky_coords[i] for i in success_list])
 
-                sci_hdr = template_sci_header.copy()
+                sci_hdr = template_sci_header_list[success_list[0]].copy()
                 target_ra = np.median(star_array[:, 0])
                 target_dec = np.median(star_array[:, 1])
+                sci_hdr.pop('STARFRMX')
+                sci_hdr.pop('STARFRMY')
+                sci_hdr.pop('METHOD')
+                sci_hdr.pop('ROUND')
+                sci_hdr.pop('SHARP')
+
                 sci_hdr['CRVAL1'] = target_ra
                 sci_hdr['CRVAL2'] = target_dec
                 sci_hdr['CRPIX1'] = tile_center + 1
                 sci_hdr['CRPIX2'] = tile_center + 1
 
-                comp_x_list = [hdul['COMPCENX'] for hdul in sci_hdus_list if hdul.get('COMPCENX') is not None]
-                comp_y_list = [hdul['COMPCENY'] for hdul in sci_hdus_list if hdul.get('COMPCENY') is not None]
-                comp_f_list = [hdul['COMPEACK'] for hdul in sci_hdus_list if hdul.get('COMPEACK') is not None]
-                t_count = np.sum([hdul.get('BINTEST') for hdul in sci_hdus_list])
-                f_count = len(sci_hdus_list) - t_count
-                is_binary = True if t_count >= f_count else False
+                sci_hdr['STARCENX'] = round(np.nanmean([hdul['STARCENX'] for hdul in [sci_hdus_list[i] for i in success_list]]), 2)
+                sci_hdr['STARCENY'] = round(np.nanmean([hdul['STARCENY'] for hdul in [sci_hdus_list[i] for i in success_list]]), 2)
+                try:
+                    sci_hdr['STARPEAK'] = round(np.nanmean([hdul['STARPEAK'] for hdul in [sci_hdus_list[i] for i in success_list]]), 2)
+                except:
+                    sci_hdr['STARPEAK'] = None
 
-                # sci_hdr['EXTNAME'] = 'SCI'
-                sci_hdr['STARCENX'] = np.nanmean([hdul['STARCENX'] for hdul in sci_hdus_list])
-                sci_hdr['STARCENY'] = np.nanmean([hdul['STARCENY'] for hdul in sci_hdus_list])
-                sci_hdr['STARPEAK'] = np.nanmean([hdul['STARPEAK'] for hdul in sci_hdus_list])
+
+                b_count = np.sum([hdul.get('BINTEST') for hdul in [sci_hdus_list[i] for i in success_list]])
+                f_count = len([sci_hdus_list[i] for i in success_list]) - b_count
+                is_binary = True if b_count >= f_count else False
+
+                if is_binary:
+                    comp_x_list = [hdul['COMPCENX'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul.get('COMPCENX') is not None]
+                    comp_y_list = [hdul['COMPCENY'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul.get('COMPCENY') is not None]
+                    comp_f_list = [hdul['COMPEACK'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul.get('COMPEACK') is not None]
+
+                    x_min = min(comp_x_list)
+                    x_max = max(comp_x_list)
+                    x_limit_range = abs(x_limits[1] - x_limits[0])
+                    check_x_comp = (x_max - x_min) <= x_limit_range
+
+                    y_min = min(comp_y_list)
+                    y_max = max(comp_y_list)
+                    y_limit_range = abs(y_limits[1] - y_limits[0])
+                    check_y_comp = (y_max - y_min) <= y_limit_range
+
+                    if not check_x_comp or not check_y_comp:
+                        is_binary = False
+
+                s_count = np.sum([hdul.get('SUCCESS') for hdul in [sci_hdus_list[i] for i in success_list]])
+                is_success = True if s_count > 0 else False
 
                 sci_hdr['BINTEST'] = is_binary
-                sci_hdr['COMPCENX'] = np.nanmean(comp_x_list) if (is_binary and comp_x_list) else None
-                sci_hdr['COMPCENY'] = np.nanmean(comp_y_list) if (is_binary and comp_y_list) else None
-                sci_hdr['COMPEACK'] = np.nanmean(comp_f_list) if (is_binary and comp_f_list) else None
-                sci_hdr['CORESAT'] = np.nanmean([hdul['CORESAT'] for hdul in sci_hdus_list])
-                # sci_hdr['SKYCHECK'] = skycheck
+                sci_hdr['SUCCESS'] = is_success
+                sci_hdr['COMPCENX'] = round(np.nanmean(comp_x_list), 2) if is_binary else None
+                sci_hdr['COMPCENY'] = round(np.nanmean(comp_y_list), 2) if is_binary else None
+                sci_hdr['COMPEACK'] = round(np.nanmean(comp_f_list), 2) if is_binary else None
+                sci_hdr['CORESAT'] = round(np.nanmean([hdul['CORESAT'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['CORESAT'] is not None]), 2)
+                # sci_hdr['ROUND'] = round(np.nanmean([hdul['ROUND'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['ROUND'] is not None]), 2)
+                # sci_hdr['SHARP'] = round(np.nanmean([hdul['SHARP'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['SHARP'] is not None]), 2)
+                sci_hdr['CND'] = ', '.join([str(hdul['CND']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['CND'] is not None])
+                sci_hdr['CNG'] = ', '.join([str(hdul['CNG']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['CNG'] is not None])
+                sci_hdr['OTYPE'] = ', '.join([str(hdul['OTYPE']) for hdul in [sci_hdus_list[i] for i in success_list] if hdul['OTYPE'] is not None])
 
                 file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
                 for index, hdul in enumerate(sci_hdus_list):
@@ -4358,24 +4419,66 @@ class ImageTools():
                     sci_hdr[f'CNG_{index}'] = hdul['CNG']
                     sci_hdr[f'OTYPE_{index}'] = hdul['OTYPE']
                     sci_hdr[f'BINTEST_{index}'] = hdul['BINTEST']
+                    sci_hdr[f'SUCCESS_{index}'] = hdul['SUCCESS']
                     sci_hdr[f'ROLL_REF_{index}'] = hdul['ROLL_REF']
                     sci_hdr[f'V3I_YANG_{index}'] = hdul['V3I_YANG']
                     sci_hdr[f'VPARITY_{index}'] = hdul['VPARITY']
 
                 pri_hdus_list.insert(0,pri_hdr)
                 sci_hdus_list.insert(0,sci_hdr)
-                tile_list=np.array(tile_list)
-                err_list=np.array(err_list)
-                dq_list=np.array(dq_list)
+                tile_list=np.array([tile_list[i] for i in success_list])
+                err_list=np.array([err_list[i] for i in success_list])
+                dq_list=np.array([dq_list[i] for i in success_list])
 
-                median_tile= np.median(tile_list, axis=0)
-                nsample = np.sum(np.logical_not(np.isnan(err_list)), axis=0)
+                median_tile= np.nanmedian(tile_list, axis=0)
+                nsample = np.nansum(np.logical_not(np.isnan(err_list)), axis=0)
                 erro = np.true_divide(np.sqrt(np.nansum(err_list ** 2, axis=0)), nsample)
                 pxdq = dq_list[0]
 
                 # Save fits file.
                 tile_fitsfile = widefield_utils.write_obs(fitsfile, output_dir, median_tile, erro, pxdq, pri_hdus_list, sci_hdus_list, is2d, new_fitsfile=tile_fitsfile)
                 key_tile_fitsfile_list.append(tile_fitsfile)
+
+                load_plt_style(None)
+                # 1. Safely extract the data min and max bounds
+                tile_min = float(np.nanmin(median_tile))
+                tile_max = float(np.nanmax(median_tile))
+
+                # 2. FIX: Dynamically safeguard the normalization limits
+                # If the image is completely flat or invalid, provide a safe default window
+                if tile_max <= tile_min:
+                    vmin, vmax = -1.0, 1.0
+                else:
+                    vmin = tile_min
+                    # Try your preferred 20% scaling threshold
+                    vmax_trial = tile_max * 0.2
+
+                    # If the scaled vmax falls below or equal to vmin (due to negative values),
+                    # fall back to a safe upper bound (e.g., halfway between min and max)
+                    if vmax_trial <= vmin:
+                        vmax = vmin + (tile_max - vmin) * 0.5
+                    else:
+                        vmax = vmax_trial
+
+                # Double check to guarantee absolute safety before passing to Matplotlib
+                if vmin >= vmax:
+                    vmax = vmin + 1.0
+
+                fig, ax = plt.subplots(figsize=(5, 5))
+
+                # Pass explicit, fully verified parameters to the renderer
+                ax.imshow(median_tile, origin='lower', vmin=vmin, vmax=vmax, cmap='viridis')
+                ax.set_title(f"Tile for Group ID {group_i}")
+                ax.plot(sci_hdr['STARCENX']-1, sci_hdr['STARCENY']-1, 'xr', markersize=12, label='Fitted Star 1')
+                if is_binary:
+                    ax.plot(sci_hdr['COMPCENX']-1, sci_hdr['COMPCENY']-1, 'xb', markersize=12, label='Fitted Star 2')
+                ax.legend()
+                plt.tight_layout()
+                plt.savefig(tile_fitsfile.replace('.fits', '.png'))
+                if showplot:
+                    plt.show()
+                plt.close()
+
                 pass
 
         # I need to create a new database from scratch since I'm creating snapshots of stars from the original
