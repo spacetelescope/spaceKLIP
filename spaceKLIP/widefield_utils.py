@@ -2775,7 +2775,13 @@ class FITPSF:
 
             residuals = (clean_data - mod)  # / err_map
             chi_sq = np.nansum(((residuals[nanmask == 0] * weights[nanmask == 0]) ** 2))
-            return chi_sq
+            # Count valid data points
+            num_data_points = np.sum(nanmask == 0)  # or len(residuals[nanmask == 0])
+
+            # Or if you know the number of parameters (n_params):
+            dof = num_data_points - len(params)
+            chi_sq_reduced = chi_sq / dof
+            return chi_sq_reduced
 
         log.debug(f"[STAGE A - ONE SOURCE MODEL]")
         log.debug(f"  Initial guess_1: dx1={guess_1[0]:.4f}, dy1={guess_1[1]:.4f}")
@@ -2983,13 +2989,20 @@ class FITPSF:
                                      nan_reflected=False,
                                      pad_amount=0)
 
-        def chisq_companion_stage(comp_params):
-            contrast, dx2, dy2 = comp_params
+        def chisq_companion_stage(params):
+            contrast, dx2, dy2 = params
             s2 = (p1_stage_a * contrast) * ut.imshift(imaging_psf / np.nanmax(imaging_psf), [dx2, dy2], method='spline',
                                                       nan_reflected=False, pad_amount=0)
             residuals = (clean_data - (s1 + s2))  # / err_map
             chi_sq = np.nansum(((residuals[nanmask == 0] * weights[nanmask == 0]) ** 2))
-            return chi_sq
+
+            # Count valid data points
+            num_data_points = np.sum(nanmask == 0)  # or len(residuals[nanmask == 0])
+
+            # Or if you know the number of parameters (n_params):
+            dof = num_data_points - len(params)
+            chi_sq_reduced = chi_sq / dof
+            return chi_sq_reduced
 
         log.debug(f"[STAGE B - FREEZE PRIMARY, LOCK COMPANION IN WELL]")
         log.debug(f"  dx1_stage_a={dx1_stage_a:.4f}, dy1_stage_a={dy1_stage_a:.4f}, p1_stage_a:{p1_stage_a:.2f}")
@@ -3085,8 +3098,14 @@ class FITPSF:
                                               nan_reflected=False,
                                               pad_amount=0)
             residuals = (clean_data - (s1 + s2))  # / err_map
-            chisq_2 = np.nansum(((residuals[nanmask == 0] * weights[nanmask == 0]) ** 2))
-            return chisq_2
+            chi_sq = np.nansum(((residuals[nanmask == 0] * weights[nanmask == 0]) ** 2))
+            # Count valid data points
+            num_data_points = np.sum(nanmask == 0)  # or len(residuals[nanmask == 0])
+
+            # Or if you know the number of parameters (n_params):
+            dof = num_data_points - len(params)
+            chi_sq_reduced = chi_sq / dof
+            return chi_sq_reduced
 
         eps_vector_2_pos = [1e-3, 1e-3, 1e-2, 1e-3, 1e-3]
         res_2 = minimize(chisq_2, guess_2, method='L-BFGS-B',
