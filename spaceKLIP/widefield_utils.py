@@ -3124,14 +3124,14 @@ class FITPSF:
             else:
                 self.peak1, self.dx1, self.dy1 = p1, dx1, dy1
                 self.peak2, self.dx2, self.dy2 = p2, dx2, dy2
-            log.info(f"Binary-source model accepted: delta BIC={delta_bic:.2f}, (dx1,dy1)=({self.dx1:.4f},{self.dy1:.4f}), peak1: {self.peak1:.2f} |  (dx2,dy2)=({self.dx2:.4f},{self.dy2:.4f}), peak2: {self.peak2:.2f}")
+            log.info(f"Binary-source model accepted: delta BIC={delta_bic:.2f}, (dx1,dy1)=({self.dx1:.4f},{self.dy1:.4f}), peak1: {self.peak1:.2f} |  (dx2,dy2)=({self.dx2:.4f},{self.dy2:.4f}), peak2: {self.peak2:.2f}, contrast: {self.peak2/self.peak1:.2f}")
 
         else:
             self.bintest = False
             self.success = success_a
             self.peak1, self.dx1, self.dy1 = p1_stage_a, dx1_stage_a, dy1_stage_a
             self.peak2, self.dx2, self.dy2 = 0.0, None, None
-            log.info("Single-source model accepted: delta BIC={delta_bic:.2f}, (dx,dy)=({self.dx1:.4f},{self.dy1:.4f}), peak: {self.peak1:.2f}")
+            log.info(f"Single-source model accepted: delta BIC={delta_bic:.2f}, (dx,dy)=({self.dx1:.4f},{self.dy1:.4f}), peak: {self.peak1:.2f}")
 
 
     def fitpsf(self, tile_with_nans, nanmask, err_map, imaging_psf):
@@ -3249,6 +3249,7 @@ class FITPSF:
             p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, bic_2, success_b = self._companion_search_joint_relaxation(clean_data, nanmask, err_map, weights, imaging_psf, p1_stage_a, dx1_stage_a, dy1_stage_a, c2_seed, dx2_seed, dy2_seed, num_data_points, r1, r2)
         else:
             bic_2 = np.inf
+            p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, success_b = None, None, None, None, None, None, None
 
         # -----------------------------------------------------------------
         # MODEL SELECTION & INTEGRATED SELF-SORTING GATE
