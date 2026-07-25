@@ -1711,7 +1711,7 @@ class FITPSF:
     """
 
     def __init__(self, max_separation=25, min_separation=1, r_sat=0, x_limits=(-3, 3), y_limits=(-3, 3),
-                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0, bic_gate=10.0,
+                 min_contrast=0.05, max_contrast=1.0, eps=1e-3, maxiter=1000, background=0, bic_gate=10.0, epsilon=0.5,
                  ftol=1e-4, gtol = 1e-4, debug=False, showplot=False):
                 """
                 Initialize FITPSF fitter with solver options and gating thresholds.
@@ -1779,7 +1779,10 @@ class FITPSF:
                 self.showplot = showplot
                 self.ftol = ftol
                 self.gtol = gtol
-
+                if self.r_sat > 0:
+                    self.epsilon = epsilon
+                else:
+                    self.epsilon = 0
                 # Extracted parameters results containers (filled by fitpsf)
                 self.peak1 = None
                 self.dx1 = None
@@ -2967,8 +2970,8 @@ class FITPSF:
         guess_comp = [c2_stage_a, dx2_stage_a, dy2_stage_a]
         bounds_comp = [
             (self.min_contrast, self.max_contrast),
-            (dx2_stage_a + self.x_limits[0], dx2_stage_a + self.x_limits[1]),  # Limit dx2 drift
-            (dy2_stage_a + self.y_limits[0], dy2_stage_a + self.y_limits[1])  # Limit dy2 drift
+            (dx2_stage_a + self.x_limits[0]+self.epsilon, dx2_stage_a + self.x_limits[1]+self.epsilon),  # Limit dx2 drift
+            (dy2_stage_a + self.y_limits[0]+self.epsilon, dy2_stage_a + self.y_limits[1]+self.epsilon)  # Limit dy2 drift
         ]
 
         s1 = p1_stage_a * ut.imshift(imaging_psf / np.nanmax(imaging_psf), [dx1_stage_a, dy1_stage_a], method='spline',
@@ -3053,8 +3056,8 @@ class FITPSF:
             (float(self.x_limits[0]), float(self.x_limits[1])),
             (float(self.y_limits[0]), float(self.y_limits[1])),
             (float(self.min_contrast), float(self.max_contrast)),
-            (dx2_seed + self.x_limits[0], dx2_seed + self.x_limits[1]),  # Limit dx2 drift
-            (dy2_seed + self.y_limits[0], dy2_seed + self.y_limits[1])  # Limit dy2 drift
+            (dx2_seed + self.x_limits[0]+self.epsilon, dx2_seed + self.x_limits[1]+self.epsilon),  # Limit dx2 drift
+            (dy2_seed + self.y_limits[0]+self.epsilon, dy2_seed + self.y_limits[1]+self.epsilon)  # Limit dy2 drift
         ]
 
         def chisq_2(params):
@@ -3258,8 +3261,8 @@ class FITPSF:
         self._model_selection(bic_1, bic_2, p1_stage_a, dx1_stage_a, dy1_stage_a, success_a, p1_stage_b, dx1_stage_b, dy1_stage_b, contrast_stage_b, dx2_stage_b, dy2_stage_b, success_b)
 
         if success_b and not self.bintest and not searched:
-            dx2_guess = None
-            dy2_guess = None
+            #If a companion was originally detected from the double circle fit, and then discarded in favor of a singe fit.
+            # do a second companion search to look for other sources farther away.
             # -----------------------------------------------------------------
             #  STAGE A - COMPANION CENTROID SEARCH (if guesses not provided)
             # -----------------------------------------------------------------
