@@ -839,6 +839,11 @@ def stars_extractor(data,
         dx = (x_i - coords[0])
         dy = (y_i - coords[1])
 
+        # ADD THIS: Include shifts if provided
+        if shifts is not None:
+            dx += shifts[0]
+            dy += shifts[1]
+
         # Calculate coordinates with shift applied
         y_indices = np.arange(fov) - fov // 2 - dy
         x_indices = np.arange(fov) - fov // 2 - dx
@@ -1780,9 +1785,9 @@ class FITPSF:
                 self.ftol = ftol
                 self.gtol = gtol
                 if self.r_sat > 0:
-                    self.epsilon = epsilon
+                    self.espsilon = epsilon
                 else:
-                    self.epsilon = 0
+                    self.espsilon = 0
                 # Extracted parameters results containers (filled by fitpsf)
                 self.peak1 = None
                 self.dx1 = None
@@ -2970,8 +2975,8 @@ class FITPSF:
         guess_comp = [c2_stage_a, dx2_stage_a, dy2_stage_a]
         bounds_comp = [
             (self.min_contrast, self.max_contrast),
-            (dx2_stage_a + self.x_limits[0]+self.epsilon, dx2_stage_a + self.x_limits[1]+self.epsilon),  # Limit dx2 drift
-            (dy2_stage_a + self.y_limits[0]+self.epsilon, dy2_stage_a + self.y_limits[1]+self.epsilon)  # Limit dy2 drift
+            (dx2_stage_a + (self.x_limits[0] - self.espsilon), dx2_stage_a + (self.x_limits[1] + self.espsilon)),
+            (dy2_stage_a + (self.y_limits[0] - self.espsilon), dy2_stage_a + (self.y_limits[1] + self.espsilon))
         ]
 
         s1 = p1_stage_a * ut.imshift(imaging_psf / np.nanmax(imaging_psf), [dx1_stage_a, dy1_stage_a], method='spline',
@@ -3053,11 +3058,11 @@ class FITPSF:
         """
         guess_2 = [float(dx1_stage_a), float(dy1_stage_a), float(c2_seed), float(dx2_seed), float(dy2_seed)]
         bounds_2 = [
-            (float(self.x_limits[0]), float(self.x_limits[1])),
-            (float(self.y_limits[0]), float(self.y_limits[1])),
+            (dx1_stage_a + self.x_limits[0], dx1_stage_a + self.x_limits[1]),
+            (dy1_stage_a + self.y_limits[0], dy1_stage_a + self.y_limits[1]),
             (float(self.min_contrast), float(self.max_contrast)),
-            (dx2_seed + self.x_limits[0]+self.epsilon, dx2_seed + self.x_limits[1]+self.epsilon),  # Limit dx2 drift
-            (dy2_seed + self.y_limits[0]+self.epsilon, dy2_seed + self.y_limits[1]+self.epsilon)  # Limit dy2 drift
+            (dx2_seed + (self.x_limits[0]-self.espsilon), dx2_seed + (self.x_limits[1]+self.espsilon)),  # Limit dx2 drift
+            (dy2_seed + (self.y_limits[0]-self.espsilon), dy2_seed + (self.y_limits[1]+self.espsilon))  # Limit dy2 drift
         ]
 
         def chisq_2(params):
