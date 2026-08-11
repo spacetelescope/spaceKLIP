@@ -576,7 +576,11 @@ class AnalysisTools():
                 # Read Stage 2 files and make pyKLIP dataset
                 filepaths, psflib_filepaths = get_pyklip_filepaths(self.database, key)
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                pyklip_dataset = JWSTData(filepaths, psflib_filepaths)
+                
+                # TODO: track highpass argument to match JWSTData created in pyklippipeline.run_obs()
+                pyklip_dataset = JWSTData(filepaths, psflib_filepaths,
+                                          center_include_offset=False,
+                                          center_keywords=['STARCENX','STARCENY'])
 
                 # Compute the resolution element. Account for possible blurring.
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
