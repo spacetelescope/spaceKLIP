@@ -213,7 +213,7 @@ def run_obs(database,
                         pass
                     hdul[0].header['MODE'] = mode
                     hdul[0].header['ANNULI'] = annu
-                    hdul[0].header['ANNULI_S'] = (kwargs['annuli_spacing'], 'Radial annulus spacing: constant, log, or linear')
+                    hdul[0].header['ANNSPACE'] = (kwargs['annuli_spacing'], 'Radial annulus spacing: constant, log, or linear')
                     hdul[0].header['SUBSECTS'] = subs
                     hdul[0].header['BUNIT'] = database.obs[key]['BUNIT'][ww_sci[0]]
                     w = wcs.WCS(head_sci)

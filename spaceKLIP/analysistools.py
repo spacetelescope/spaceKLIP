@@ -667,7 +667,7 @@ class AnalysisTools():
                 klip_args = {}
                 klip_args['mode'] = self.database.red[key]['MODE'][j]
                 klip_args['annuli'] = self.database.red[key]['ANNULI'][j]
-                klip_args['annuli_spacing'] = self.database.red[key]['ANNULI_S'][j]
+                klip_args['annuli_spacing'] = self.database.red[key]['ANNSPACE'][j]
                 klip_args['subsections'] = self.database.red[key]['SUBSECTS'][j]
                 klip_args['numbasis'] = [int(nb) for nb in self.database.red[key]['KLMODES'][j].split(',')]
                 klip_args['algo'] = 'klip' #Currently not logged, may need changing in future. 
@@ -1546,6 +1546,7 @@ class AnalysisTools():
                     # Compute the FM dataset.
                     mode = self.database.red[key]['MODE'][j]
                     annuli = int(self.database.red[key]['ANNULI'][j])
+                    annuli_spacing = self.database.red[key]['ANNSPACE'][j]
                     subsections = int(self.database.red[key]['SUBSECTS'][j])
                     fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fmpsf-KLmodes-all.fits')
                     klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-klipped-KLmodes-all.fits')
@@ -1591,6 +1592,7 @@ class AnalysisTools():
                                         outputdir=output_dir_fm,
                                         fileprefix='FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key,
                                         annuli=annuli,
+                                        annuli_spacing=annuli_spacing,
                                         subsections=subsections,
                                         movement=1.,
                                         numbasis=klmodes,
@@ -2244,12 +2246,14 @@ class AnalysisTools():
                         # Reduce companion-subtracted data.
                         mode = self.database.red[key]['MODE'][j]
                         annuli = self.database.red[key]['ANNULI'][j]
+                        annuli_spacing = self.database.red[key]['ANNSPACE'][j]
                         subsections = self.database.red[key]['SUBSECTS'][j]
                         parallelized.klip_dataset(dataset=dataset_orig,
                                                   mode=mode,
                                                   outputdir=output_dir_fm,
                                                   fileprefix=fileprefix,
                                                   annuli=annuli,
+                                                  annuli_spacing=annuli_spacing,
                                                   subsections=subsections,
                                                   movement=1.,
                                                   numbasis=klmodes,

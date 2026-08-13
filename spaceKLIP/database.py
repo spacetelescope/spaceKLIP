@@ -725,7 +725,7 @@ class Database():
         PIXAR_SR = []  # sr
         MODE = []
         ANNULI = []
-        ANNULI_S = []  # Radial spacing of annuli : constant, log, linear
+        ANNSPACE = []  # Radial spacing of annuli : constant, log, linear
         SUBSECTS = []
         KLMODES = []
         BUNIT = []
@@ -806,7 +806,7 @@ class Database():
             if TYPE[-1] == 'CORON3':
                 MODE += ['RDI']
                 ANNULI += [1]
-                ANNULI_S += ['constant']  # set default for annuli spacing
+                ANNSPACE += ['constant']  # Set default for annuli spacing.
                 SUBSECTS += [1]
                 try:
                     KLMODES += [str(head['KLMODE0'])]
@@ -816,7 +816,7 @@ class Database():
             elif TYPE[-1] == 'PYKLIP':
                 MODE += [head['MODE']]
                 ANNULI += [head['ANNULI']]
-                ANNULI_S += [head.get('ANNULI_S', 'constant')]
+                ANNSPACE += [head.get('ANNSPACE', 'constant')]
                 SUBSECTS += [head['SUBSECTS']]
                 klmodes = str(head['KLMODE0'])
                 j = 1
@@ -874,7 +874,7 @@ class Database():
         PIXAR_SR = np.array(PIXAR_SR)
         MODE = np.array(MODE)
         ANNULI = np.array(ANNULI)
-        ANNULI_S = np.array(ANNULI_S)
+        ANNSPACE = np.array(ANNSPACE)
         SUBSECTS = np.array(SUBSECTS)
         KLMODES = np.array(KLMODES)
         BUNIT = np.array(BUNIT)
@@ -927,7 +927,7 @@ class Database():
                                    'STARCENY',
                                    'MODE',
                                    'ANNULI',
-                                   'ANNULI_S',
+                                   'ANNSPACE',
                                    'SUBSECTS',
                                    'KLMODES',
                                    'BUNIT',
@@ -999,7 +999,7 @@ class Database():
                              STARCENY[ww[j]],
                              MODE[ww[j]],
                              ANNULI[ww[j]],
-                             ANNULI_S[ww[j]],
+                             ANNSPACE[ww[j]],
                              SUBSECTS[ww[j]],
                              KLMODES[ww[j]],
                              BUNIT[ww[j]],
