@@ -68,6 +68,9 @@ def run_obs(database,
         - movement : float, optional
             Minimum amount of movement (pix) of an astrophysical source to
             consider using that image as a reference PSF. The default is 1.
+        - highpass : bool or float, optional
+            If True, run a Gaussian high pass filter (default size is sigma=imgsize/10).
+            Can also be a number specifying FWHM of box in pixel units. Default is False.
         - verbose : bool, optional
             Verbose mode? The default is False.
         - save_rolls : bool, optional
@@ -215,6 +218,7 @@ def run_obs(database,
                     hdul[0].header['ANNULI'] = annu
                     hdul[0].header['ANNSPACE'] = (kwargs['annuli_spacing'], 'Radial annulus spacing: constant, log, or linear')
                     hdul[0].header['SUBSECTS'] = subs
+                    hdul[0].header['HIGHPASS'] = (kwargs_temp['highpass'], 'High-pass filter setting used by pyKLIP')
                     hdul[0].header['BUNIT'] = database.obs[key]['BUNIT'][ww_sci[0]]
                     w = wcs.WCS(head_sci)
                     _rotate_wcs_hdr(w, database.obs[key]['ROLL_REF'][ww_sci[0]])
@@ -288,7 +292,6 @@ def run_obs(database,
                     else str(row)
                     for row in database.obs[key][col]
                 ]
-
 
         database.obs[key].write(file, format='ascii', overwrite=True)
 

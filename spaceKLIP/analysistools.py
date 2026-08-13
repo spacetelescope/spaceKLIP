@@ -576,7 +576,10 @@ class AnalysisTools():
                 # Read Stage 2 files and make pyKLIP dataset
                 filepaths, psflib_filepaths = get_pyklip_filepaths(self.database, key)
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                pyklip_dataset = JWSTData(filepaths, psflib_filepaths)
+                pyklip_dataset = JWSTData(filepaths, psflib_filepaths,
+                                          highpass=self.database.red[key]['HIGHPASS'][j],
+                                          center_include_offset=False,
+                                          center_keywords=['STARCENX','STARCENY'])
 
                 # Compute the resolution element. Account for possible blurring.
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
@@ -677,7 +680,7 @@ class AnalysisTools():
                             + '_NSUBS' + str(klip_args['subsections']) + '_' + key +'/'
                 klip_args['movement'] = 1 #Currently not logged, fix later. 
                 klip_args['calibrate_flux'] = False
-                klip_args['highpass'] = False
+                klip_args['highpass'] = self.database.red[key]['HIGHPASS'][j]
                 klip_args['verbose'] = False
                 inj_output_dir = os.path.join(output_dir, inj_subdir)
                 if not os.path.exists(inj_output_dir):
@@ -933,7 +936,6 @@ class AnalysisTools():
                            date='auto',
                            use_fm_psf=True,
                            flip_fmpsf_xy=None,
-                           highpass=False,
                            fitmethod='mcmc',
                            minmethod=None,
                            fitkernel='diag',
@@ -987,9 +989,6 @@ class AnalysisTools():
             incorporate any KLIP throughput losses. The default is True.
         flip_fmpsf_xy : str, optional
             If 'x', flip the x-axis of the FM PSF. If 'y', flip the y-axis of the FM PSF. 'xy' or 'yx' for both.
-        highpass : bool or float, optional
-            If float, will apply a high-pass filter to the FM PSF and KLIP
-            dataset. The default is False.
         fitmethod : 'mcmc' or 'nested', optional
             Sampling algorithm which shall be used. If None and minmethod not None, it will mock the MCMC fit results
             using the initial guesses and perform only the Gaussian convolution fit to estimate extension.
@@ -1060,7 +1059,9 @@ class AnalysisTools():
             # Loop through FITS files.
             nfitsfiles = len(self.database.red[key])
             for j in range(nfitsfiles):
-                
+
+                highpass = self.database.red[key]['HIGHPASS'][j]
+
                 # Get stellar magnitudes and filter zero points.
                 mstar, fzero, fzero_flam, fzero_wm2um = get_stellar_magnitudes(
                     starfile, spectral_type,
@@ -1102,7 +1103,10 @@ class AnalysisTools():
                 
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass)
+                dataset = JWSTData(filepaths, psflib_filepaths,
+                                   highpass=highpass,
+                                   center_include_offset=False,
+                                   center_keywords=['STARCENX','STARCENY'])
                 kwargs_temp['dataset'] = dataset
                 kwargs_temp['aligned_center'] = dataset._centers[0]
                 kwargs_temp['psf_library'] = dataset.psflib
