@@ -65,6 +65,8 @@ def run_obs(database,
         - numbasis : list of int, optional
             Number of KL modes that shall be looped over. The default is [1, 2,
             5, 10, 20, 50, 100].
+        - IWA : float, optional
+            Inner working angle, in pixels, used by pyKLIP. The default is 1.
         - movement : float, optional
             Minimum amount of movement (pix) of an astrophysical source to
             consider using that image as a reference PSF. The default is 1.
