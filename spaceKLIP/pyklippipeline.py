@@ -228,7 +228,7 @@ def run_obs(database,
                     hdul[0].header['ANNSPACE'] = (kwargs['annuli_spacing'], 'Radial annulus spacing: constant, log, or linear')
                     hdul[0].header['SUBSECTS'] = (subs, "Number of subtraction subsections within each annulus")
                     hdul[0].header['HIGHPASS'] = (kwargs_temp['highpass'], 'High-pass filter setting used by pyKLIP')
-                    hdul[0].header['IWA'] = (kwargs['IWA'], 'Inner working angle used by pyKLIP')
+                    hdul[0].header['IWA'] = (kwargs['IWA'], '[pixel] Inner working angle used by pyKLIP')
                     hdul[0].header['BUNIT'] = (database.obs[key]['BUNIT'][ww_sci[0]], head_sci.comments["BUNIT"])
 
                     w = wcs.WCS(head_sci)
