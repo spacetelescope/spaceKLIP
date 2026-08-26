@@ -128,7 +128,7 @@ class AnalysisTools():
             File type to save the raw contrast information to. Options are 'ecsv'
             or 'npy'.
         save_figures : bool, optional
-            Save the plots in a PDF?
+            Save the plots_bk in a PDF?
         
         Returns
         -------
@@ -441,14 +441,14 @@ class AnalysisTools():
 
                     output_fn =  fitsfile[:-5]+"_contrast.ecsv"
                     results_table.write(output_fn, overwrite=True)
-                    print(f"Contrast results and plots saved to {output_fn}")
+                    print(f"Contrast results and plots_bk saved to {output_fn}")
                 elif output_filetype.lower()=='npy':
                     # Save outputs as numpy .npy files
                     np.save(fitsfile[:-5] + '_seps.npy', seps)
                     np.save(fitsfile[:-5] + '_cons.npy', cons)
                     if mask is not None:
                         np.save(fitsfile[:-5] + '_cons_mask.npy', cons_mask)
-                    print(f"Contrast results and plots saved to {fitsfile[:-5] + '_seps.npy'}, {fitsfile[:-5] + '_cons.npy'}")
+                    print(f"Contrast results and plots_bk saved to {fitsfile[:-5] + '_seps.npy'}, {fitsfile[:-5] + '_cons.npy'}")
                 else:
                     raise ValueError('File save format not supported, options are "npy" or "ecsv".')
 
@@ -765,7 +765,7 @@ class AnalysisTools():
                     # Get fluxes for this KL mode subtracted image
                     this_KL_retr_fluxes = all_retr_fluxes[:,k]
 
-                    # Make a table to make things easier
+                    # Make a tables to make things easier
                     results = Table([all_inj_seps, all_inj_pas, all_inj_fluxes, this_KL_retr_fluxes], 
                                     names=('inj_seps', 'inj_pas', 'inj_fluxes', 'retr_fluxes'))
 
@@ -808,7 +808,7 @@ class AnalysisTools():
                     np.save(save_string+'_cal_maskcons.npy', maskcons_corr)
 
                 # Define some local utilty functions for plot setup.
-                # This makes the plotting code below less repetitive and more consistent
+                # This makes the plotting codes_bk below less repetitive and more consistent
 
                 def standardize_plots_setup(plot_style=None):
                     # Intialize the matplotlib style.
@@ -946,6 +946,7 @@ class AnalysisTools():
                            use_epsf=False,
                            fov_pix=65,
                            save_psf = False,
+                           center_include_offset=True,
                            **kwargs):
         """
         Extract the best fit parameters of a number of companions from each
@@ -1019,7 +1020,7 @@ class AnalysisTools():
             Name of the directory where the data products shall be saved. The
             default is 'companions'.
         save_figures : bool, optional
-            Save the plots in a PDF?
+            Save the plots_bk in a PDF?
         save_psf: bool, optional
                 Save the best fit PSF for each companion as a FITS file.
         
@@ -1101,7 +1102,7 @@ class AnalysisTools():
                 
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass)
+                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass, center_include_offset=center_include_offset)
                 kwargs_temp['dataset'] = dataset
                 kwargs_temp['aligned_center'] = dataset._centers[0]
                 kwargs_temp['psf_library'] = dataset.psflib
@@ -1813,7 +1814,7 @@ class AnalysisTools():
                             plt.show()
                             plt.close(fig)
 
-                            # Write the MCMC fit results into a table.
+                            # Write the MCMC fit results into a tables.
                             if isinstance(mstar_err, dict):
                                 mstar_err_temp = mstar_err[filt]
                             else:
@@ -1980,7 +1981,7 @@ class AnalysisTools():
                             plt.show()
                             plt.close(fig)
 
-                            # Write the pymultinest fit results into a table.
+                            # Write the pymultinest fit results into a tables.
                             if isinstance(mstar_err, dict):
                                 mstar_err_temp = mstar_err[filt]
                             else:
@@ -2272,7 +2273,7 @@ class AnalysisTools():
                 # Update source database.
                 self.database.update_src(key, j, tab)
 
-                # Save the results table.
+                # Save the results tables.
                 output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
                     subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
                 tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
@@ -2520,7 +2521,7 @@ def inject_and_recover(raw_dataset,
                     inj_de = injection_seps[i]*np.cos(np.deg2rad(injection_pas[j])) # pixels
                     # Calculate distance to companion
                     dist = np.sqrt((tcomp_ra-inj_ra)**2+(tcomp_de-inj_de)**2)
-                    #Check if too close, if so, lie to the code and say its already injected
+                    #Check if too close, if so, lie to the codes_bk and say its already injected
                     if dist < tcomp_rad:
                         list_of_injected += [pos_id]
     if len(list_of_injected) != 0:

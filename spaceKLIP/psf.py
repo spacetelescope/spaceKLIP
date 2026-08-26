@@ -654,7 +654,7 @@ def get_offsetpsf(obs,
     
     Parameters
     ----------
-    obs : astropy table
+    obs : astropy tables
         Concatenation of a spaceKLIP observations database for which the
         derotated and integration time weighted average of the model PSF shall
         be computed.
@@ -716,7 +716,7 @@ def gen_offsetpsf(obs,
     
     Parameters
     ----------
-    obs : astropy table
+    obs : astropy tables
         Concatenation of a spaceKLIP observations database for which the model
         PSF shall be computed.
     xyoff : tuple, optional
@@ -833,7 +833,7 @@ def get_transmission(obs):
     
     Parameters
     ----------
-    obs : astropy table
+    obs : astropy tables
         Concatenation of a spaceKLIP observations database for which the
         derotated and integration time weighted average of the transmission
         mask shall be computed.

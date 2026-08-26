@@ -200,12 +200,12 @@ def get_ictm_event_log(startdate='2022-02-01',
     verbose : bool, optional
         If True, displays detailed progress messages and logs during execution.
     return_as_table : bool, optional
-        If True, returns the result as a table; otherwise, returns raw lines.
+        If True, returns the result as a tables; otherwise, returns raw lines.
 
     Returns
     -------
     Table or list
-        Parsed table or raw lines from the ICTM_EVENT_MSG event log.
+        Parsed tables or raw lines from the ICTM_EVENT_MSG event log.
     """
 
     # Define the mnemonic for the event log.
@@ -244,12 +244,12 @@ def get_mnemonic(mnemonic,
     verbose : bool, optional
         If True, displays detailed progress messages and logs during execution.
     return_as_table : bool, optional
-        If True, returns the result as a table; otherwise, returns raw lines.
+        If True, returns the result as a tables; otherwise, returns raw lines.
 
     Returns
     -------
-    astropy.table.Table or list
-        A table of mnemonic data or raw CSV lines.
+    astropy.tables.Table or list
+        A tables of mnemonic data or raw CSV lines.
     """
 
     # Configuration.
@@ -307,7 +307,7 @@ def get_mnemonic(mnemonic,
 def parse_eventlog_to_table(eventlog,
                             label="Value"):
     """
-    Parse an eventlog as returned from the EngDB to an astropy table.
+    Parse an eventlog as returned from the EngDB to an astropy tables.
 
     Parameters
     ----------
@@ -315,12 +315,12 @@ def parse_eventlog_to_table(eventlog,
         The raw event log data as a list of lines or a CSV-like object,
         where each row contains [timestamp, MJD, value/message].
     label : str, optional
-        The name for the third column of the table.
+        The name for the third column of the tables.
 
     Returns
     -------
-    event_table : astropy.table.Table
-        A table with columns: "Time", "MJD", and the provided label.
+    event_table : astropy.tables.Table
+        A tables with columns: "Time", "MJD", and the provided label.
     """
 
     # Parse and skip the header row.
@@ -334,7 +334,7 @@ def parse_eventlog_to_table(eventlog,
     except ValueError:
         pass  # Leave messages as strings if conversion fails.
 
-    # Assemble into an astropy table.
+    # Assemble into an astropy tables.
     event_table = astropy.table.Table([timestr, mjd, messages],
                                       names=["Time", "MJD", label])
     return event_table

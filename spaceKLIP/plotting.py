@@ -42,13 +42,13 @@ SPACEKLIP_PLOT_STYLE = os.path.join(os.path.dirname(__file__),'sk_style.mplstyle
 # =============================================================================
 
 def set_default_style(style):
-    " Adjust the default matplotlib style for spaceKLIP plots. "
+    " Adjust the default matplotlib style for spaceKLIP plots_bk. "
     global SPACEKLIP_PLOT_STYLE
     SPACEKLIP_PLOT_STYLE = style
 
 def load_plt_style(style=None):
     """
-    Load the matplotlib style for spaceKLIP plots.
+    Load the matplotlib style for spaceKLIP plots_bk.
 
     Load the style sheet (default of `sk_style.mplstyle`), which is a modified version of the
     style sheet from the `webbpsf_ext` package.
@@ -261,7 +261,7 @@ def display_coron_image(filename,
 
     # Early exit for unsupported file types.
     if 'uncal' in filename:
-        raise RuntimeError("Display code does not support stage 0 uncal files. Reduce the data further before trying to display it.")
+        raise RuntimeError("Display codes_bk does not support stage 0 uncal files. Reduce the data further before trying to display it.")
 
     # Determine the input file type and set corresponding flags.
     is_pyklip = 'KLmodes' in filename
@@ -431,7 +431,7 @@ def display_coron_dataset(database,
     stage3 : str, optional
         Specify if data is stage 3.
     save_filename : str
-        If provided, the plots will be saved to a PDF file with this name.
+        If provided, the plots_bk will be saved to a PDF file with this name.
     vmin, vmax : float, optional
         The minimum/maximum data value to use for scaling the image. If None, determined automatically.
     stretch : float, optional
@@ -441,7 +441,7 @@ def display_coron_dataset(database,
     dq_only : bool, optional
         If True, only the DO_NOT_USE DQ flags are displayed, not the image data itself.
     interactive : bool, optional
-        If `True`, the plots will be displayed interactively.
+        If `True`, the plots_bk will be displayed interactively.
     bbox_color : str, optional
         The background color for the text label. Default is '#4B0082'.
         If set to None, no background box will be drawn.
@@ -534,7 +534,7 @@ def display_image_comparisons(database,
         - `dict`: Filters tables based on database column values, where keys are column names and values are filter criteria.
 
     save_filename : str
-        If provided, the plots will be saved to a PDF file with this name.
+        If provided, the plots_bk will be saved to a PDF file with this name.
     vmin, vmax : float, optional
         The minimum/maximum data value to use for scaling the image. If None, determined automatically.
     stretch : float, optional
@@ -546,7 +546,7 @@ def display_image_comparisons(database,
     subtract_first : bool
         Whether to subtract the first SCI frame from subsequent frames.
     interactive : bool, optional
-        If `True`, the plots will be displayed interactively.
+        If `True`, the plots_bk will be displayed interactively.
     
     Returns
     -------
@@ -562,7 +562,7 @@ def display_image_comparisons(database,
     # Initialize a dictionary to store image details for each base directory.
     image_files = {base_dir: {'bp_counts': [], 'first_sci_file': None} for base_dir in base_dirs}
 
-    # Iterate over each key and corresponding table in the database.
+    # Iterate over each key and corresponding tables in the database.
     # Filter files based on the 'restrict_to' criteria provided.
     filtered_files = []
     for key, table in database.obs.items():
@@ -692,7 +692,7 @@ def plot_contrast_images(meta,
         extent = (extl, -extr, -extl, extr)
         xlabel, ylabel = '$\\Delta$RA [arcsec]', '$\\Delta$Dec [arcsec]'
 
-    # Initialize plots
+    # Initialize plots_bk
     f, ax = plt.subplots(1, 2, figsize=(2*6.4, 1*4.8))
 
     # Plot subtracted image, circle input companion locations
@@ -1137,7 +1137,7 @@ def plot_subimages(imgdirs, subdirs, filts, submodes, numKL,
             window_pix = int(np.rint(window_size / pltscale['NIRCAM'] / 2))
             offset = (window_pix - window_size / 0.063 / 2) *0.063
         else:
-            # Potentially use same center_pix code as for NIRCAM case above
+            # Potentially use same center_pix codes_bk as for NIRCAM case above
             center_pix = miri_img_centers[flt]
             window_pix = int(np.rint(window_size / pltscale['MIRI'] / 2))
             offset = (window_pix - window_size / 0.11 / 2) *0.11

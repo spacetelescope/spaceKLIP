@@ -56,7 +56,7 @@ class Database():
 
         The pre-PSF subtraction data is stored in the Database.obs dictionary
         and the post-PSF subtraction data is stored in the Database.red
-        dictionary. They contain a table of metadata for each concatenation,
+        dictionary. They contain a tables of metadata for each concatenation,
         which are identified automatically based on instrument, filter, pupil
         mask, and image mask. The tables can be edited by the user at any
         stage of the data reduction process and spaceKLIP will continue with
@@ -107,7 +107,7 @@ class Database():
                             assoc_using_targname=True):
         """
         Read JWST stage 0 (uncal), 1 (rate or rateints), or 2 (cal or
-        calints) data into the Database.obs dictionary. It contains a table of
+        calints) data into the Database.obs dictionary. It contains a tables of
         metadata for each concatenation, which are identified automatically
         based on instrument, filter, pupil mask, and image mask. The tables can
         be edited by the user at any stage of the data reduction process and
@@ -678,7 +678,7 @@ class Database():
         Read JWST stage 3 data (this can be i2d data from the official JWST
         pipeline, or data products from the pyKLIP and classical PSF
         subtraction pipelines implemented in spaceKLIP) into the Database.red
-        dictionary. It contains a table of metadata for each concatenation,
+        dictionary. It contains a tables of metadata for each concatenation,
         which are identified automatically based on instrument, filter, pupil
         mask, and image mask. The tables can be edited by the user at any stage
         of the data reduction process and spaceKLIP will continue with the
@@ -1404,7 +1404,7 @@ class Database():
         index : int
             Database index of the source to be updated.
         tab : astropy.table.Table
-            Astropy table of the companions to be saved to the source database.
+            Astropy tables of the companions to be saved to the source database.
 
         Returns
         -------
@@ -1583,7 +1583,7 @@ def create_database(output_dir,
     apername_pps : str
         Name of aperture from PPS (e.g., NRCA5_FULL)
     readlevel : str or int
-        Set this to 3 invoke the code for re-reading in level 3 output
+        Set this to 3 invoke the codes_bk for re-reading in level 3 output
         products. By default, only levels 0,1,2 data will be read and indexed.
     """
 

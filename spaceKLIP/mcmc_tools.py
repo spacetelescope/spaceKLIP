@@ -62,7 +62,7 @@ class MCMCTools:
             - 'theta_limits': list, limits for the angle in the MCMC fit (if binarity is True). Default is [0, 360].
             - 'psi_limits': list, limits for the rotation angle in the MCMC fit (if rotate is True). Default is [0, 360].
             - 'binarity': bool, whether to fit a binary model (two PSFs) to the data. Default is True if type is 'SCI', otherwise False.
-            - 'debug': bool, whether to show debug plots during the MCMC fit. Default is False.
+            - 'debug': bool, whether to show debug plots_bk during the MCMC fit. Default is False.
             - 'burnin': int, number of burn-in steps to discard in the MCMC fit. Default is None (automatically set to 60% of nsteps).
             - 'thin': int, thinning factor for the MCMC samples. Default is None (automatically set to 0.5 times the minimum autocorrelation time).
             - 'save_figures': bool, whether to save figures generated during the MCMC fit. Default is True.
@@ -441,7 +441,7 @@ class MCMCTools:
                 binarity (bool): Whether to fit a binary PSF.
                 rotate (bool): Whether to rotate the PSF.
                 r (int): Radius for masking the center of the data and PSF.
-                show_plots (bool): Whether to show plots.
+                show_plots (bool): Whether to show plots_bk.
                 vmin (float): Minimum value for plotting.
                 vmax (float): Maximum value for plotting.
                 vminres (float): Minimum value for residual plotting.

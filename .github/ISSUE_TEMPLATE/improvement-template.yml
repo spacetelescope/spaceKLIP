@@ -7,7 +7,7 @@ body:
     id: instrument
     attributes:
       label: Instrument or Category
-      description: Which instrument or piece of code would you like to see improved?
+      description: Which instrument or piece of codes_bk would you like to see improved?
       multiple: true
       options:
         - NIRCam Stage 1/2 Pipeline

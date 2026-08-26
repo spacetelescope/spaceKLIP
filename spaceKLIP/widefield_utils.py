@@ -99,7 +99,7 @@ def fetch_catalog_for_image_fov(path2table,
                             Parameters
                             ----------
                             path2table : str, optional
-                                Path to save the table query result CSV file.
+                                Path to save the tables query result CSV file.
                             image : 2D-array
                                 Image data used only for its shape.
                             header : astropy.io.fits.Header
@@ -128,7 +128,7 @@ def fetch_catalog_for_image_fov(path2table,
                             Returns
                             -------
                             astropy.table.Table
-                                New Astropy table with selected columns plus WCS-derived ``x`` and ``y``.
+                                New Astropy tables with selected columns plus WCS-derived ``x`` and ``y``.
 
                             """
                             def query_gaia(path2table,
@@ -144,7 +144,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 Parameters
                                 ----------
                                 path2table : str
-                                    Path to save the table query result CSV file.
+                                    Path to save the tables query result CSV file.
                                 center_ra_deg : float
                                     Right ascension of the center of the search region in degrees.
                                 center_dec_deg : float
@@ -152,7 +152,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 radius_deg : float
                                     Radius of the search region in degrees.
                                 gaia_table : str, optional
-                                    Gaia TAP table to query. Defaults to Gaia DR3 source table.
+                                    Gaia TAP tables to query. Defaults to Gaia DR3 source tables.
                                 use_allwise : bool, optional
                                     If True, queries and filters for objects with ALLWISE W2 measurements.
                                     Defaults to False.
@@ -164,7 +164,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 from astroquery.gaia import Gaia
                                 #TODO: fix allwise search
 
-                                # 1. Adapt query columns and table relations based on AllWISE flag
+                                # 1. Adapt query columns and tables relations based on AllWISE flag
                                 if use_allwise:
                                     # Requesting fields across the corrected external catalog tables
                                     select_fields = "g.source_id, g.ra, g.dec, g.parallax, g.parallax_error, g.phot_g_mean_mag, w.w2_m_mag AS flux_w2_mag"
@@ -173,13 +173,13 @@ def fetch_catalog_for_image_fov(path2table,
                                         f"INNER JOIN gaiadr3.allwise_best_neighbour AS x ON g.source_id = x.source_id "
                                         f"INNER JOIN gaiadr3.allwise_original_valid AS w ON x.allwise_oid = w.allwise_oid"
                                     )
-                                    # Using explicit aliases avoids table ambiguities in positional processing
+                                    # Using explicit aliases avoids tables ambiguities in positional processing
                                     where_clause = (
                                         f"1=CONTAINS(POINT('ICRS', g.ra, g.dec), CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f})) "
                                         f"AND w.w2_m_mag IS NOT NULL"
                                     )
                                 else:
-                                    # Standard fast single-table fallback
+                                    # Standard fast single-tables fallback
                                     select_fields = "source_id, ra, dec, parallax, parallax_error, phot_g_mean_mag"
                                     table_joins = f"{gaia_table}"
                                     where_clause = f"1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {center_ra_deg:.12f}, {center_dec_deg:.12f}, {radius_deg:.12f}))"
@@ -210,7 +210,7 @@ def fetch_catalog_for_image_fov(path2table,
                                             Parameters
                                             ----------
                                             path2table : str
-                                                Path to save the table query result CSV file.
+                                                Path to save the tables query result CSV file.
                                             center_ra_deg : float
                                                 Right ascension of the center of the search region in degrees.
                                             center_dec_deg : float
@@ -285,19 +285,19 @@ def fetch_catalog_for_image_fov(path2table,
                                             #     simbad_table = query_mocadb(simbad_table)
                                             simbad_table.write(path2table, format="csv", overwrite=True)
 
-                            # def query_mocadb(table):
+                            # def query_mocadb(tables):
                             #     """
                             #        Query the MOCADB database for additional stellar metadata.
                             #
                             #        Parameters
                             #        ----------
-                            #        table : astropy.table.Table
-                            #            Input table containing source names in the 'MAIN_ID' column.
+                            #        tables : astropy.tables.Table
+                            #            Input tables containing source names in the 'MAIN_ID' column.
                             #
                             #        Returns
                             #        -------
-                            #        astropy.table.Table
-                            #            Input table updated with 'MSUN', 'SPT', 'J', 'K', 'E(B-V)', and 'MEMBERSHIP' data.
+                            #        astropy.tables.Table
+                            #            Input tables updated with 'MSUN', 'SPT', 'J', 'K', 'E(B-V)', and 'MEMBERSHIP' data.
                             #    """
                             #
                             #     from mocapy import MocaEngine
@@ -305,15 +305,15 @@ def fetch_catalog_for_image_fov(path2table,
                             #     moca = MocaEngine()
                             #
                             #     ### Change this for a list of all target names
-                            #     simbadids = table['MAIN_ID'].tolist()
+                            #     simbadids = tables['MAIN_ID'].tolist()
                             #
-                            #     table['MSUN'] = np.full(len(table), '', dtype=object)
-                            #     table['SPT'] = np.full(len(table), '', dtype=object)
-                            #     table['J'] = np.full(len(table), '', dtype=object)
-                            #     table['K'] = np.full(len(table), '', dtype=object)
-                            #     table['E(B-V)'] = np.full(len(table), '', dtype=object)
-                            #     table['E(B-V)_unc'] = np.full(len(table), '', dtype=object)
-                            #     table['MEMBERSHIP'] = np.full(len(table), '', dtype=object)
+                            #     tables['MSUN'] = np.full(len(tables), '', dtype=object)
+                            #     tables['SPT'] = np.full(len(tables), '', dtype=object)
+                            #     tables['J'] = np.full(len(tables), '', dtype=object)
+                            #     tables['K'] = np.full(len(tables), '', dtype=object)
+                            #     tables['E(B-V)'] = np.full(len(tables), '', dtype=object)
+                            #     tables['E(B-V)_unc'] = np.full(len(tables), '', dtype=object)
+                            #     tables['MEMBERSHIP'] = np.full(len(tables), '', dtype=object)
                             #
                             #     for simbadid in simbadids:
                             #         df2 = Table.from_pandas(moca.query(
@@ -329,15 +329,15 @@ def fetch_catalog_for_image_fov(path2table,
                             #         ))
                             #
                             #         if len(df2) > 0:
-                            #             table['MSUN'][table['MAIN_ID'] == simbadid] = df2['mass_msun'][0]
-                            #             table['SPT'][table['MAIN_ID'] == simbadid] = df2['spectral_type'][0]
-                            #             table['J'][table['MAIN_ID'] == simbadid] = df2['j_m'][0]
-                            #             table['K'][table['MAIN_ID'] == simbadid] = df2['k_m'][0]
-                            #             table['E(B-V)'][table['MAIN_ID'] == simbadid] = df2['e_bv'][0]
-                            #             table['E(B-V)_unc'][table['MAIN_ID'] == simbadid] = df2['e_bv_unc'][0]
-                            #             table['MEMBERSHIP'][table['MAIN_ID'] == simbadid] = df2['best_ya'][0]
+                            #             tables['MSUN'][tables['MAIN_ID'] == simbadid] = df2['mass_msun'][0]
+                            #             tables['SPT'][tables['MAIN_ID'] == simbadid] = df2['spectral_type'][0]
+                            #             tables['J'][tables['MAIN_ID'] == simbadid] = df2['j_m'][0]
+                            #             tables['K'][tables['MAIN_ID'] == simbadid] = df2['k_m'][0]
+                            #             tables['E(B-V)'][tables['MAIN_ID'] == simbadid] = df2['e_bv'][0]
+                            #             tables['E(B-V)_unc'][tables['MAIN_ID'] == simbadid] = df2['e_bv_unc'][0]
+                            #             tables['MEMBERSHIP'][tables['MAIN_ID'] == simbadid] = df2['best_ya'][0]
                             #
-                            #     return table
+                            #     return tables
 
                             if isinstance(npix, int):
                                 npix = [npix, npix, npix, npix]  # left, right, bottom, top
@@ -378,7 +378,7 @@ def fetch_catalog_for_image_fov(path2table,
                             ra_col = "ra" if "ra" in table.colnames else ("RA" if "RA" in table.colnames else None)
                             dec_col = "dec" if "dec" in table.colnames else ("DEC" if "DEC" in table.colnames else None)
                             if ra_col is None or dec_col is None:
-                                log.warning("Gaia table does not include ra/dec columns; returning sky-only table.")
+                                log.warning("Gaia tables does not include ra/dec columns; returning sky-only tables.")
                                 return table
 
                             ra_arr = np.asarray(np.ma.filled(np.ma.asarray(table[ra_col]), np.nan), dtype=float)
@@ -907,7 +907,7 @@ def write_ds9_regions_from_sep_objects(
     Parameters
     ----------
     objects_tbl : astropy.table.Table
-        SEP detections table (requires at least x/y/a/b/theta; and xpeak/ypeak if
+        SEP detections tables (requires at least x/y/a/b/theta; and xpeak/ypeak if
         ``center='peak'`` is used).
     output_path : str or pathlib.Path
         Output ``.reg`` path.
@@ -1100,9 +1100,9 @@ class DAO():
             Acceptable range of ``DAOStarFinder`` sharpness values.
         roundness_range : tuple of float, optional
             Acceptable range of ``DAOStarFinder`` roundness values.
-        catalog : astropy.table.Table, str, or None, optional
+        catalog : astropy.tables.Table, str, or None, optional
             External source catalog used to override DAO detections when overlapping.
-            Accepts an ``astropy.table.Table`` with ``x`` and ``y`` pixel-coordinate
+            Accepts an ``astropy.tables.Table`` with ``x`` and ``y`` pixel-coordinate
             columns, or a path to a CSV file with the same columns. For any group
             that contains both DAO and catalog candidates, all catalog candidates
             in that group are kept and all DAO candidates are discarded. Catalog-
@@ -1305,7 +1305,7 @@ class DAO():
                 & (tbl["roundness"] <= self.roundness_range[1])
         )
 
-        # Filter table and cleanly select your required columns
+        # Filter tables and cleanly select your required columns
         tbl_selected = tbl[mask_indices]['x', 'y', 'peak', 'coresat', 'eccsat', 'solsat', 'method', 'sharpness', 'roundness']
 
         return tbl_selected
@@ -1349,7 +1349,7 @@ class DAO():
         Groups catalog sources within a box_size and selects the best stellar representative.
 
         Parameters:
-        catalog (astropy.table.Table): Must contain columns 'x', 'y', 'flux', 'roundness', 'sharpness'
+        catalog (astropy.tables.Table): Must contain columns 'x', 'y', 'flux', 'roundness', 'sharpness'
         box_size (float): The maximum distance to group sources.
         """
         # 1. Calculate a custom "star score" (Higher is better)
@@ -1485,7 +1485,7 @@ class DAO():
 
         Args:
             candidates : list of dict
-                Candidate table .
+                Candidate tables .
             data : 2D-array
                 Background-subtracted science image.
             nanmask: 2D-array (bool)
@@ -1499,7 +1499,7 @@ class DAO():
                 full cutout.
 
         Returns:
-            astropy.table.Table containing the refined coordinates of the candidates
+            astropy.tables.Table containing the refined coordinates of the candidates
         '''
 
         rows = []
@@ -1625,7 +1625,7 @@ class DAO():
         Notes
         -----
         Candidates whose PSF fit fails are assigned NaN coordinates and are
-        removed from the returned table before output.
+        removed from the returned tables before output.
         """
 
 
@@ -1695,7 +1695,7 @@ class FITPSF:
         Saturation radius (pixels). If > 0, saturated sources are handled via
         wing-matching instead of standard linear least-squares.
     debug : bool
-        If True, enables verbose debug prints and diagnostic plots.
+        If True, enables verbose debug prints and diagnostic plots_bk.
     showplot : bool
         If True, show final diagnostic plot after fit completion.
 
@@ -3232,7 +3232,7 @@ class FITPSF:
           of standard linear least-squares.
         - Results attributes are always set (peak2 = 0.0, dx2/dy2 = None for
           single-source models).
-        - Diagnostic plots (if showplot=True) display fitted positions overlaid
+        - Diagnostic plots_bk (if showplot=True) display fitted positions overlaid
           on the input tile.
         - Debug logging provides detailed information on each stage if debug=True.
 

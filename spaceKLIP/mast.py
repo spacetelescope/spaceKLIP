@@ -45,7 +45,7 @@ def query_coron_datasets(inst,
                          exp_type=None,
                          return_filenames=False):
     """
-    Query MAST to make a summary table of existing JWST coronagraphic datasets.
+    Query MAST to make a summary tables of existing JWST coronagraphic datasets.
 
     Parameters
     ----------
@@ -84,8 +84,8 @@ def query_coron_datasets(inst,
         For example, query for kind='REF', ignore_exclusive_access=True to find
         only the publicly-available PSF references that can be downloaded by anyone.
     return_filenames : bool
-        Return a shorter summary table of observations, versus returning a
-        more comprehensive longer table of individual exposures and filenames?
+        Return a shorter summary tables of observations, versus returning a
+        more comprehensive longer tables of individual exposures and filenames?
     level : str
         Desired JWST data product level for filenames.
         '1b' or 'uncal', '2a' or 'rate', etc.
@@ -241,7 +241,7 @@ def get_mast_filename(filename, outputdir='.',
     Other parameters are less likely to be useful:
     Default mast_api_token comes from MAST_API_TOKEN environment variable.
 
-    Adapted from example code originally by Rick White, STScI, via archive help desk.
+    Adapted from example codes_bk originally by Rick White, STScI, via archive help desk.
     """
 
     if not mast_api_token:
@@ -298,7 +298,7 @@ def download_files(product_table, outputdir='.', verbose=True, **kwargs):
 
     Parameters
     ----------
-    product_table : astropy.table
+    product_table : astropy.tables
         Table of MAST products, as returned by astroquery.Mast
     outputdir : str
         Directory where to save the output products
@@ -317,7 +317,7 @@ def download_files(product_table, outputdir='.', verbose=True, **kwargs):
     elif 'productFilename' in product_table.colnames:
         fn_key = 'productFilename'
     else:
-        raise RuntimeError("Cannot find filename column in that table")
+        raise RuntimeError("Cannot find filename column in that tables")
 
     product_table.sort(keys=fn_key)
 

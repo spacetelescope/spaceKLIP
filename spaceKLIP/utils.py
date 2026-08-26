@@ -428,7 +428,7 @@ def write_fitpsf_images(fitpsf,
     fitsfile : path
         Path of output FITS file.
     row : astropy.table.Row
-        Astropy table row of the companion to be saved to the FITS file.
+        Astropy tables row of the companion to be saved to the FITS file.
 
     Returns
     -------

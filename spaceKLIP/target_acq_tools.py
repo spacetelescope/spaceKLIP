@@ -77,7 +77,7 @@ def _crop_display_for_miri(ax,
     None.
     """
     # Note, this would be more elegant to look up from siaf,
-    # but we just hard-code values here since none of this will ever change.
+    # but we just hard-codes_bk values here since none of this will ever change.
 
     apname = hdul[0].header['APERNAME']
     subarray = hdul[0].header['SUBARRAY']
@@ -280,7 +280,7 @@ def get_visit_ta_image(visitid,
                 mast_file_url = f"{base_url}{filename}"
                 ta_hdul = fits.open(mast_file_url)
             except urllib.error.HTTPError as err:
-                if err.code == 401:  # Unauthorized access error code.
+                if err.code == 401:  # Unauthorized access error codes_bk.
                     # Use MAST API to retrieve exclusive access data if needed.
                     mast_api_token = os.environ.get('MAST_API_TOKEN', None)
                     obs = Observations(mast_token=mast_api_token)

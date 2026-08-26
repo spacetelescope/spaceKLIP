@@ -815,7 +815,7 @@ def create_discrete_model(apert, ppscale, step, binary=True, tmin=0.8):
     >> model = xara.core.create_discrete_model(pup, pscale, 0.16, True)
 
     To verify that your model reflects the symmetry properties of the
-    original aperture, look at the following superimposed plots:
+    original aperture, look at the following superimposed plots_bk:
 
     >> plt.plot( model[:,0],  model[:,1], 'bo')
     >> plt.plot(-model[:,0],  model[:,1], 'r.')

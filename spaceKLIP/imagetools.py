@@ -141,7 +141,7 @@ class ImageTools():
         Iterate some callable function over all files in a database.
 
         This is a repetitive pattern used in many of the image processing functions, so
-        we abstract it here to reduce code repetition.
+        we abstract it here to reduce codes_bk repetition.
 
         The file transformation function should take one filename as an input, perform some transformation or image processing
         write out the file to some new path, and return the output filename.
@@ -3915,7 +3915,7 @@ class ImageTools():
             Interpolation method for shifting tiles when recentering sources
             ('spline' or 'fourier'). Default is 'spline'.
         showplot : bool, optional
-            If True, display final diagnostic plots for the tile extraction.
+            If True, display final diagnostic plots_bk for the tile extraction.
             Default is False.
 
         Returns
@@ -5259,7 +5259,7 @@ class ImageTools():
             Use pre-computed coefficients to generate the WebbPSF model. The
             default is False.
         save_figures : bool, optional
-            Save the plots in a PDF?
+            Save the plots_bk in a PDF?
 
         Returns
         -------
@@ -5450,7 +5450,7 @@ class ImageTools():
             Name of the directory where the data products shall be saved. The
             default is 'aligned'.
         save_figures : bool, optional
-            Save the plots in a PDF?
+            Save the plots_bk in a PDF?
 
         Returns
         -------
@@ -5832,7 +5832,7 @@ class ImageTools():
             Name of the directory where the data products shall be saved. The
             default is 'aligned'.
         save_figures : bool, optional
-            Save the plots in a PDF?
+            Save the plots_bk in a PDF?
 
         Returns
         -------

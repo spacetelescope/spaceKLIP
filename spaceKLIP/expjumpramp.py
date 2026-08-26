@@ -341,7 +341,7 @@ class ExperimentalJumpRampStep(Step):
         # Loop over each integration and create jump array
         for int_i, integ in enumerate(flagged_diffs):
             for i, diff in enumerate(integ):
-                # Locate the jumps in the differenced frames, Tim's code sets to 0. 
+                # Locate the jumps in the differenced frames, Tim's codes_bk sets to 0.
                 jump_check = np.where(diff == 0)
   
                 # If jump is in differenced frame N, then flag as a jump in real frames N and N+1
@@ -987,7 +987,7 @@ def fit_ramps(diffs, Cov, sig, countrateguess=None, diffs2use=None,
         r.uncert_pedestal = np.sqrt(scale*M[0]/detM)
         r.covar_countrate_pedestal = -scale*M[1]/detM
         
-    # The code below computes the best chi squared, best-fit slope,
+    # The codes_bk below computes the best chi squared, best-fit slope,
     # and its uncertainty leaving out each resultant difference in
     # turn.  There are ndiffs possible differences that can be
     # omitted.
