@@ -208,7 +208,7 @@ def run_obs(database,
                     hdul[0].header['FILTER'] = (database.obs[key]['FILTER'][ww_sci[0]], head_primary.comments["FILTER"])
                     hdul[0].header['CWAVEL'] = (database.obs[key]['CWAVEL'][ww_sci[0]], "[micron] Filter pivot wavelength")
                     hdul[0].header['DWAVEL'] = (database.obs[key]['DWAVEL'][ww_sci[0]], "[micron] Filter effective width")
-                    hdul[0].header['PUPIL'] = (database.obs[key]['PUPIL'][ww_sci[0]], head_primary.comments["PUPIL"])
+                    hdul[0].header['PUPIL'] = (database.obs[key]['PUPIL'][ww_sci[0]], head_primary.comments['PUPIL'] if 'PUPIL' in head_primary else '')
                     hdul[0].header['CORONMSK'] = (database.obs[key]['CORONMSK'][ww_sci[0]], head_primary.comments["CORONMSK"])
                     hdul[0].header['EXP_TYPE'] = (database.obs[key]['EXP_TYPE'][ww_sci[0]], head_primary.comments["EXP_TYPE"])
                     hdul[0].header['EXPSTART'] = (np.min(database.obs[key]['EXPSTART'][ww_sci]), head_primary.comments["EXPSTART"])
