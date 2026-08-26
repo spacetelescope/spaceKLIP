@@ -580,6 +580,7 @@ class AnalysisTools():
                                           highpass=self.database.red[key]['HIGHPASS'][j],
                                           center_include_offset=False,
                                           center_keywords=['STARCENX','STARCENY'])
+                pyklip_dataset.IWA = self.database.red[key]['IWA'][j]
 
                 # Compute the resolution element. Account for possible blurring.
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
@@ -678,7 +679,7 @@ class AnalysisTools():
                 klip_args['maxnumbasis'] = maxnumbasis
                 inj_subdir = klip_args['mode'] + '_NANNU' + str(klip_args['annuli']) \
                             + '_NSUBS' + str(klip_args['subsections']) + '_' + key +'/'
-                klip_args['movement'] = 1 #Currently not logged, fix later. 
+                klip_args['movement'] = 1. #Currently not logged, fix later.
                 klip_args['calibrate_flux'] = False
                 klip_args['highpass'] = self.database.red[key]['HIGHPASS'][j]
                 klip_args['verbose'] = False
@@ -721,7 +722,7 @@ class AnalysisTools():
                     else:
                         kwargs_inj['binarity'] = False
 
-                    # Run the injection and recovery process
+                    # Run the injection and recovery process.
                     log.info('Injecting and recovering synthetic companions. This may take a while...')
                     inj_rec = inject_and_recover(pyklip_dataset, 
                                                  injection_psf=offsetpsf,
@@ -1107,10 +1108,11 @@ class AnalysisTools():
                                    highpass=highpass,
                                    center_include_offset=False,
                                    center_keywords=['STARCENX','STARCENY'])
+                dataset.IWA = self.database.red[key]['IWA'][j]
                 kwargs_temp['dataset'] = dataset
                 kwargs_temp['aligned_center'] = dataset._centers[0]
                 kwargs_temp['psf_library'] = dataset.psflib
-                
+
                 # Make copy of the original pyKLIP dataset.
                 dataset_orig = copy.deepcopy(dataset)
 
@@ -2651,6 +2653,7 @@ def inject_and_recover(raw_dataset,
             fileprefix = 'INJ_ITER{}_{}COMP'.format(counter, Ninjected)
             parallelized.klip_dataset(dataset=dataset,
                                       psf_library=dataset.psflib,
+                                      aligned_center=dataset._centers[0],
                                       fileprefix=fileprefix,
                                       **klip_args)
 

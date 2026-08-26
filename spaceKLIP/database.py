@@ -727,6 +727,7 @@ class Database():
         ANNULI = []
         ANNSPACE = []  # Radial spacing of annuli : constant, log, linear.
         SUBSECTS = []
+        IWA = []  # Inner working angle used for the pyKLIP reduction [pix].
         HIGHPASS = []  # High-pass filter setting used by pyKLIP.
         KLMODES = []
         BUNIT = []
@@ -809,6 +810,7 @@ class Database():
                 ANNULI += [1]
                 ANNSPACE += ['constant']  # Set default for annuli spacing.
                 SUBSECTS += [1]
+                IWA += [1.0]
                 HIGHPASS += [False]
                 try:
                     KLMODES += [str(head['KLMODE0'])]
@@ -820,6 +822,7 @@ class Database():
                 ANNULI += [head['ANNULI']]
                 ANNSPACE += [head.get('ANNSPACE', 'constant')]
                 SUBSECTS += [head['SUBSECTS']]
+                IWA += [head.get('IWA', 1.0)]
                 HIGHPASS += [head.get('HIGHPASS', False)]
                 klmodes = str(head['KLMODE0'])
                 j = 1
@@ -879,6 +882,7 @@ class Database():
         ANNULI = np.array(ANNULI)
         ANNSPACE = np.array(ANNSPACE)
         SUBSECTS = np.array(SUBSECTS)
+        IWA = np.array(IWA)
         HIGHPASS = np.array(HIGHPASS, dtype=object)
         KLMODES = np.array(KLMODES)
         BUNIT = np.array(BUNIT)
@@ -933,6 +937,7 @@ class Database():
                                    'ANNULI',
                                    'ANNSPACE',
                                    'SUBSECTS',
+                                   'IWA',
                                    'HIGHPASS',
                                    'KLMODES',
                                    'BUNIT',
@@ -967,6 +972,7 @@ class Database():
                                    'int',
                                    'object',
                                    'int',
+                                   'float',
                                    'object',
                                    'object',
                                    'object',
@@ -1007,6 +1013,7 @@ class Database():
                              ANNULI[ww[j]],
                              ANNSPACE[ww[j]],
                              SUBSECTS[ww[j]],
+                             IWA[ww[j]],
                              HIGHPASS[ww[j]],
                              KLMODES[ww[j]],
                              BUNIT[ww[j]],
