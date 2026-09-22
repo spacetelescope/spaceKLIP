@@ -970,7 +970,7 @@ def display_image_comparisons(database,
                 with tempfile.NamedTemporaryFile(suffix='_' + fn.split('_')[-1], delete=False) as tmp:
                     shutil.copy2(fn_path, tmp.name)
                     with fits.open(tmp.name, mode='update') as hdul:
-                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI')
+                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI')[0]
                         hdul['SCI'].data -= first_sci_frame.astype(np.float32)
                         
                         # Determine the center of the image.
@@ -1001,8 +1001,13 @@ def display_image_comparisons(database,
    
     # Static mode.
     else:
-        for i in range(len(filtered_files)):
-            update_image(i+1 if subtract_first else i)
+        if subtract_first:
+            indices = range(1, len(filtered_files))
+        else:
+            indices = range(len(filtered_files))
+
+        for i in indices:
+            update_image(i)
             if pdf:
                 pdf.savefig(plt.gcf())
             plt.show()
