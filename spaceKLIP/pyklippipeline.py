@@ -65,8 +65,10 @@ def run_obs(database,
         - numbasis : list of int, optional
             Number of KL modes that shall be looped over. The default is [1, 2,
             5, 10, 20, 50, 100].
-        - IWA : float, optional
-            Inner working angle, in pixels, used by pyKLIP. The default is 1.
+        - IWA : float or 'auto', optional
+            Inner working angle, in pixels, used by pyKLIP.
+            If 'auto', use the IWA automatically determined by pyKLIP.
+            The default is 'auto'.
         - movement : float, optional
             Minimum amount of movement (pix) of an astrophysical source to
             consider using that image as a reference PSF. The default is 1.
@@ -111,7 +113,7 @@ def run_obs(database,
     if not isinstance(kwargs['numbasis'], list):
         kwargs['numbasis'] = [kwargs['numbasis']]
     if 'IWA' not in kwargs.keys():
-        kwargs['IWA'] = 1.
+        kwargs['IWA'] = 'auto'
     kwargs_temp = kwargs.copy()
     if 'movement' not in kwargs_temp.keys():
         kwargs_temp['movement'] = 1.
@@ -159,7 +161,8 @@ def run_obs(database,
                                highpass=kwargs_temp['highpass'],
                                center_include_offset=False,
                                center_keywords=['STARCENX','STARCENY'])
-            dataset.IWA = kwargs['IWA']
+            if kwargs['IWA'] != 'auto':
+                dataset.IWA = kwargs['IWA']
             kwargs_temp['dataset'] = dataset
             kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
             kwargs_temp['psf_library'] = dataset.psflib
@@ -230,7 +233,7 @@ def run_obs(database,
                     hdul[0].header['ANNSPACE'] = (kwargs['annuli_spacing'], 'Radial annulus spacing: constant, log, or linear')
                     hdul[0].header['SUBSECTS'] = (subs, "Number of subtraction subsections within each annulus")
                     hdul[0].header['HIGHPASS'] = (kwargs_temp['highpass'], 'High-pass filter setting used by pyKLIP')
-                    hdul[0].header['IWA'] = (kwargs['IWA'], '[pixel] Inner working angle used by pyKLIP')
+                    hdul[0].header['IWA'] = (dataset.IWA, '[pixel] Inner working angle used by pyKLIP')
                     hdul[0].header['BUNIT'] = (database.obs[key]['BUNIT'][ww_sci[0]], head_sci.comments["BUNIT"])
 
                     w = wcs.WCS(head_sci)
