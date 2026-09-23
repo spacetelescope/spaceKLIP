@@ -478,7 +478,7 @@ def show_ta_img(visitid,
                                        vmax=vmax, vmin=-rsig)
 
     # Prepare annotation text.
-    model = datamodels.open(hdul)
+    model = datamodels.ImageModel(hdul)
     annotation_text = (
         f"{model.meta.target.proposer_name}\n"
         f"{model.meta.instrument.filter}, {model.meta.exposure.readpatt}:"
@@ -652,7 +652,7 @@ def ta_analysis(data_product,
     # ---------- EXTRACT WCS INFORMATION ----------
 
     # Open the data model to access WCS and TA metadata.
-    model = datamodels.open(hdul)
+    model = datamodels.ImageModel(hdul)
     wcs_ta = model.meta.wcs
 
     # Create SkyCoord object for target coord (RA, Dec) in ICRS frame.
@@ -888,7 +888,7 @@ def ta_analysis(data_product,
 
         outname = os.path.join(output_dir,
                                f'{inst.lower()}_ta_analysis_{os.path.basename(data_product[:-13])}.pdf')
-        plt.savefig(outname)
+        fig.savefig(outname, bbox_inches="tight", pad_inches=0.1)
         log.info(f'                 TA analysis saved: {outname}')
 
     if oss_cen_ta is not None:
