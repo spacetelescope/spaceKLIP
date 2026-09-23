@@ -593,101 +593,6 @@ class ImageTools():
 
         pass
 
-    def mask_NDsquares(self,
-                        npix=1,
-                        cval=np.nan,
-                        minval=0.1,
-                        types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
-                        subdir='ndmasked'):
-        """
-        Mask the ND squares in the frames by setting the pixel values to NaN.
-
-        Parameters
-        ----------
-        npix : int or list of four int, optional
-            Number of pixels to be added around the square masks. The default is 1.
-        cval : float, optional
-            Fill value for the maked pixels. The default is nan.
-        minval: float, optional
-            Minimum value in the PSF mask to consider a pixel as
-            part of the ND square. The default is 0.1.
-        types : list of str, optional
-            List of data types from which the frames shall be padded. The
-            default is ['SCI', 'SCI_BG', 'REF', 'REF_BG'].
-        subdir : str, optional
-            Name of the directory where the data products shall be saved. The
-            default is 'padded'.
-
-        Returns
-        -------
-        None.
-
-        """
-
-        def dilate_squares(mask, n):
-            """
-            Expand masks by n pixels in every direction.
-            mask : 2D array of 0/1 (or bool)
-            n : non-negative int
-            returns : 2D array (same dtype as input) with expanded clusters
-            """
-            if n <= 0:
-                return mask.copy()
-            struct = np.ones((2 * n + 1, 2 * n + 1), dtype=bool)
-            out = scipy.ndimage.binary_dilation(mask.astype(bool), structure=struct)
-            return out.astype(mask.dtype)
-
-        # Set output directory.
-        output_dir = os.path.join(self.database.output_dir, subdir)
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        # Loop through concatenations.
-        for i, key in enumerate(self.database.obs.keys()):
-            log.info('--> Concatenation ' + key)
-
-            # Loop through FITS files.
-            nfitsfiles = len(self.database.obs[key])
-            for j in range(nfitsfiles):
-                # Read FITS file and PSF mask.
-                fitsfile = self.database.obs[key]['FITSFILE'][j]
-                data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
-                maskfile = self.database.obs[key]['MASKFILE'][j]
-                mask = ut.read_msk(maskfile)
-                crpix1 = self.database.obs[key]['CRPIX1'][j]
-                crpix2 = self.database.obs[key]['CRPIX2'][j]
-                starcenx = self.database.obs[key]['STARCENX'][j]
-                starceny = self.database.obs[key]['STARCENY'][j]
-                maskcenx = self.database.obs[key]['MASKCENX'][j]
-                maskceny = self.database.obs[key]['MASKCENY'][j]
-
-                if self.database.obs[key]['TYPE'][j] in types:
-                    head, tail = os.path.split(fitsfile)
-                    log.info('  --> Frame ND square masking: ' + tail)
-                    # Get data shape.
-                    ny, nx = mask.shape
-                    yy, xx = np.indices((ny, nx))
-
-                    rows, cols = np.where(np.isfinite(data[0]))
-                    bbox = [np.min(cols), np.max(cols)]
-                    # only mask where psfmask indicates bad pixels (e.g. psfmask[0] < 1)
-                    NDmask = (mask < minval) & ((xx < bbox[0] + 30) | (xx > bbox[1] - 50))
-
-                    # apply to data (assumes data.shape == (n_frames, ny, nx))
-                    data[:, dilate_squares(NDmask,n=npix)] = cval
-
-                # Write new FITS file and mask.
-                fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
-                                        align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
-                                        center_mask=center_mask, maskoffs=maskoffs)
-                maskfile = ut.write_msk(maskfile, mask, fitsfile)
-
-                # Update spaceKLIP database.
-                self.database.update_obs(key, j, fitsfile, maskfile, crpix1=crpix1, crpix2=crpix2, starcenx=starcenx,
-                                         starceny=starceny, maskcenx=maskcenx, maskceny=maskceny)
-
-        pass
-
     def coadd_frames(self,
                      nframes=None,
                      types=['SCI', 'SCI_BG', 'REF', 'REF_BG'],
@@ -3365,7 +3270,7 @@ class ImageTools():
 
                     # Replace NaNs in ERR data.
                     ww_erro = np.isnan(erro)
-                    erro[ww_erro] = 1e6
+                    erro[ww_erro] = np.nan
 
                     log.info('  --> Nan replacement: replaced %.0f nan pixel(s) with value ' % (np.sum(ww)) + str(cval) + ' -- %.2f%%' % (100. * np.sum(ww)/np.prod(ww.shape)))
 
@@ -5884,6 +5789,7 @@ class ImageTools():
         if not sci_good:
             raise(ValueError('No science frames found in database concatenations'))
 
+
     def shift_frames(self,
                      method='fourier',
                      kwargs={},
@@ -5932,13 +5838,13 @@ class ImageTools():
             center_shift_star = self.database.obs[key]['CENTER_SHIFT']
             center_shift_mask = self.database.obs[key]['CENTER_MASK']
 
-            # Need to determine largest potential shift for padding purposes
+            # Need to determine largest potential shift for padding purposes.
             shiftpad = ut.estimate_padding_for_shift(align_shift_star, center_shift_star)
             log.info(f'  --> Estimated padding for shifting: {shiftpad} pixels')
 
             shifts_all = []
             for j in ww_all:
-                # Read FITS file and PSF mask.
+                # Read FITS file, PSF mask, and any NAN mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
@@ -5955,10 +5861,10 @@ class ImageTools():
                 # However, it's not really meaningful to shift the DQ array by sub-pixel amounts.
                 # For now we will pad the array with zeros and assume that DQ is not important following shift_frames.
                 pxdq = np.pad(pxdq, pad_width=((0, 0), (shiftpad, shiftpad), (shiftpad, shiftpad)),
-                                    mode='constant', constant_values=0)
+                              mode='constant', constant_values=0)
 
                 # SCI and REF data.
-                data_shift, erro_shift = [], []
+                data_shift, erro_shift, nans_shift = [], [], []
                 if j in ww_sci or j in ww_ref:
 
                     maskcenx = self.database.obs[key]['MASKCENX'][j]  # 1 indexed
@@ -5977,11 +5883,25 @@ class ImageTools():
                                      (center_shift_star[j][k][1] if not isinstance(center_shift_star[j], types.BuiltinFunctionType) else 0.0)
                             shifts += [np.array([xshift, yshift])]
 
-                            # Recenter and align the SCI and REF frames.
+                            # Recenter and align the SCI and REF frames as well as the errors.
+                            # Shift the data.
                             data_shift += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
                                            pad_amount=shiftpad, method=method, kwargs=kwargs)]
-                            erro_shift += [ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+                                           
+                            # Temporarily replace NaNs in ERR with zero.
+                            erro_nans = np.isnan(erro[k])
+                            erro_temp = erro[k].copy()
+                            erro_temp[erro_nans] = 0.0
+                            
+                            # Shift the error data and NaN mask.
+                            erro_shift += [ut.imshift(erro_temp, [shifts[k][0], shifts[k][1]],
                                            pad_amount=shiftpad, method=method, kwargs=kwargs)]
+                            nans_shift += [ut.imshift(erro_nans.astype(float), [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
+
+                            # Set affected ERR pixels to obviously bad pixel value 1e6.
+                            erro_shift[-1][np.abs(nans_shift[-1]) > 0.5] = 1e6
+
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
 
@@ -6017,12 +5937,28 @@ class ImageTools():
                                      (center_shift_star[j][k][1] if not isinstance(center_shift_star[j], types.BuiltinFunctionType) else 0.0)
                             shifts += [np.array([xshift, yshift])]
 
+                            # Recenter and align the SCI and REF frames as well as the errors.
+                            # Shift the data.
                             data_shift += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
                                            pad_amount=shiftpad, method=method, kwargs=kwargs)]
-                            erro_shift += [ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+
+                            # Temporarily replace NaNs in ERR with zero.
+                            erro_nans = np.isnan(erro[k])
+                            erro_temp = erro[k].copy()
+                            erro_temp[erro_nans] = 0.0
+                            
+                            # Shift the error data and NaN mask.
+                            erro_shift += [ut.imshift(erro_temp, [shifts[k][0], shifts[k][1]],
                                            pad_amount=shiftpad, method=method, kwargs=kwargs)]
+                            nans_shift += [ut.imshift(erro_nans.astype(float), [shifts[k][0], shifts[k][1]],
+                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
+
+                            # Set affected ERR pixels to obviously bad pixel value 1e6.
+                            erro_shift[-1][np.abs(nans_shift[-1]) > 0.5] = 1e6
+
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
+
                         if mask is not None:
                             mask_shift = center_shift_mask[j] + align_shift_mask[j]
                             mask = ut.imshift(mask, [mask_shift[0], mask_shift[1]], method='spline',
@@ -6056,9 +5992,19 @@ class ImageTools():
                             yshift = align_shift_star[j][k][1] + center_shift_star[j][k][1]
                             shifts += [np.array([xshift, yshift])]
 
+                            # Shift the data.
                             this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
                                                    pad_amount=shiftpad, method=method, kwargs=kwargs)
-                            this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
+
+                            # Temporarily replace NaNs in ERR with zero.
+                            erro_nans = np.isnan(erro[k])
+                            erro_temp = erro[k].copy()
+                            erro_temp[erro_nans] = 0.0
+
+                            # Shift the error data and NaN mask.
+                            this_erro = ut.imshift(erro_temp, [shifts[k][0], shifts[k][1]],
+                                                   pad_amount=shiftpad, method=method, kwargs=kwargs)
+                            this_nans = ut.imshift(erro_nans.astype(float), [shifts[k][0], shifts[k][1]],
                                                    pad_amount=shiftpad, method=method, kwargs=kwargs)
 
                             # Recenter SCI and REF frames to integer pixel
@@ -6070,9 +6016,15 @@ class ImageTools():
                                 shifts[-1][1] += dy
                                 data_shift += [np.roll(np.roll(this_data, dx, axis=1), dy, axis=0)]
                                 erro_shift += [np.roll(np.roll(this_erro, dx, axis=1), dy, axis=0)]
+                                nans_shift = np.roll(np.roll(this_nans, dx, axis=1), dy, axis=0)
+
                             else:
                                 data_shift += [this_data]
                                 erro_shift += [this_erro]
+                                nans_shift = this_nans
+
+                        # Set affected ERR pixels to obviously bad pixel value 1e6.
+                        erro_shift[-1][np.abs(nans_shift) > 0.5] = 1e6
 
                         if nanmask is not None:
                             # nanmask shift preservesing 0/1 and NaN values.
@@ -6103,10 +6055,20 @@ class ImageTools():
                         yshift = align_shift_star[j][k][1] + center_shift_star[j][k][1]
                         shifts += [np.array([xshift, yshift])]
 
+                        # Shift the data.
                         this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
                                            pad_amount=shiftpad, method=method, kwargs=kwargs)
-                        this_erro = ut.imshift(erro[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                        
+                        # Temporarily replace NaNs in ERR with zero.
+                        erro_nans = np.isnan(erro[k])
+                        erro_temp = erro[k].copy()
+                        erro_temp[erro_nans] = 0.0
+                        
+                        # Shift the error data and NaN mask.
+                        this_erro = ut.imshift(erro_temp, [shifts[k][0], shifts[k][1]],
+                                               pad_amount=shiftpad, method=method, kwargs=kwargs)
+                        this_nans = ut.imshift(erro_nans.astype(float), [shifts[k][0], shifts[k][1]],
+                                               pad_amount=shiftpad, method=method, kwargs=kwargs)
 
                         # Recenter TA frames to integer pixel precision by
                         # rolling the image.
@@ -6117,6 +6079,11 @@ class ImageTools():
                             shifts[-1][1] += dy
                             data_shift += [np.roll(np.roll(this_data, dx, axis=1), dy, axis=0)]
                             erro_shift += [np.roll(np.roll(this_erro, dx, axis=1), dy, axis=0)]
+                            nans_shift = np.roll(np.roll(this_nans, dx, axis=1), dy, axis=0)
+
+                        # Set affected ERR pixels to obviously bad pixel value 1e6.
+                        erro_shift[-1][np.abs(nans_shift) > 0.5] = 1e6
+
                     data = np.array(data_shift)
                     erro = np.array(erro_shift)
 
