@@ -54,15 +54,27 @@ def run_obs(database,
         - annuli : list of int, optional
             Numbers of subtraction annuli that shall be looped over. The
             default is [1].
+        - annuli_spacing : str, optional
+            How to distribute the annuli radially. Currently three options. 
+                - 'constant' : equally spaced (Default), 
+                - 'log' : logarithmical expansion with r, and 
+                - 'linear' : linearly expansion with r
         - subsections : list of int, optional
             Numbers of subtraction subsections that shall be looped over. The
             default is [1].
         - numbasis : list of int, optional
             Number of KL modes that shall be looped over. The default is [1, 2,
             5, 10, 20, 50, 100].
+        - IWA : float or 'auto', optional
+            Inner working angle, in pixels, used by pyKLIP.
+            If 'auto', use the IWA automatically determined by pyKLIP.
+            The default is 'auto'.
         - movement : float, optional
             Minimum amount of movement (pix) of an astrophysical source to
             consider using that image as a reference PSF. The default is 1.
+        - highpass : bool or float, optional
+            If True, run a Gaussian high pass filter (default size is sigma=imgsize/10).
+            Can also be a number specifying FWHM of box in pixel units. Default is False.
         - verbose : bool, optional
             Verbose mode? The default is False.
         - save_rolls : bool, optional
@@ -90,6 +102,8 @@ def run_obs(database,
         kwargs['annuli'] = [1]
     if not isinstance(kwargs['annuli'], list):
         kwargs['annuli'] = [kwargs['annuli']]
+    if 'annuli_spacing' not in kwargs.keys():
+        kwargs['annuli_spacing'] = 'constant'
     if 'subsections' not in kwargs.keys():
         kwargs['subsections'] = [1]
     if not isinstance(kwargs['subsections'], list):
@@ -99,7 +113,7 @@ def run_obs(database,
     if not isinstance(kwargs['numbasis'], list):
         kwargs['numbasis'] = [kwargs['numbasis']]
     if 'IWA' not in kwargs.keys():
-        kwargs['IWA'] = 1.
+        kwargs['IWA'] = 'auto'
     kwargs_temp = kwargs.copy()
     if 'movement' not in kwargs_temp.keys():
         kwargs_temp['movement'] = 1.
@@ -147,12 +161,13 @@ def run_obs(database,
                                highpass=kwargs_temp['highpass'],
                                center_include_offset=False,
                                center_keywords=['STARCENX','STARCENY'])
-            dataset.IWA = kwargs['IWA']
+            if kwargs['IWA'] != 'auto':
+                dataset.IWA = kwargs['IWA']
             kwargs_temp['dataset'] = dataset
             kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
             kwargs_temp['psf_library'] = dataset.psflib
             kwargs_temp['mode'] = mode
-            
+
             # Can run pyKLIP multiple times on the same dataset with different
             # annuli and subsections.
             for annu in kwargs['annuli']:
@@ -211,12 +226,16 @@ def run_obs(database,
                     try:
                         hdul[0].header['PIXAR_SR'] = (database.obs[key]['PIXAR_SR'][ww_sci[0]], head_sci.comments["PIXAR_SR"])
                     except:
-                        pass
+                        pass                
 
                     hdul[0].header['MODE'] = (mode, "PSF subtraction mode: ADI, RDI, or ADI+RDI")
                     hdul[0].header['ANNULI'] = (annu, "Number of subtraction annuli")
+                    hdul[0].header['ANNSPACE'] = (kwargs['annuli_spacing'], 'Radial annulus spacing: constant, log, or linear')
                     hdul[0].header['SUBSECTS'] = (subs, "Number of subtraction subsections within each annulus")
+                    hdul[0].header['HIGHPASS'] = (kwargs_temp['highpass'], 'High-pass filter setting used by pyKLIP')
+                    hdul[0].header['IWA'] = (dataset.IWA, '[pixel] Inner working angle used by pyKLIP')
                     hdul[0].header['BUNIT'] = (database.obs[key]['BUNIT'][ww_sci[0]], head_sci.comments["BUNIT"])
+
                     w = wcs.WCS(head_sci)
                     _rotate_wcs_hdr(w, database.obs[key]['ROLL_REF'][ww_sci[0]])
                     hdul[0].header['WCSAXES'] = (head_sci['WCSAXES'], head_sci.comments["WCSAXES"])
@@ -290,7 +309,6 @@ def run_obs(database,
                     else str(row)
                     for row in database.obs[key][col]
                 ]
-
 
         database.obs[key].write(file, format='ascii', overwrite=True)
 

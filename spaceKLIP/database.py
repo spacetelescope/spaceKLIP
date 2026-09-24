@@ -725,7 +725,10 @@ class Database():
         PIXAR_SR = []  # sr
         MODE = []
         ANNULI = []
+        ANNSPACE = []  # Radial spacing of annuli : constant, log, linear.
         SUBSECTS = []
+        IWA = []  # Inner working angle used for the pyKLIP reduction [pix].
+        HIGHPASS = []  # High-pass filter setting used by pyKLIP.
         KLMODES = []
         BUNIT = []
         CRPIX1 = []  # pix
@@ -805,7 +808,10 @@ class Database():
             if TYPE[-1] == 'CORON3':
                 MODE += ['RDI']
                 ANNULI += [1]
+                ANNSPACE += ['constant']  # Set default for annuli spacing.
                 SUBSECTS += [1]
+                IWA += [1.0]
+                HIGHPASS += [False]
                 try:
                     KLMODES += [str(head['KLMODE0'])]
                 except KeyError:
@@ -814,7 +820,10 @@ class Database():
             elif TYPE[-1] == 'PYKLIP':
                 MODE += [head['MODE']]
                 ANNULI += [head['ANNULI']]
+                ANNSPACE += [head.get('ANNSPACE', 'constant')]
                 SUBSECTS += [head['SUBSECTS']]
+                IWA += [head.get('IWA', 1.0)]
+                HIGHPASS += [head.get('HIGHPASS', False)]
                 klmodes = str(head['KLMODE0'])
                 j = 1
                 while True:
@@ -871,7 +880,10 @@ class Database():
         PIXAR_SR = np.array(PIXAR_SR)
         MODE = np.array(MODE)
         ANNULI = np.array(ANNULI)
+        ANNSPACE = np.array(ANNSPACE)
         SUBSECTS = np.array(SUBSECTS)
+        IWA = np.array(IWA)
+        HIGHPASS = np.array(HIGHPASS, dtype=object)
         KLMODES = np.array(KLMODES)
         BUNIT = np.array(BUNIT)
         CRPIX1 = np.array(CRPIX1)
@@ -923,7 +935,10 @@ class Database():
                                    'STARCENY',
                                    'MODE',
                                    'ANNULI',
+                                   'ANNSPACE',
                                    'SUBSECTS',
+                                   'IWA',
+                                   'HIGHPASS',
                                    'KLMODES',
                                    'BUNIT',
                                    'BLURFWHM',
@@ -955,7 +970,10 @@ class Database():
                                    'float',
                                    'object',
                                    'int',
+                                   'object',
                                    'int',
+                                   'float',
+                                   'object',
                                    'object',
                                    'object',
                                    'float',
@@ -993,7 +1011,10 @@ class Database():
                              STARCENY[ww[j]],
                              MODE[ww[j]],
                              ANNULI[ww[j]],
+                             ANNSPACE[ww[j]],
                              SUBSECTS[ww[j]],
+                             IWA[ww[j]],
+                             HIGHPASS[ww[j]],
                              KLMODES[ww[j]],
                              BUNIT[ww[j]],
                              BLURFWHM[ww][j],
