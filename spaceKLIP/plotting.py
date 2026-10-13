@@ -656,17 +656,19 @@ def display_coron_image(filename,
             f"{model.meta.exposure.ngroups}:{model.meta.exposure.nints}\n"
             f"{model.meta.exposure.effective_exposure_time:.2f} s"
         )
-        try:
-            # I don't know how to deal with the slightly different API of the GWCS class
-            # so, this is crude, just cast it to a regular WCS and drop the high order distortion stuff
-            # This suffices for our purposes in plotting compass annotations etc.
-            # (There is almost certainly a better way to do this...)
+        
+        # I don't know how to deal with the slightly different API of the GWCS class
+        # so, this is crude, just cast it to a regular WCS and drop the high order distortion stuff
+        # This suffices for our purposes in plotting compass annotations etc.
+        # (There is almost certainly a better way to do this...)
+        if model.meta.wcs is not None:
             wcs = astropy.wcs.WCS(model.meta.wcs.to_fits()[0])
-        except:
-            wcs = model.get_fits_wcs()
-            if cube_ints:
-                wcs = wcs.dropaxis(2)
+        else:
+            wcs = astropy.wcs.WCS(header)
 
+        if cube_ints and wcs.pixel_n_dim > 2:
+            wcs = wcs.dropaxis(2)
+            
     # Create a bad pixel mask.
     # Does this file have DQ extension or not? PyKLIP outputs do not.
     bpmask = np.zeros_like(image) + np.nan
