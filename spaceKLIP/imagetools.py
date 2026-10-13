@@ -2771,7 +2771,7 @@ class ImageTools():
             astrofix_kwargs = {}
         else:
             astrofix_kwargs = astrofix_kwargs.copy()
-        
+
         # Check inputs. These are astrofix defaults.
         if 'sig_clip' not in astrofix_kwargs.keys():
             astrofix_kwargs['sig_clip'] = 10
@@ -2783,7 +2783,7 @@ class ImageTools():
             astrofix_kwargs['width'] = 9
         if 'init_guess' not in astrofix_kwargs.keys():
             astrofix_kwargs['init_guess'] = [1, 1]
-            
+
         # Fix bad pixels using astrofix.
         pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
         ww = (pxdq != 0) & (~pxmask_nonsci)
@@ -2793,9 +2793,14 @@ class ImageTools():
         data_temp = data.copy()
         data_temp[np.where(np.isnan(data_temp))] = 0
         data_temp[ww] = np.nan
-                
+
+        erro_temp = erro.copy()
+        erro_temp[np.where(np.isnan(erro_temp))] = 0
+        erro_temp[ww] = np.nan
+
         # Prepare array to hold fixed images
         fixed_img = np.zeros_like(data_temp)
+        fixed_erro = np.zeros_like(erro_temp)
 
         # Loop over integrations
         for i, integration in enumerate(data_temp):
@@ -2809,14 +2814,24 @@ class ImageTools():
                                                             width=astrofix_kwargs['width'],
                                                             init_guess=astrofix_kwargs['init_guess']
                                                             )
+
+                fixed_erro[i], erro_para, erro_TS = astrofix.Fix_Image(erro_temp[i], "asnan",
+                                                                       sig_clip=astrofix_kwargs['sig_clip'],
+                                                                       max_clip=astrofix_kwargs['max_clip'],
+                                                                       sig_data=astrofix_kwargs['sig_data'],
+                                                                       width=astrofix_kwargs['width'],
+                                                                       init_guess=astrofix_kwargs['init_guess']
+                                                                       )
                 #print(f"a={para[0]}, h={para[1]}")
                 #print(f"Number of training set pixels: {np.count_nonzero(TS)}")
             else:
                 # Remaining integrations: interpolate using parameters from first
                 fixed_img[i] = astrofix.Interpolate(para[0], para[1], integration, BP="asnan")
-            
-            # Update the original data using bad pixel mask
+                fixed_erro[i] = astrofix.Interpolate(erro_para[0], erro_para[1], erro_temp[i], BP="asnan")
+
+            # Update the original data using bad pixel mask.
             data[i][ww[i]] = fixed_img[i][ww[i]]
+            erro[i][ww[i]] = fixed_erro[i][ww[i]]
 
             # Update DQ flag to good
             pxdq[i][ww[i]] = 0
@@ -5887,21 +5902,22 @@ class ImageTools():
                             # Shift the data.
                             data_shift += [ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
                                            pad_amount=shiftpad, method=method, kwargs=kwargs)]
-                                           
+
                             # Temporarily replace NaNs in ERR with zero.
                             erro_nans = np.isnan(erro[k])
                             erro_temp = erro[k].copy()
                             erro_temp[erro_nans] = 0.0
-                            
+
                             # Shift the error data and NaN mask.
                             erro_shift += [ut.imshift(erro_temp, [shifts[k][0], shifts[k][1]],
                                            pad_amount=shiftpad, method=method, kwargs=kwargs)]
                             nans_shift += [ut.imshift(erro_nans.astype(float), [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
+                                           pad_amount=shiftpad, method="spline",
+                                           kwargs={"order": 1, "mode": "constant", "cval": 0.0})]
 
-                            # Set affected ERR pixels to obviously bad pixel value 1e6.
-                            erro_shift[-1][np.abs(nans_shift[-1]) > 0.5] = 1e6
-
+                            # Restore the NaNs.
+                            erro_shift[-1][nans_shift[-1] != 0] = np.nan
+                                            
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
 
@@ -5951,10 +5967,11 @@ class ImageTools():
                             erro_shift += [ut.imshift(erro_temp, [shifts[k][0], shifts[k][1]],
                                            pad_amount=shiftpad, method=method, kwargs=kwargs)]
                             nans_shift += [ut.imshift(erro_nans.astype(float), [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)]
+                                           pad_amount=shiftpad, method="spline",
+                                           kwargs={"order": 1, "mode": "constant", "cval": 0.0})]
 
-                            # Set affected ERR pixels to obviously bad pixel value 1e6.
-                            erro_shift[-1][np.abs(nans_shift[-1]) > 0.5] = 1e6
+                            # Restore the NaNs.
+                            erro_shift[-1][nans_shift[-1] != 0] = np.nan
 
                         data = np.array(data_shift)
                         erro = np.array(erro_shift)
@@ -6005,7 +6022,8 @@ class ImageTools():
                             this_erro = ut.imshift(erro_temp, [shifts[k][0], shifts[k][1]],
                                                    pad_amount=shiftpad, method=method, kwargs=kwargs)
                             this_nans = ut.imshift(erro_nans.astype(float), [shifts[k][0], shifts[k][1]],
-                                                   pad_amount=shiftpad, method=method, kwargs=kwargs)
+                                                   pad_amount=shiftpad, method="spline",
+                                                   kwargs={"order": 1, "mode": "constant", "cval": 0.0})
 
                             # Recenter SCI and REF frames to integer pixel
                             # precision by rolling the image.
@@ -6022,9 +6040,9 @@ class ImageTools():
                                 data_shift += [this_data]
                                 erro_shift += [this_erro]
                                 nans_shift = this_nans
-
-                        # Set affected ERR pixels to obviously bad pixel value 1e6.
-                        erro_shift[-1][np.abs(nans_shift) > 0.5] = 1e6
+                            
+                            # Restore the NaNs.
+                            erro_shift[-1][nans_shift != 0] = np.nan
 
                         if nanmask is not None:
                             # nanmask shift preservesing 0/1 and NaN values.
@@ -6057,7 +6075,7 @@ class ImageTools():
 
                         # Shift the data.
                         this_data = ut.imshift(data[k], [shifts[k][0], shifts[k][1]],
-                                           pad_amount=shiftpad, method=method, kwargs=kwargs)
+                                               pad_amount=shiftpad, method=method, kwargs=kwargs)
                         
                         # Temporarily replace NaNs in ERR with zero.
                         erro_nans = np.isnan(erro[k])
@@ -6068,7 +6086,8 @@ class ImageTools():
                         this_erro = ut.imshift(erro_temp, [shifts[k][0], shifts[k][1]],
                                                pad_amount=shiftpad, method=method, kwargs=kwargs)
                         this_nans = ut.imshift(erro_nans.astype(float), [shifts[k][0], shifts[k][1]],
-                                               pad_amount=shiftpad, method=method, kwargs=kwargs)
+                                               pad_amount=shiftpad, method="spline",
+                                               kwargs={"order": 1, "mode": "constant", "cval": 0.0})
 
                         # Recenter TA frames to integer pixel precision by
                         # rolling the image.
@@ -6081,8 +6100,8 @@ class ImageTools():
                             erro_shift += [np.roll(np.roll(this_erro, dx, axis=1), dy, axis=0)]
                             nans_shift = np.roll(np.roll(this_nans, dx, axis=1), dy, axis=0)
 
-                        # Set affected ERR pixels to obviously bad pixel value 1e6.
-                        erro_shift[-1][np.abs(nans_shift) > 0.5] = 1e6
+                        # Restore the NaNs.
+                        erro_shift[-1][nans_shift != 0] = np.nan
 
                     data = np.array(data_shift)
                     erro = np.array(erro_shift)
