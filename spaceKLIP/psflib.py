@@ -235,7 +235,13 @@ def build_refdb(idir,odir='.',suffix='calints',overwrite=False,
     #       - slightly wrong SIMBAD names
     # - logic for if 'HAS_DISK','HAS_CANDS' have a mix of 'unknown' and bool values
     
-    import mocapy
+    try:
+        import mocapy
+    except ImportError as err:
+        raise ImportError(
+            "mocapy is required for build_refdb(). Install it with "
+            "pip install \"spaceKLIP[mocapy]\"."
+        ) from err
 
     # Check that you won't accidentally overwrite an existing csv.
     outpath = os.path.join(odir,'ref_lib.csv')
@@ -632,4 +638,3 @@ def download_mast(ref_db,token=None,
                                overwrite=overwrite, exists_ok=exists_ok,
                                progress=progress, verbose=verbose,
                                mast_api_token=token)
-

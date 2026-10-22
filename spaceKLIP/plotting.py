@@ -12,6 +12,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gs
 import matplotlib.patheffects as patheffects
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib import font_manager
 import scipy.ndimage as ndi
@@ -32,6 +33,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
 
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -42,13 +46,13 @@ SPACEKLIP_PLOT_STYLE = os.path.join(os.path.dirname(__file__),'sk_style.mplstyle
 # =============================================================================
 
 def set_default_style(style):
-    " Adjust the default matplotlib style for spaceKLIP plots_bk. "
+    " Adjust the default matplotlib style for spaceKLIP plots. "
     global SPACEKLIP_PLOT_STYLE
     SPACEKLIP_PLOT_STYLE = style
 
 def load_plt_style(style=None):
     """
-    Load the matplotlib style for spaceKLIP plots_bk.
+    Load the matplotlib style for spaceKLIP plots.
 
     Load the style sheet (default of `sk_style.mplstyle`), which is a modified version of the
     style sheet from the `webbpsf_ext` package.
@@ -217,6 +221,348 @@ def annotate_secondary_axes_arcsec(ax,
     secay.tick_params(labelsize='small', color='white', which='both')
 
 
+def compare_clean_methods(files,
+                          kwargs_list=None,
+                          zoom_region=None,
+                          interactive=False):
+    """
+    Plot and compare spaceKLIP clean methods.
+    For the Bad Pixel Tutorial Notebook.
+
+    Parameters
+    ----------
+    files : list of str
+        FITS files containing cleaned products.
+    kwargs_list : list of dict
+        List of parameter dictionaries corresponding to each run.
+    zoom_region : tuple, optional
+        (x0, x1, y0, y1) zoom region.
+
+    Returns
+    -------
+    None.
+    """
+
+    # Load all runs.
+    runs = []
+    all_data = []
+
+    for i, file in enumerate(files):
+
+        # Get the cleaned data.
+        data = fits.getdata(file, ext=1)
+        data = data if data.ndim == 2 else data[-1]
+        data = np.asarray(data, dtype=np.float32)
+
+        all_data.append(data)
+
+        # Build annotation.
+        text = []
+        if kwargs_list:
+            method = kwargs_list[i].get("method", f"Run {i}")
+            text.append(f"method = {method}")
+            if method != "custom":
+                flat = []
+                for k, v in kwargs_list[i].items():
+                    if isinstance(v, dict):
+                        flat.extend(
+                            f"{k2} = {v2}"
+                            for k2, v2 in v.items()
+                        )
+                    else:
+                        flat.append(f"{k} = {v}")
+
+                text.extend(
+                    ", ".join(flat[j:j+2])
+                    for j in range(0, len(flat), 2)
+                )
+
+        runs.append(dict(data=data, txt="\n".join(text), html="<br>".join(text)))
+
+    # Shared scaling.
+    flat = np.concatenate([d.ravel() for d in all_data])
+    zmin, zmax = np.nanpercentile(flat, [1, 98])
+    unit = fits.getval(files[0], "BUNIT", ext=1)
+
+    # STATIC PLOTS.
+    if not interactive:
+
+        # Setup the figure.
+        n = len(runs)
+        ncols = min(2, n)
+        nrows = (n + ncols - 1) // ncols
+        fig, axes = plt.subplots(nrows * 2, ncols, figsize=(5 * ncols, 7 * nrows),
+                                 gridspec_kw={"height_ratios": [4, 1] * nrows}, squeeze=False)
+
+        fig.suptitle(r"Bad Pixel $\it{Clean}$ Method Comparison")
+
+        for i, run in enumerate(runs):
+
+            row = (i // ncols) * 2
+            col = i % ncols
+
+            ax = axes[row, col]
+            txt = axes[row + 1, col]
+
+            im = ax.imshow(run["data"], origin="lower",
+                           cmap="viridis", vmin=zmin, vmax=zmax)
+
+            ax.set_title(f"Run {i+1}")
+            ax.set_xlabel("Pixel X")
+            ax.set_ylabel("Pixel Y")
+
+            if zoom_region:
+                x0, x1, y0, y1 = zoom_region
+                ax.set_xlim(x0, x1)
+                ax.set_ylim(y0, y1)
+
+            txt.text(0.02, 0.95, run["txt"], va="top", fontsize=8)
+            txt.set_facecolor("#f7f7f7")
+            txt.axis("off")
+
+        # Hide unused panels.
+        total = nrows * ncols
+        for j in range(n, total):
+            row = (j // ncols) * 2
+            col = j % ncols
+            axes[row, col].axis("off")
+            axes[row + 1, col].axis("off")
+
+        cax = fig.add_axes([0.93, 0.15, 0.015, 0.7])
+        fig.colorbar(im, cax=cax, label=unit)
+
+        plt.tight_layout(rect=[0.02, 0.02, 0.90, 0.97])
+        plt.show()
+
+    # INTERACTIVE PLOTS
+    else:
+
+        # Setup figure.
+        ncols = min(2, len(runs))
+        nrows = int(np.ceil(len(runs) / 2))
+        fig = make_subplots(rows=nrows * 2, cols=ncols,
+                            row_heights=[0.8, 0.2] * nrows,
+                            vertical_spacing=0.06)
+
+        for i, run in enumerate(runs):
+
+            row = 2 * (i // 2) + 1
+            col = (i % 2) + 1
+
+            fig.add_trace(go.Heatmap(z=run["data"], zmin=zmin, zmax=zmax,
+                                     colorscale="Viridis", showscale=(i == 0),
+                                     colorbar=dict(title=unit) if i == 0 else None,
+                                     hovertemplate=("x: %{x}<br>y: %{y}<br>value: %{z:.2f}<extra></extra>")),
+                                     row=row, col=col)
+
+            fig.add_trace(go.Scatter(x=[0.5], y=[0.5], text=[run["html"]],
+                                     mode="text", textfont=dict(size=11),
+                                     showlegend=False), row=row + 1, col=col)
+
+            fig.update_xaxes(title="Pixel X", matches="x", row=row, col=col)
+
+            fig.update_yaxes(title="Pixel Y", matches="y",
+                             scaleanchor="x", scaleratio=1,
+                             row=row, col=col)
+
+            fig.update_xaxes(row=row + 1, col=col, visible=False)
+            fig.update_yaxes(row=row + 1, col=col, visible=False)
+
+            if zoom_region:
+                x0, x1, y0, y1 = zoom_region
+                fig.update_xaxes(range=[x0, x1], row=row, col=col)
+                fig.update_yaxes(range=[y0, y1], row=row, col=col)
+
+        fig.update_layout(
+            title="Bad Pixel <i>Clean</i> Method Comparison",
+            height=450 * nrows, width=900,
+            margin=dict(l=50, r=50, t=100, b=75))
+
+        fig.show()
+
+
+def compare_find_methods(files,
+                         kwargs_list=None,
+                         zoom_region=None,
+                         interactive=True):
+    """
+    Plot and compare bad-pixel masks from multiple runs on a given image.
+    For the Bad Pixel Tutorial Notebook.
+
+    Parameters
+    ----------
+    files : list of str
+        FITS files containing DQ and science data.
+
+    kwargs_list : list of dict, optional
+        Parameter dictionaries corresponding to each run.
+
+    zoom_region : tuple, optional
+        (x0, x1, y0, y1) zoom region.
+
+    interactive : bool, optional
+        Interactive Plotly plot or static Matplotlib plot.
+        Default is True.
+
+    Returns
+    -------
+    None
+    """
+
+    # Use first file as reference image.
+    reference_file = files[0]
+
+    # Load reference image.
+    data = fits.getdata(reference_file, ext=1)
+    data = data if data.ndim == 2 else data[-1]
+    data = np.asarray(data, dtype=np.float32)
+
+    unit = fits.getval(reference_file, "BUNIT", ext=1)
+    zmin, zmax = np.nanpercentile(data, [1, 98])
+
+    # Load each run.
+    runs = []
+    for i, file in enumerate(files):
+
+        # Load the DQ data.
+        dq = fits.getdata(file, extname="DQ")
+        dq = dq if dq.ndim == 2 else dq[-1]
+
+        # Create DO_NOT_USE mask.
+        mask = (np.asarray(dq, dtype=np.int32) & 1) != 0
+        y, x = np.where(mask)
+        text = [r"DO_NOT_USE (bad pixels) = " + f"{mask.sum():,}"]
+
+        # Annotate the kwargs for each run.
+        if kwargs_list and kwargs_list[i].get("method") != "custom":
+            flat = []
+            for k, v in kwargs_list[i].items():
+                if isinstance(v, dict):
+                    flat.extend(f"{k2} = {v2}" for k2, v2 in v.items())
+                else:
+                    flat.append(f"{k} = {v}")
+            text.extend(", ".join(flat[j:j+2]) for j in range(0, len(flat), 2))
+
+        html = "<br>".join(text)
+        html = html.replace("DO_NOT_USE", '<span style="color:red;">×</span> DO_NOT_USE')
+
+        runs.append(dict(x=x, y=y, txt="\n".join(text), html=html))
+
+    # STATIC PLOT
+    if not interactive:
+
+        # Setup figure.
+        n = len(runs)
+        ncols = min(2, n)
+        nrows = (n + ncols - 1) // ncols
+        
+        fig, axes = plt.subplots(
+            nrows * 2, ncols,
+            figsize=(6 * ncols, 7 * nrows), squeeze=False,
+            gridspec_kw={"height_ratios": [4, 1] * nrows})
+        #axes = np.atleast_2d(axes)
+
+        fig.suptitle(r"Bad Pixel $\it{Find}$ Method Comparison")
+
+        # Plot each run.
+        for i, run in enumerate(runs):
+
+            row = (i // ncols) * 2
+            col = i % ncols
+
+            ax = axes[row, col]
+            txt = axes[row + 1, col]
+
+            im = ax.imshow(data, origin="lower",
+                           cmap="viridis", vmin=zmin, vmax=zmax)
+            
+            ax.scatter(run["x"], run["y"], s=10, marker="x",
+                       color="red", linewidths=0.5)
+            
+            ax.set_title(f"Run {i+1}")
+            ax.set_xlabel("Pixel X")
+            ax.set_ylabel("Pixel Y")
+
+            if zoom_region:
+                x0, x1, y0, y1 = zoom_region
+                ax.set_xlim(x0, x1)
+                ax.set_ylim(y0, y1)
+
+            txt.text(0.01, 0.95, r"$\times$", color="red", va="top", fontsize=10)
+            txt.text(0.06, 0.95, run["txt"], va="top", fontsize=8)
+            txt.set_facecolor("#f7f7f7")
+            txt.axis("off")
+
+        cax = fig.add_axes([0.93, 0.15, 0.015, 0.7])
+        fig.colorbar(im, cax=cax, label=unit)
+        plt.tight_layout(rect=[0.02, 0.02, 0.90, 0.97])
+        plt.show()
+
+    # INTERACTIVE PLOT.
+    else:
+
+        fig = make_subplots(rows=2, cols=1, row_heights=[0.8, 0.2], vertical_spacing=0.06)
+
+        # Plot the reference.
+        fig.add_trace(go.Heatmap(z=data, zmin=zmin, zmax=zmax,
+                                 colorscale="Viridis", colorbar=dict(title=unit)),
+                                 row=1, col=1)
+
+        # Overlay the mask.
+        for i, run in enumerate(runs):
+            fig.add_trace(go.Scattergl(x=run["x"], y=run["y"], visible=(i == 0),
+                                       mode="markers", showlegend=False,
+                                       marker=dict(symbol="x", size=5, color="red")),
+                                       row=1, col=1)
+
+        # Anotation.
+        fig.add_trace(go.Scatter(x=[0.5], y=[0.5], text=[runs[0]["html"]],
+                                 mode="text", showlegend=False),
+                                 row=2, col=1)
+
+        if zoom_region:
+            x0, x1, y0, y1 = zoom_region
+            fig.update_xaxes(range=[x0, x1], row=1, col=1)
+            fig.update_yaxes(range=[y0, y1], row=1, col=1)
+
+        fig.update_layout(
+
+            title="Bad Pixel <i>Find</i> Method Comparison",
+            height=900, width=1000,
+            margin=dict(l=50, r=200, t=100, b=50),
+
+            updatemenus=[dict(
+                x=1.25, y=1,
+
+                buttons=[dict(
+
+                    label=f"Run {i}",
+                    method="restyle",
+
+                    args=[{
+                        "visible":
+                            [True] +
+                            [j == i for j in range(len(runs))] +
+                            [True],
+
+                        "text":
+                            [None] * (len(fig.data)-1) +
+                            [[runs[i]["html"]]]
+
+                    }]
+
+                ) for i in range(len(runs))]
+            )]
+        )
+
+        fig.update_xaxes(title="Pixel X", row=1, col=1)
+        fig.update_xaxes(row=2, col=1, visible=False)
+        fig.update_yaxes(row=2, col=1, visible=False)
+        fig.update_yaxes(title="Pixel Y", scaleanchor="x", scaleratio=1, row=1, col=1)
+
+        fig.show()
+
+
 def display_coron_image(filename,
                         vmin=None,
                         vmax=None,
@@ -261,7 +607,7 @@ def display_coron_image(filename,
 
     # Early exit for unsupported file types.
     if 'uncal' in filename:
-        raise RuntimeError("Display codes_bk does not support stage 0 uncal files. Reduce the data further before trying to display it.")
+        raise RuntimeError("Display code does not support stage 0 uncal files. Reduce the data further before trying to display it.")
 
     # Determine the input file type and set corresponding flags.
     is_pyklip = 'KLmodes' in filename
@@ -310,17 +656,19 @@ def display_coron_image(filename,
             f"{model.meta.exposure.ngroups}:{model.meta.exposure.nints}\n"
             f"{model.meta.exposure.effective_exposure_time:.2f} s"
         )
-        try:
-            # I don't know how to deal with the slightly different API of the GWCS class
-            # so, this is crude, just cast it to a regular WCS and drop the high order distortion stuff
-            # This suffices for our purposes in plotting compass annotations etc.
-            # (There is almost certainly a better way to do this...)
+        
+        # I don't know how to deal with the slightly different API of the GWCS class
+        # so, this is crude, just cast it to a regular WCS and drop the high order distortion stuff
+        # This suffices for our purposes in plotting compass annotations etc.
+        # (There is almost certainly a better way to do this...)
+        if model.meta.wcs is not None:
             wcs = astropy.wcs.WCS(model.meta.wcs.to_fits()[0])
-        except:
-            wcs = model.get_fits_wcs()
-            if cube_ints:
-                wcs = wcs.dropaxis(2)
+        else:
+            wcs = astropy.wcs.WCS(header)
 
+        if cube_ints and wcs.pixel_n_dim > 2:
+            wcs = wcs.dropaxis(2)
+            
     # Create a bad pixel mask.
     # Does this file have DQ extension or not? PyKLIP outputs do not.
     bpmask = np.zeros_like(image) + np.nan
@@ -431,7 +779,7 @@ def display_coron_dataset(database,
     stage3 : str, optional
         Specify if data is stage 3.
     save_filename : str
-        If provided, the plots_bk will be saved to a PDF file with this name.
+        If provided, the plots will be saved to a PDF file with this name.
     vmin, vmax : float, optional
         The minimum/maximum data value to use for scaling the image. If None, determined automatically.
     stretch : float, optional
@@ -441,7 +789,7 @@ def display_coron_dataset(database,
     dq_only : bool, optional
         If True, only the DO_NOT_USE DQ flags are displayed, not the image data itself.
     interactive : bool, optional
-        If `True`, the plots_bk will be displayed interactively.
+        If `True`, the plots will be displayed interactively.
     bbox_color : str, optional
         The background color for the text label. Default is '#4B0082'.
         If set to None, no background box will be drawn.
@@ -534,7 +882,7 @@ def display_image_comparisons(database,
         - `dict`: Filters tables based on database column values, where keys are column names and values are filter criteria.
 
     save_filename : str
-        If provided, the plots_bk will be saved to a PDF file with this name.
+        If provided, the plots will be saved to a PDF file with this name.
     vmin, vmax : float, optional
         The minimum/maximum data value to use for scaling the image. If None, determined automatically.
     stretch : float, optional
@@ -546,7 +894,7 @@ def display_image_comparisons(database,
     subtract_first : bool
         Whether to subtract the first SCI frame from subsequent frames.
     interactive : bool, optional
-        If `True`, the plots_bk will be displayed interactively.
+        If `True`, the plots will be displayed interactively.
     
     Returns
     -------
@@ -562,7 +910,7 @@ def display_image_comparisons(database,
     # Initialize a dictionary to store image details for each base directory.
     image_files = {base_dir: {'bp_counts': [], 'first_sci_file': None} for base_dir in base_dirs}
 
-    # Iterate over each key and corresponding tables in the database.
+    # Iterate over each key and corresponding table in the database.
     # Filter files based on the 'restrict_to' criteria provided.
     filtered_files = []
     for key, table in database.obs.items():
@@ -616,7 +964,7 @@ def display_image_comparisons(database,
             # Count the number of bad (DO_NOT_USE) pixels in the DQ data.
             dq = fits.getdata(fn_path, extname='DQ')
             num_bad_pixels = np.sum((dq & 1) == 1)
-            image_info['bp_counts'].append(num_bad_pixels)
+            #image_info['bp_counts'].append(num_bad_pixels)
 
             # Handle subtraction only if enabled.
             if subtract_first:
@@ -624,7 +972,7 @@ def display_image_comparisons(database,
                 with tempfile.NamedTemporaryFile(suffix='_' + fn.split('_')[-1], delete=False) as tmp:
                     shutil.copy2(fn_path, tmp.name)
                     with fits.open(tmp.name, mode='update') as hdul:
-                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI')
+                        first_sci_frame = fits.getdata(image_info['first_sci_file'], extname='SCI')[0]
                         hdul['SCI'].data -= first_sci_frame.astype(np.float32)
                         
                         # Determine the center of the image.
@@ -639,7 +987,7 @@ def display_image_comparisons(database,
             plt.draw()
 
             ax.set_title(base_dir)
-            ax.legend(handles=[patches.Patch(color='orange', label=f"DO_NOT_USE = {image_info['bp_counts'][0]} px")],
+            ax.legend(handles=[patches.Patch(color='orange', label=f"DO_NOT_USE = {num_bad_pixels} px")],
                       loc='lower center', bbox_to_anchor=(0.5, -0.18))
         fig.suptitle(
             f"{os.path.basename(fn)} - {os.path.basename(image_info['first_sci_file'])}" if subtract_first else os.path.basename(fn),
@@ -655,8 +1003,13 @@ def display_image_comparisons(database,
    
     # Static mode.
     else:
-        for i in range(len(filtered_files)):
-            update_image(i+1 if subtract_first else i)
+        if subtract_first:
+            indices = range(1, len(filtered_files))
+        else:
+            indices = range(len(filtered_files))
+
+        for i in indices:
+            update_image(i)
             if pdf:
                 pdf.savefig(plt.gcf())
             plt.show()
@@ -692,7 +1045,7 @@ def plot_contrast_images(meta,
         extent = (extl, -extr, -extl, extr)
         xlabel, ylabel = '$\\Delta$RA [arcsec]', '$\\Delta$Dec [arcsec]'
 
-    # Initialize plots_bk
+    # Initialize plots
     f, ax = plt.subplots(1, 2, figsize=(2*6.4, 1*4.8))
 
     # Plot subtracted image, circle input companion locations
@@ -1137,7 +1490,7 @@ def plot_subimages(imgdirs, subdirs, filts, submodes, numKL,
             window_pix = int(np.rint(window_size / pltscale['NIRCAM'] / 2))
             offset = (window_pix - window_size / 0.063 / 2) *0.063
         else:
-            # Potentially use same center_pix codes_bk as for NIRCAM case above
+            # Potentially use same center_pix code as for NIRCAM case above
             center_pix = miri_img_centers[flt]
             window_pix = int(np.rint(window_size / pltscale['MIRI'] / 2))
             offset = (window_pix - window_size / 0.11 / 2) *0.11

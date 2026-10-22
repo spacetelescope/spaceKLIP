@@ -9,6 +9,9 @@ authors = [
   { name="The JWST Direct Observations of Exoplanetary Systems (ERS-1386) Collaboration"},
 ]
 
+[project.optional-dependencies]
+mocapy = ["mocapy @ git+https://github.com/jgagneastro/mocapy.git"]
+
 
 [build-system]
 requires = [

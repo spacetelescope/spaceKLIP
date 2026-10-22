@@ -77,7 +77,7 @@ def _crop_display_for_miri(ax,
     None.
     """
     # Note, this would be more elegant to look up from siaf,
-    # but we just hard-codes_bk values here since none of this will ever change.
+    # but we just hard-code values here since none of this will ever change.
 
     apname = hdul[0].header['APERNAME']
     subarray = hdul[0].header['SUBARRAY']
@@ -280,7 +280,7 @@ def get_visit_ta_image(visitid,
                 mast_file_url = f"{base_url}{filename}"
                 ta_hdul = fits.open(mast_file_url)
             except urllib.error.HTTPError as err:
-                if err.code == 401:  # Unauthorized access error codes_bk.
+                if err.code == 401:  # Unauthorized access error code.
                     # Use MAST API to retrieve exclusive access data if needed.
                     mast_api_token = os.environ.get('MAST_API_TOKEN', None)
                     obs = Observations(mast_token=mast_api_token)
@@ -478,7 +478,7 @@ def show_ta_img(visitid,
                                        vmax=vmax, vmin=-rsig)
 
     # Prepare annotation text.
-    model = datamodels.open(hdul)
+    model = datamodels.ImageModel(hdul)
     annotation_text = (
         f"{model.meta.target.proposer_name}\n"
         f"{model.meta.instrument.filter}, {model.meta.exposure.readpatt}:"
@@ -652,7 +652,7 @@ def ta_analysis(data_product,
     # ---------- EXTRACT WCS INFORMATION ----------
 
     # Open the data model to access WCS and TA metadata.
-    model = datamodels.open(hdul)
+    model = datamodels.ImageModel(hdul)
     wcs_ta = model.meta.wcs
 
     # Create SkyCoord object for target coord (RA, Dec) in ICRS frame.
@@ -888,7 +888,7 @@ def ta_analysis(data_product,
 
         outname = os.path.join(output_dir,
                                f'{inst.lower()}_ta_analysis_{os.path.basename(data_product[:-13])}.pdf')
-        plt.savefig(outname)
+        fig.savefig(outname, bbox_inches="tight", pad_inches=0.1)
         log.info(f'                 TA analysis saved: {outname}')
 
     if oss_cen_ta is not None:

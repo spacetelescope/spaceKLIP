@@ -54,15 +54,27 @@ def run_obs(database,
         - annuli : list of int, optional
             Numbers of subtraction annuli that shall be looped over. The
             default is [1].
+        - annuli_spacing : str, optional
+            How to distribute the annuli radially. Currently three options. 
+                - 'constant' : equally spaced (Default), 
+                - 'log' : logarithmical expansion with r, and 
+                - 'linear' : linearly expansion with r
         - subsections : list of int, optional
             Numbers of subtraction subsections that shall be looped over. The
             default is [1].
         - numbasis : list of int, optional
             Number of KL modes that shall be looped over. The default is [1, 2,
             5, 10, 20, 50, 100].
+        - IWA : float or 'auto', optional
+            Inner working angle, in pixels, used by pyKLIP.
+            If 'auto', use the IWA automatically determined by pyKLIP.
+            The default is 'auto'.
         - movement : float, optional
             Minimum amount of movement (pix) of an astrophysical source to
             consider using that image as a reference PSF. The default is 1.
+        - highpass : bool or float, optional
+            If True, run a Gaussian high pass filter (default size is sigma=imgsize/10).
+            Can also be a number specifying FWHM of box in pixel units. Default is False.
         - verbose : bool, optional
             Verbose mode? The default is False.
         - save_rolls : bool, optional
@@ -90,6 +102,8 @@ def run_obs(database,
         kwargs['annuli'] = [1]
     if not isinstance(kwargs['annuli'], list):
         kwargs['annuli'] = [kwargs['annuli']]
+    if 'annuli_spacing' not in kwargs.keys():
+        kwargs['annuli_spacing'] = 'constant'
     if 'subsections' not in kwargs.keys():
         kwargs['subsections'] = [1]
     if not isinstance(kwargs['subsections'], list):
@@ -99,7 +113,7 @@ def run_obs(database,
     if not isinstance(kwargs['numbasis'], list):
         kwargs['numbasis'] = [kwargs['numbasis']]
     if 'IWA' not in kwargs.keys():
-        kwargs['IWA'] = 1.
+        kwargs['IWA'] = 'auto'
     kwargs_temp = kwargs.copy()
     if 'movement' not in kwargs_temp.keys():
         kwargs_temp['movement'] = 1.
@@ -147,12 +161,13 @@ def run_obs(database,
                                highpass=kwargs_temp['highpass'],
                                center_include_offset=False,
                                center_keywords=['STARCENX','STARCENY'])
-            dataset.IWA = kwargs['IWA']
+            if kwargs['IWA'] != 'auto':
+                dataset.IWA = kwargs['IWA']
             kwargs_temp['dataset'] = dataset
             kwargs_temp['aligned_center'] = dataset.psflib.aligned_center
             kwargs_temp['psf_library'] = dataset.psflib
             kwargs_temp['mode'] = mode
-            
+
             # Can run pyKLIP multiple times on the same dataset with different
             # annuli and subsections.
             for annu in kwargs['annuli']:
@@ -198,7 +213,7 @@ def run_obs(database,
                     hdul[0].header['FILTER'] = (database.obs[key]['FILTER'][ww_sci[0]], head_primary.comments["FILTER"])
                     hdul[0].header['CWAVEL'] = (database.obs[key]['CWAVEL'][ww_sci[0]], "[micron] Filter pivot wavelength")
                     hdul[0].header['DWAVEL'] = (database.obs[key]['DWAVEL'][ww_sci[0]], "[micron] Filter effective width")
-                    hdul[0].header['PUPIL'] = (database.obs[key]['PUPIL'][ww_sci[0]], head_primary.comments["PUPIL"])
+                    hdul[0].header['PUPIL'] = (database.obs[key]['PUPIL'][ww_sci[0]], head_primary.comments['PUPIL'] if 'PUPIL' in head_primary else '')
                     hdul[0].header['CORONMSK'] = (database.obs[key]['CORONMSK'][ww_sci[0]], head_primary.comments["CORONMSK"])
                     hdul[0].header['EXP_TYPE'] = (database.obs[key]['EXP_TYPE'][ww_sci[0]], head_primary.comments["EXP_TYPE"])
                     hdul[0].header['EXPSTART'] = (np.min(database.obs[key]['EXPSTART'][ww_sci]), head_primary.comments["EXPSTART"])
@@ -209,30 +224,35 @@ def run_obs(database,
                     hdul[0].header['PPS_APER'] = (database.obs[key]['PPS_APER'][ww_sci[0]], head_primary.comments["PPS_APER"])
                     hdul[0].header['PIXSCALE'] = (database.obs[key]['PIXSCALE'][ww_sci[0]], "[arcsec/pixel] Pixel scale")
                     try:
-                        hdul[0].header['PIXAR_SR'] = database.obs[key]['PIXAR_SR'][ww_sci[0]]
+                        hdul[0].header['PIXAR_SR'] = (database.obs[key]['PIXAR_SR'][ww_sci[0]], head_sci.comments["PIXAR_SR"])
                     except:
-                        pass
-                    hdul[0].header['MODE'] = mode
-                    hdul[0].header['ANNULI'] = annu
-                    hdul[0].header['SUBSECTS'] = subs
-                    hdul[0].header['BUNIT'] = database.obs[key]['BUNIT'][ww_sci[0]]
+                        pass                
+
+                    hdul[0].header['MODE'] = (mode, "PSF subtraction mode: ADI, RDI, or ADI+RDI")
+                    hdul[0].header['ANNULI'] = (annu, "Number of subtraction annuli")
+                    hdul[0].header['ANNSPACE'] = (kwargs['annuli_spacing'], 'Radial annulus spacing: constant, log, or linear')
+                    hdul[0].header['SUBSECTS'] = (subs, "Number of subtraction subsections within each annulus")
+                    hdul[0].header['HIGHPASS'] = (kwargs_temp['highpass'], 'High-pass filter setting used by pyKLIP')
+                    hdul[0].header['IWA'] = (dataset.IWA, '[pixel] Inner working angle used by pyKLIP')
+                    hdul[0].header['BUNIT'] = (database.obs[key]['BUNIT'][ww_sci[0]], head_sci.comments["BUNIT"])
+
                     w = wcs.WCS(head_sci)
                     _rotate_wcs_hdr(w, database.obs[key]['ROLL_REF'][ww_sci[0]])
-                    hdul[0].header['WCSAXES'] = head_sci['WCSAXES']
-                    hdul[0].header['CRPIX1'] = head_sci['STARCENX']
-                    hdul[0].header['CRPIX2'] = head_sci['STARCENY']
-                    hdul[0].header['CRVAL1'] = head_sci['CRVAL1']
-                    hdul[0].header['CRVAL2'] = head_sci['CRVAL2']
-                    hdul[0].header['CTYPE1'] = head_sci['CTYPE1']
-                    hdul[0].header['CTYPE2'] = head_sci['CTYPE2']
-                    hdul[0].header['CUNIT1'] = head_sci['CUNIT1']
-                    hdul[0].header['CUNIT2'] = head_sci['CUNIT2']
-                    hdul[0].header['CD1_1'] = w.wcs.cd[0, 0]
-                    hdul[0].header['CD1_2'] = w.wcs.cd[0, 1]
-                    hdul[0].header['CD2_1'] = w.wcs.cd[1, 0]
-                    hdul[0].header['CD2_2'] = w.wcs.cd[1, 1]
+                    hdul[0].header['WCSAXES'] = (head_sci['WCSAXES'], head_sci.comments["WCSAXES"])
+                    hdul[0].header['CRPIX1'] = (head_sci['STARCENX'], head_sci.comments["CRPIX1"])
+                    hdul[0].header['CRPIX2'] = (head_sci['STARCENY'], head_sci.comments["CRPIX2"])
+                    hdul[0].header['CRVAL1'] = (head_sci['CRVAL1'], head_sci.comments["CRVAL1"])
+                    hdul[0].header['CRVAL2'] = (head_sci['CRVAL2'], head_sci.comments["CRVAL2"])
+                    hdul[0].header['CTYPE1'] = (head_sci['CTYPE1'], head_sci.comments["CTYPE1"])
+                    hdul[0].header['CTYPE2'] = (head_sci['CTYPE2'], head_sci.comments["CTYPE2"])
+                    hdul[0].header['CUNIT1'] = (head_sci['CUNIT1'], head_sci.comments["CUNIT1"])
+                    hdul[0].header['CUNIT2'] = (head_sci['CUNIT2'], head_sci.comments["CUNIT2"])
+                    hdul[0].header['CD1_1'] = (w.wcs.cd[0, 0], head_sci.comments["CD1_1"])
+                    hdul[0].header['CD1_2'] = (w.wcs.cd[0, 1], head_sci.comments["CD1_2"])
+                    hdul[0].header['CD2_1'] = (w.wcs.cd[1, 0], head_sci.comments["CD2_1"])
+                    hdul[0].header['CD2_2'] = (w.wcs.cd[1, 1], head_sci.comments["CD2_2"])
                     if not np.isnan(database.obs[key]['BLURFWHM'][ww_sci[0]]):
-                        hdul[0].header['BLURFWHM'] = database.obs[key]['BLURFWHM'][ww_sci[0]]
+                        hdul[0].header['BLURFWHM'] = (database.obs[key]['BLURFWHM'][ww_sci[0]], "[pixel] FWHM of applied Gaussian blur")
                     hdul.writeto(datapath, output_verify='fix', overwrite=True)
                     hdul.close()
 
@@ -253,6 +273,7 @@ def run_obs(database,
                         n_roll = 1
                         for j in ww_sci:
                             fitsfile = os.path.split(database.obs[key]['FITSFILE'][j])[1]
+                            head_primary = fits.getheader(database.obs[key]['FITSFILE'][j], 0)
                             head_sci = fits.getheader(database.obs[key]['FITSFILE'][j], 'SCI')
                             ww = [k for k in range(len(dataset._filenames)) if fitsfile in dataset._filenames[k]]
                             hdul = fits.open(datapath)
@@ -260,20 +281,20 @@ def run_obs(database,
                                 hdul[0].data = np.nanmedian(dataset.allints[:, :, ww, :, :], axis=(1, 2))
                             else:
                                 hdul[0].data = np.nanmedian(dataset.allints[:, :, ww, :, :], axis=2)
-                            hdul[0].header['NINTS'] = database.obs[key]['NINTS'][j]
-                            hdul[0].header['WCSAXES'] = head_sci['WCSAXES']
-                            hdul[0].header['CRPIX1'] = head_sci['STARCENX']
-                            hdul[0].header['CRPIX2'] = head_sci['STARCENY']
-                            hdul[0].header['CRVAL1'] = head_sci['CRVAL1']
-                            hdul[0].header['CRVAL2'] = head_sci['CRVAL2']
-                            hdul[0].header['CTYPE1'] = head_sci['CTYPE1']
-                            hdul[0].header['CTYPE2'] = head_sci['CTYPE2']
-                            hdul[0].header['CUNIT1'] = head_sci['CUNIT1']
-                            hdul[0].header['CUNIT2'] = head_sci['CUNIT2']
-                            hdul[0].header['CD1_1'] = head_sci['CD1_1']
-                            hdul[0].header['CD1_2'] = head_sci['CD1_2']
-                            hdul[0].header['CD2_1'] = head_sci['CD2_1']
-                            hdul[0].header['CD2_2'] = head_sci['CD2_2']
+                            hdul[0].header['NINTS'] = (database.obs[key]['NINTS'][j], head_primary.comments['NINTS'])
+                            hdul[0].header['WCSAXES'] = (head_sci['WCSAXES'], head_sci.comments['WCSAXES'])
+                            hdul[0].header['CRPIX1'] = (head_sci['STARCENX'], head_sci.comments['CRPIX1'])
+                            hdul[0].header['CRPIX2'] = (head_sci['STARCENY'], head_sci.comments['CRPIX2'])
+                            hdul[0].header['CRVAL1'] = (head_sci['CRVAL1'], head_sci.comments['CRVAL1'])
+                            hdul[0].header['CRVAL2'] = (head_sci['CRVAL2'], head_sci.comments['CRVAL2'])
+                            hdul[0].header['CTYPE1'] = (head_sci['CTYPE1'], head_sci.comments['CTYPE1'])
+                            hdul[0].header['CTYPE2'] = (head_sci['CTYPE2'], head_sci.comments['CTYPE2'])
+                            hdul[0].header['CUNIT1'] = (head_sci['CUNIT1'], head_sci.comments['CUNIT1'])
+                            hdul[0].header['CUNIT2'] = (head_sci['CUNIT2'], head_sci.comments['CUNIT2'])
+                            hdul[0].header['CD1_1'] = (head_sci['CD1_1'], head_sci.comments['CD1_1'])
+                            hdul[0].header['CD1_2'] = (head_sci['CD1_2'], head_sci.comments['CD1_2'])
+                            hdul[0].header['CD2_1'] = (head_sci['CD2_1'], head_sci.comments['CD2_1'])
+                            hdul[0].header['CD2_2'] = (head_sci['CD2_2'], head_sci.comments['CD2_2'])
                             hdul.writeto(datapath.replace('-KLmodes-all.fits', '-KLmodes-all_roll%.0f.fits' % n_roll), output_verify='fix', overwrite=True)
                             hdul.close()
                             n_roll += 1
@@ -288,7 +309,6 @@ def run_obs(database,
                     else str(row)
                     for row in database.obs[key][col]
                 ]
-
 
         database.obs[key].write(file, format='ascii', overwrite=True)
 

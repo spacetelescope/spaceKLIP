@@ -128,7 +128,7 @@ class AnalysisTools():
             File type to save the raw contrast information to. Options are 'ecsv'
             or 'npy'.
         save_figures : bool, optional
-            Save the plots_bk in a PDF?
+            Save the plots in a PDF?
         
         Returns
         -------
@@ -441,14 +441,14 @@ class AnalysisTools():
 
                     output_fn =  fitsfile[:-5]+"_contrast.ecsv"
                     results_table.write(output_fn, overwrite=True)
-                    print(f"Contrast results and plots_bk saved to {output_fn}")
+                    print(f"Contrast results and plots saved to {output_fn}")
                 elif output_filetype.lower()=='npy':
                     # Save outputs as numpy .npy files
                     np.save(fitsfile[:-5] + '_seps.npy', seps)
                     np.save(fitsfile[:-5] + '_cons.npy', cons)
                     if mask is not None:
                         np.save(fitsfile[:-5] + '_cons_mask.npy', cons_mask)
-                    print(f"Contrast results and plots_bk saved to {fitsfile[:-5] + '_seps.npy'}, {fitsfile[:-5] + '_cons.npy'}")
+                    print(f"Contrast results and plots saved to {fitsfile[:-5] + '_seps.npy'}, {fitsfile[:-5] + '_cons.npy'}")
                 else:
                     raise ValueError('File save format not supported, options are "npy" or "ecsv".')
 
@@ -576,7 +576,11 @@ class AnalysisTools():
                 # Read Stage 2 files and make pyKLIP dataset
                 filepaths, psflib_filepaths = get_pyklip_filepaths(self.database, key)
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                pyklip_dataset = JWSTData(filepaths, psflib_filepaths)
+                pyklip_dataset = JWSTData(filepaths, psflib_filepaths,
+                                          highpass=self.database.red[key]['HIGHPASS'][j],
+                                          center_include_offset=False,
+                                          center_keywords=['STARCENX','STARCENY'])
+                pyklip_dataset.IWA = self.database.red[key]['IWA'][j]
 
                 # Compute the resolution element. Account for possible blurring.
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
@@ -667,6 +671,7 @@ class AnalysisTools():
                 klip_args = {}
                 klip_args['mode'] = self.database.red[key]['MODE'][j]
                 klip_args['annuli'] = self.database.red[key]['ANNULI'][j]
+                klip_args['annuli_spacing'] = self.database.red[key]['ANNSPACE'][j]
                 klip_args['subsections'] = self.database.red[key]['SUBSECTS'][j]
                 klip_args['numbasis'] = [int(nb) for nb in self.database.red[key]['KLMODES'][j].split(',')]
                 klip_args['algo'] = 'klip' #Currently not logged, may need changing in future. 
@@ -674,9 +679,9 @@ class AnalysisTools():
                 klip_args['maxnumbasis'] = maxnumbasis
                 inj_subdir = klip_args['mode'] + '_NANNU' + str(klip_args['annuli']) \
                             + '_NSUBS' + str(klip_args['subsections']) + '_' + key +'/'
-                klip_args['movement'] = 1 #Currently not logged, fix later. 
+                klip_args['movement'] = 1. #Currently not logged, fix later.
                 klip_args['calibrate_flux'] = False
-                klip_args['highpass'] = False
+                klip_args['highpass'] = self.database.red[key]['HIGHPASS'][j]
                 klip_args['verbose'] = False
                 inj_output_dir = os.path.join(output_dir, inj_subdir)
                 if not os.path.exists(inj_output_dir):
@@ -717,7 +722,7 @@ class AnalysisTools():
                     else:
                         kwargs_inj['binarity'] = False
 
-                    # Run the injection and recovery process
+                    # Run the injection and recovery process.
                     log.info('Injecting and recovering synthetic companions. This may take a while...')
                     inj_rec = inject_and_recover(pyklip_dataset, 
                                                  injection_psf=offsetpsf,
@@ -765,7 +770,7 @@ class AnalysisTools():
                     # Get fluxes for this KL mode subtracted image
                     this_KL_retr_fluxes = all_retr_fluxes[:,k]
 
-                    # Make a tables to make things easier
+                    # Make a table to make things easier
                     results = Table([all_inj_seps, all_inj_pas, all_inj_fluxes, this_KL_retr_fluxes], 
                                     names=('inj_seps', 'inj_pas', 'inj_fluxes', 'retr_fluxes'))
 
@@ -808,7 +813,7 @@ class AnalysisTools():
                     np.save(save_string+'_cal_maskcons.npy', maskcons_corr)
 
                 # Define some local utilty functions for plot setup.
-                # This makes the plotting codes_bk below less repetitive and more consistent
+                # This makes the plotting code below less repetitive and more consistent
 
                 def standardize_plots_setup(plot_style=None):
                     # Intialize the matplotlib style.
@@ -932,7 +937,6 @@ class AnalysisTools():
                            date='auto',
                            use_fm_psf=True,
                            flip_fmpsf_xy=None,
-                           highpass=False,
                            fitmethod='mcmc',
                            minmethod=None,
                            fitkernel='diag',
@@ -946,7 +950,6 @@ class AnalysisTools():
                            use_epsf=False,
                            fov_pix=65,
                            save_psf = False,
-                           center_include_offset=True,
                            **kwargs):
         """
         Extract the best fit parameters of a number of companions from each
@@ -987,9 +990,6 @@ class AnalysisTools():
             incorporate any KLIP throughput losses. The default is True.
         flip_fmpsf_xy : str, optional
             If 'x', flip the x-axis of the FM PSF. If 'y', flip the y-axis of the FM PSF. 'xy' or 'yx' for both.
-        highpass : bool or float, optional
-            If float, will apply a high-pass filter to the FM PSF and KLIP
-            dataset. The default is False.
         fitmethod : 'mcmc' or 'nested', optional
             Sampling algorithm which shall be used. If None and minmethod not None, it will mock the MCMC fit results
             using the initial guesses and perform only the Gaussian convolution fit to estimate extension.
@@ -1020,7 +1020,7 @@ class AnalysisTools():
             Name of the directory where the data products shall be saved. The
             default is 'companions'.
         save_figures : bool, optional
-            Save the plots_bk in a PDF?
+            Save the plots in a PDF?
         save_psf: bool, optional
                 Save the best fit PSF for each companion as a FITS file.
         
@@ -1060,7 +1060,9 @@ class AnalysisTools():
             # Loop through FITS files.
             nfitsfiles = len(self.database.red[key])
             for j in range(nfitsfiles):
-                
+
+                highpass = self.database.red[key]['HIGHPASS'][j]
+
                 # Get stellar magnitudes and filter zero points.
                 mstar, fzero, fzero_flam, fzero_wm2um = get_stellar_magnitudes(
                     starfile, spectral_type,
@@ -1102,11 +1104,15 @@ class AnalysisTools():
                 
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
-                dataset = JWSTData(filepaths, psflib_filepaths, highpass=highpass, center_include_offset=center_include_offset)
+                dataset = JWSTData(filepaths, psflib_filepaths,
+                                   highpass=highpass,
+                                   center_include_offset=False,
+                                   center_keywords=['STARCENX','STARCENY'])
+                dataset.IWA = self.database.red[key]['IWA'][j]
                 kwargs_temp['dataset'] = dataset
                 kwargs_temp['aligned_center'] = dataset._centers[0]
                 kwargs_temp['psf_library'] = dataset.psflib
-                
+
                 # Make copy of the original pyKLIP dataset.
                 dataset_orig = copy.deepcopy(dataset)
 
@@ -1546,6 +1552,7 @@ class AnalysisTools():
                     # Compute the FM dataset.
                     mode = self.database.red[key]['MODE'][j]
                     annuli = int(self.database.red[key]['ANNULI'][j])
+                    annuli_spacing = self.database.red[key]['ANNSPACE'][j]
                     subsections = int(self.database.red[key]['SUBSECTS'][j])
                     fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fmpsf-KLmodes-all.fits')
                     klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-klipped-KLmodes-all.fits')
@@ -1591,6 +1598,7 @@ class AnalysisTools():
                                         outputdir=output_dir_fm,
                                         fileprefix='FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key,
                                         annuli=annuli,
+                                        annuli_spacing=annuli_spacing,
                                         subsections=subsections,
                                         movement=1.,
                                         numbasis=klmodes,
@@ -1814,7 +1822,7 @@ class AnalysisTools():
                             plt.show()
                             plt.close(fig)
 
-                            # Write the MCMC fit results into a tables.
+                            # Write the MCMC fit results into a table.
                             if isinstance(mstar_err, dict):
                                 mstar_err_temp = mstar_err[filt]
                             else:
@@ -1981,7 +1989,7 @@ class AnalysisTools():
                             plt.show()
                             plt.close(fig)
 
-                            # Write the pymultinest fit results into a tables.
+                            # Write the pymultinest fit results into a table.
                             if isinstance(mstar_err, dict):
                                 mstar_err_temp = mstar_err[filt]
                             else:
@@ -2244,12 +2252,14 @@ class AnalysisTools():
                         # Reduce companion-subtracted data.
                         mode = self.database.red[key]['MODE'][j]
                         annuli = self.database.red[key]['ANNULI'][j]
+                        annuli_spacing = self.database.red[key]['ANNSPACE'][j]
                         subsections = self.database.red[key]['SUBSECTS'][j]
                         parallelized.klip_dataset(dataset=dataset_orig,
                                                   mode=mode,
                                                   outputdir=output_dir_fm,
                                                   fileprefix=fileprefix,
                                                   annuli=annuli,
+                                                  annuli_spacing=annuli_spacing,
                                                   subsections=subsections,
                                                   movement=1.,
                                                   numbasis=klmodes,
@@ -2273,7 +2283,7 @@ class AnalysisTools():
                 # Update source database.
                 self.database.update_src(key, j, tab)
 
-                # Save the results tables.
+                # Save the results table.
                 output_ecsv_path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
                     subsections) + '_' + key + '-results_c%.0f' % (k + 1) + '.ecsv')
                 tab.write(output_ecsv_path, format='ascii.ecsv', overwrite=True)
@@ -2521,7 +2531,7 @@ def inject_and_recover(raw_dataset,
                     inj_de = injection_seps[i]*np.cos(np.deg2rad(injection_pas[j])) # pixels
                     # Calculate distance to companion
                     dist = np.sqrt((tcomp_ra-inj_ra)**2+(tcomp_de-inj_de)**2)
-                    #Check if too close, if so, lie to the codes_bk and say its already injected
+                    #Check if too close, if so, lie to the code and say its already injected
                     if dist < tcomp_rad:
                         list_of_injected += [pos_id]
     if len(list_of_injected) != 0:
@@ -2643,6 +2653,7 @@ def inject_and_recover(raw_dataset,
             fileprefix = 'INJ_ITER{}_{}COMP'.format(counter, Ninjected)
             parallelized.klip_dataset(dataset=dataset,
                                       psf_library=dataset.psflib,
+                                      aligned_center=dataset._centers[0],
                                       fileprefix=fileprefix,
                                       **klip_args)
 

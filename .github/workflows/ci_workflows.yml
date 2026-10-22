@@ -22,7 +22,7 @@ jobs:
             toxenv: py311-latest-test
 
     steps:
-    - name: Checkout codes_bk
+    - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
