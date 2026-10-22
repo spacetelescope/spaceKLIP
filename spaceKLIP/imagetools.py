@@ -1309,24 +1309,34 @@ class ImageTools():
             # Initialize the output mask (same shape as image)
             output_mask = np.zeros_like(image, dtype=bool)
 
-            # Process each 2D slice independently
-            for z in range(image.shape[0]):  # Loop over the first axis (Z)
-                nan_mask = np.isnan(image[z])  # Extract NaN mask for this slice
-                labeled_array, num_features = scipy.ndimage.label(nan_mask)  # Label clusters
+            if min_nancluster is not None:
+                # Process each 2D slice independently
+                for z in range(image.shape[0]):  # Loop over the first axis (Z)
+                    nan_mask = np.isnan(image[z])  # Extract NaN mask for this slice
+                    labeled_array, num_features = scipy.ndimage.label(nan_mask)  # Label clusters
 
-                slices = scipy.ndimage.find_objects(labeled_array)  # Get bounding boxes for clusters
+                    slices = scipy.ndimage.find_objects(labeled_array)  # Get bounding boxes for clusters
 
-                for i, sl in enumerate(slices):
-                    if sl is not None:
-                        cluster_mask = (labeled_array[sl] == (i + 1))  # Mask for this cluster
-                        if np.sum(cluster_mask) >= min_nancluster:  # Only keep clusters larger than min_nancluster
-                            output_mask[z][sl][cluster_mask] = True
+                    for i, sl in enumerate(slices):
+                        if sl is not None:
+                            cluster_mask = (labeled_array[sl] == (i + 1))  # Mask for this cluster
+                            if np.sum(cluster_mask) >= min_nancluster:  # Only keep clusters larger than min_nancluster
+                                output_mask[z][sl][cluster_mask] = True
+
             if add_satpix:
-                # Identify saturated pixels from pxdq
+                # Identify saturated pixels from DQ array
                 saturated_mask = ut.get_dqmask(pxdq, 'SATURATED', return_bool=True)
+                ad_floor = ut.get_dqmask(pxdq, 'AD_FLOOR', return_bool=True)
+
+                # Identify NaN pixels in the data
+                data_nan_mask = np.isnan(data)
+
+                # Only flag pixels that are BOTH flagged in DQ AND are NaN in data
+                # This ensures they're completely saturated
+                fully_saturated = (saturated_mask | ad_floor) & data_nan_mask
 
                 # Add saturated pixels to output_mask
-                output_mask = output_mask | saturated_mask
+                output_mask = output_mask | fully_saturated
 
             nan_mask = np.nanmedian(output_mask.astype(int), axis=0)
             new_dq = pxdq.copy()
@@ -1381,6 +1391,10 @@ class ImageTools():
 
             # Loop through FITS files.
             nfitsfiles = len(self.database.obs[key])
+            min_nancluster = nanmask_kwargs.get('min_nancluster', None)
+            add_satpix = nanmask_kwargs.get('add_satpix', False)
+            pixels2nans_mask = nanmask_kwargs.get('pixels2nans_mask', {})
+
             for j in range(nfitsfiles):
 
                 # Read FITS file and PSF mask.
@@ -1388,10 +1402,9 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
-                min_nancluster = nanmask_kwargs.get('min_nancluster', None)
-                if min_nancluster is not None:
-                    nanmask = nan_clusters_mask(data, fitsfile, min_nancluster, add_satpix=nanmask_kwargs.get('add_satpix', False),
-                                                pixels2nans_mask=nanmask_kwargs.get('pixels2nans_mask', {}), key=key)
+                if min_nancluster is not None or add_satpix:
+                    nanmask = nan_clusters_mask(data, fitsfile, min_nancluster, add_satpix=add_satpix,
+                                                pixels2nans_mask=pixels2nans_mask, key=key)
                 else:
                     nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                     nanmask = ut.read_msk(nanmaskfile)
