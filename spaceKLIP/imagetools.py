@@ -1159,7 +1159,7 @@ class ImageTools():
                         custom_kwargs=None,
                         timeints_kwargs=None,
                         gradient_kwargs=None,
-                        pixles2nans_mask=None,
+                        pixels2nans_mask=None,
                         types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                         subdir='bpfound',
                         restrict_to=None,
@@ -1274,11 +1274,15 @@ class ImageTools():
             in the database will be used.
             The default is None.
 
+        pixels2nans_mask: dict, optional
+            Dictionary of boolean masks to convert pixels to NaNs for each concatenation key.
+            The keys should match the keys in the database.
+
         Returns
         -------
         None.
         """
-        def nan_clusters_mask(image, fitsfile, min_nancluster=None, pixles2nans_mask={}, key=None):
+        def nan_clusters_mask(image, fitsfile, min_nancluster=None, pixels2nans_mask={}, key=None):
             """
             Create a 3D boolean mask where NaN clusters larger than min_nancluster are marked as True,
             but only checking within each 2D slice (ignoring connections along the Z-axis).
@@ -1290,8 +1294,8 @@ class ImageTools():
             Returns:
             - 3D boolean numpy array with the same shape as input
             """
-            if pixles2nans_mask and (key is not None) and (key in pixles2nans_mask):
-                image[pixles2nans_mask[key].astype(bool)] = np.nan
+            if pixels2nans_mask and (key is not None) and (key in pixels2nans_mask):
+                image[pixels2nans_mask[key].astype(bool)] = np.nan
 
             # Initialize the output mask (same shape as image)
             output_mask = np.zeros_like(image, dtype=bool)
@@ -1366,7 +1370,7 @@ class ImageTools():
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 if min_nancluster is not None:
-                    nanmask = nan_clusters_mask(data, fitsfile, min_nancluster, pixles2nans_mask=pixles2nans_mask, key=key)
+                    nanmask = nan_clusters_mask(data, fitsfile, min_nancluster, pixels2nans_mask=pixels2nans_mask, key=key)
                 else:
                     nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                     nanmask = ut.read_msk(nanmaskfile)
