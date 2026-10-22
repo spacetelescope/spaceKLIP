@@ -1266,18 +1266,17 @@ class ImageTools():
         nanmask_kwargs : dict, optional
 
             - min_nancluster: int, optional
-                minimum number of pixels required to flag cluster of NaNs pixels. If None, the provided NaN mask
-                in the database will be used.
+                minimum number of pixels required to flag cluster of NaNs pixels. If None, skip.
+                The default is None.
+
+            - min_satcluster: int, optional
+                minimum number of pixels required to flag cluster of saturated pixels. If None, skip
                 The default is None.
 
             - pixels2nans_mask: dict, optional
                 Dictionary of boolean masks to convert pixels to NaNs for each concatenation key.
                 The keys should match the keys in the database.
                 The default is is {}.
-
-            - add_satpix: bool, optional
-                If True, pixels identified as Saturated  will also added to the DQ array.
-                The default is False.
 
             The default is {}.
         types : list of str, optional
@@ -1291,7 +1290,7 @@ class ImageTools():
         -------
         None.
         """
-        def nan_clusters_mask(image, fitsfile, min_nancluster=None, add_satpix=False, pixels2nans_mask={}, key=None):
+        def nan_clusters_mask(image, fitsfile, min_nancluster=None, min_satcluster=None, pixels2nans_mask={}, key=None):
             """
             Create a 3D boolean mask where NaN clusters larger than min_nancluster are marked as True,
             but only checking within each 2D slice (ignoring connections along the Z-axis).
@@ -1309,34 +1308,46 @@ class ImageTools():
             # Initialize the output mask (same shape as image)
             output_mask = np.zeros_like(image, dtype=bool)
 
-            if min_nancluster is not None:
+            if min_nancluster is not None or min_satcluster is not None:
                 # Process each 2D slice independently
-                for z in range(image.shape[0]):  # Loop over the first axis (Z)
-                    nan_mask = np.isnan(image[z])  # Extract NaN mask for this slice
-                    labeled_array, num_features = scipy.ndimage.label(nan_mask)  # Label clusters
+                for z in range(image.shape[0]):
+                    # Get NaN mask for this slice
+                    nan_mask = np.isnan(image[z])
 
-                    slices = scipy.ndimage.find_objects(labeled_array)  # Get bounding boxes for clusters
+                    # Get saturated pixels for this slice (if enabled)
+                    if min_satcluster is not None:
+                        saturated_mask = ut.get_dqmask(pxdq[z], 'SATURATED', return_bool=True)
+                        ad_floor = ut.get_dqmask(pxdq[z], 'AD_FLOOR', return_bool=True)
+                        data_nan_mask = np.isnan(data[z])
+                        fully_saturated = (saturated_mask | ad_floor) & data_nan_mask
 
+                        # Combine both masks: NaN clusters OR saturated clusters
+                        combined_mask = nan_mask | fully_saturated
+                    else:
+                        combined_mask = nan_mask
+
+                    # Label all clusters (both NaN and saturated together)
+                    labeled_array, num_features = scipy.ndimage.label(combined_mask)
+                    slices = scipy.ndimage.find_objects(labeled_array)
+
+                    # Process each cluster
                     for i, sl in enumerate(slices):
                         if sl is not None:
-                            cluster_mask = (labeled_array[sl] == (i + 1))  # Mask for this cluster
-                            if np.sum(cluster_mask) >= min_nancluster:  # Only keep clusters larger than min_nancluster
+                            cluster_mask = (labeled_array[sl] == (i + 1))
+                            cluster_size = np.sum(cluster_mask)
+
+                            # Determine threshold for this cluster
+                            if min_satcluster is not None:
+                                # Check if cluster contains saturated pixels
+                                cluster_sat = fully_saturated[sl] & cluster_mask
+                                is_saturated_cluster = np.any(cluster_sat)
+                                threshold = min_satcluster if is_saturated_cluster else min_nancluster
+                            else:
+                                threshold = min_nancluster
+
+                            # Apply threshold
+                            if cluster_size >= threshold:
                                 output_mask[z][sl][cluster_mask] = True
-
-            if add_satpix:
-                # Identify saturated pixels from DQ array
-                saturated_mask = ut.get_dqmask(pxdq, 'SATURATED', return_bool=True)
-                ad_floor = ut.get_dqmask(pxdq, 'AD_FLOOR', return_bool=True)
-
-                # Identify NaN pixels in the data
-                data_nan_mask = np.isnan(data)
-
-                # Only flag pixels that are BOTH flagged in DQ AND are NaN in data
-                # This ensures they're completely saturated
-                fully_saturated = (saturated_mask | ad_floor) & data_nan_mask
-
-                # Add saturated pixels to output_mask
-                output_mask = output_mask | fully_saturated
 
             nan_mask = np.nanmedian(output_mask.astype(int), axis=0)
             new_dq = pxdq.copy()
@@ -1392,7 +1403,7 @@ class ImageTools():
             # Loop through FITS files.
             nfitsfiles = len(self.database.obs[key])
             min_nancluster = nanmask_kwargs.get('min_nancluster', None)
-            add_satpix = nanmask_kwargs.get('add_satpix', False)
+            min_satcluster = nanmask_kwargs.get('min_satcluster', None)
             pixels2nans_mask = nanmask_kwargs.get('pixels2nans_mask', {})
 
             for j in range(nfitsfiles):
@@ -1402,8 +1413,8 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
-                if min_nancluster is not None or add_satpix:
-                    nanmask = nan_clusters_mask(data, fitsfile, min_nancluster, add_satpix=add_satpix,
+                if min_nancluster is not None or min_nancluster is not None:
+                    nanmask = nan_clusters_mask(data, fitsfile, min_nancluster=min_nancluster, min_satcluster=min_satcluster,
                                                 pixels2nans_mask=pixels2nans_mask, key=key)
                 else:
                     nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
