@@ -1159,11 +1159,11 @@ class ImageTools():
                         custom_kwargs=None,
                         timeints_kwargs=None,
                         gradient_kwargs=None,
-                        pixels2nans_mask=None,
+                        nanmask_kwargs=None,
                         types=['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'],
                         subdir='bpfound',
                         restrict_to=None,
-                        min_nancluster = None):
+                        ):
         """
         Identify bad pixels for cleaning.
 
@@ -1263,26 +1263,35 @@ class ImageTools():
                 Plot diagnostics?
 
             The default is {}.
+        nanmask_kwargs : dict, optional
+
+            - min_nancluster: int, optional
+                minimum number of pixels required to flag cluster of NaNs pixels. If None, the provided NaN mask
+                in the database will be used.
+                The default is None.
+
+            - pixels2nans_mask: dict, optional
+                Dictionary of boolean masks to convert pixels to NaNs for each concatenation key.
+                The keys should match the keys in the database.
+                The default is is {}.
+
+            - add_satpix: bool, optional
+                If True, pixels identified as Saturated  will also added to the DQ array.
+                The default is False.
+
+            The default is {}.
         types : list of str, optional
             List of data types for which bad pixels shall be identified.
             The default is ['SCI', 'SCI_TA', 'SCI_BG', 'REF', 'REF_TA', 'REF_BG'].
         subdir : str, optional
             Name of the directory where the data products shall be saved. The
             default is 'bpfound'.
-        min_nancluster: int, optional
-            minimum number of pixels required to flag cluster of NaNs pixels. If None, the provided NaN mask
-            in the database will be used.
-            The default is None.
-
-        pixels2nans_mask: dict, optional
-            Dictionary of boolean masks to convert pixels to NaNs for each concatenation key.
-            The keys should match the keys in the database.
 
         Returns
         -------
         None.
         """
-        def nan_clusters_mask(image, fitsfile, min_nancluster=None, pixels2nans_mask={}, key=None):
+        def nan_clusters_mask(image, fitsfile, min_nancluster=None, add_satpix=False, pixels2nans_mask={}, key=None):
             """
             Create a 3D boolean mask where NaN clusters larger than min_nancluster are marked as True,
             but only checking within each 2D slice (ignoring connections along the Z-axis).
@@ -1312,6 +1321,12 @@ class ImageTools():
                         cluster_mask = (labeled_array[sl] == (i + 1))  # Mask for this cluster
                         if np.sum(cluster_mask) >= min_nancluster:  # Only keep clusters larger than min_nancluster
                             output_mask[z][sl][cluster_mask] = True
+            if add_satpix:
+                # Identify saturated pixels from pxdq
+                saturated_mask = ut.get_dqmask(pxdq, 'SATURATED', return_bool=True)
+
+                # Add saturated pixels to output_mask
+                output_mask = output_mask | saturated_mask
 
             nan_mask = np.nanmedian(output_mask.astype(int), axis=0)
             new_dq = pxdq.copy()
@@ -1350,6 +1365,10 @@ class ImageTools():
             gradient_kwargs = {}
         else:
             gradient_kwargs = gradient_kwargs.copy()
+        if nanmask_kwargs is None:
+            nanmask_kwargs = {}
+        else:
+            nanmask_kwargs = nanmask_kwargs.copy()
 
         # Loop through concatenations.
         for i, key in enumerate(self.database.obs.keys()):
@@ -1369,8 +1388,10 @@ class ImageTools():
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
+                min_nancluster = nanmask_kwargs.get('min_nancluster', None)
                 if min_nancluster is not None:
-                    nanmask = nan_clusters_mask(data, fitsfile, min_nancluster, pixels2nans_mask=pixels2nans_mask, key=key)
+                    nanmask = nan_clusters_mask(data, fitsfile, min_nancluster, add_satpix=nanmask_kwargs.get('add_satpix', False),
+                                                pixels2nans_mask=nanmask_kwargs.get('pixels2nans_mask', {}), key=key)
                 else:
                     nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
                     nanmask = ut.read_msk(nanmaskfile)
