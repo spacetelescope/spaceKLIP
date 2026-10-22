@@ -178,28 +178,36 @@ def run_obs(database,
                     
                     # Update reduction header.
                     ww_sci = np.where(database.obs[key]['TYPE'] == 'SCI')[0]
+                    head_primary = fits.getheader(database.obs[key]['FITSFILE'][ww_sci[0]], 0)
                     head_sci = fits.getheader(database.obs[key]['FITSFILE'][ww_sci[0]], 'SCI')
                     head_sci['NAXIS'] = 2
                     hdul = fits.open(datapath)
-                    hdul[0].header['TELESCOP'] = database.obs[key]['TELESCOP'][ww_sci[0]]
-                    hdul[0].header['TARGPROP'] = database.obs[key]['TARGPROP'][ww_sci[0]]
-                    hdul[0].header['TARG_RA'] = database.obs[key]['TARG_RA'][ww_sci[0]]
-                    hdul[0].header['TARG_DEC'] = database.obs[key]['TARG_DEC'][ww_sci[0]]
-                    hdul[0].header['INSTRUME'] = database.obs[key]['INSTRUME'][ww_sci[0]]
-                    hdul[0].header['DETECTOR'] = database.obs[key]['DETECTOR'][ww_sci[0]]
-                    hdul[0].header['FILTER'] = database.obs[key]['FILTER'][ww_sci[0]]
-                    hdul[0].header['CWAVEL'] = database.obs[key]['CWAVEL'][ww_sci[0]]
-                    hdul[0].header['DWAVEL'] = database.obs[key]['DWAVEL'][ww_sci[0]]
-                    hdul[0].header['PUPIL'] = database.obs[key]['PUPIL'][ww_sci[0]]
-                    hdul[0].header['CORONMSK'] = database.obs[key]['CORONMSK'][ww_sci[0]]
-                    hdul[0].header['EXP_TYPE'] = database.obs[key]['EXP_TYPE'][ww_sci[0]]
-                    hdul[0].header['EXPSTART'] = np.min(database.obs[key]['EXPSTART'][ww_sci])
-                    hdul[0].header['NINTS'] = np.sum(database.obs[key]['NINTS'][ww_sci])
-                    hdul[0].header['EFFINTTM'] = database.obs[key]['EFFINTTM'][ww_sci[0]]
-                    hdul[0].header['SUBARRAY'] = database.obs[key]['SUBARRAY'][ww_sci[0]]
-                    hdul[0].header['APERNAME'] = database.obs[key]['APERNAME'][ww_sci[0]]
-                    hdul[0].header['PPS_APER'] = database.obs[key]['PPS_APER'][ww_sci[0]]
-                    hdul[0].header['PIXSCALE'] = database.obs[key]['PIXSCALE'][ww_sci[0]]
+                    
+                    # Adding comments to a handful of the FITS header keywords populated by pyKLIP.
+                    hdul[0].header.comments['PSFCENTX'] = 'Star center along the X axis, 0-indexed'
+                    hdul[0].header.comments['PSFCENTY'] = 'Star center along the Y axis, 0-indexed'
+                    hdul[0].header.comments['STARCENX'] = 'Star center along the X axis, 1-indexed'
+                    hdul[0].header.comments['STARCENY'] = 'Star center along the Y axis, 1-indexed'
+                    
+                    hdul[0].header['TELESCOP'] = (database.obs[key]['TELESCOP'][ww_sci[0]], head_primary.comments["TELESCOP"])
+                    hdul[0].header['TARGPROP'] = (database.obs[key]['TARGPROP'][ww_sci[0]], head_primary.comments["TARGPROP"])
+                    hdul[0].header['TARG_RA'] = (database.obs[key]['TARG_RA'][ww_sci[0]], head_primary.comments["TARG_RA"])
+                    hdul[0].header['TARG_DEC'] = (database.obs[key]['TARG_DEC'][ww_sci[0]], head_primary.comments["TARG_DEC"])
+                    hdul[0].header['INSTRUME'] = (database.obs[key]['INSTRUME'][ww_sci[0]], head_primary.comments["INSTRUME"])
+                    hdul[0].header['DETECTOR'] = (database.obs[key]['DETECTOR'][ww_sci[0]], head_primary.comments["DETECTOR"])
+                    hdul[0].header['FILTER'] = (database.obs[key]['FILTER'][ww_sci[0]], head_primary.comments["FILTER"])
+                    hdul[0].header['CWAVEL'] = (database.obs[key]['CWAVEL'][ww_sci[0]], "[micron] Filter pivot wavelength")
+                    hdul[0].header['DWAVEL'] = (database.obs[key]['DWAVEL'][ww_sci[0]], "[micron] Filter effective width")
+                    hdul[0].header['PUPIL'] = (database.obs[key]['PUPIL'][ww_sci[0]], head_primary.comments["PUPIL"])
+                    hdul[0].header['CORONMSK'] = (database.obs[key]['CORONMSK'][ww_sci[0]], head_primary.comments["CORONMSK"])
+                    hdul[0].header['EXP_TYPE'] = (database.obs[key]['EXP_TYPE'][ww_sci[0]], head_primary.comments["EXP_TYPE"])
+                    hdul[0].header['EXPSTART'] = (np.min(database.obs[key]['EXPSTART'][ww_sci]), head_primary.comments["EXPSTART"])
+                    hdul[0].header['NINTS'] = (np.sum(database.obs[key]['NINTS'][ww_sci]), head_primary.comments["NINTS"])
+                    hdul[0].header['EFFINTTM'] = (database.obs[key]['EFFINTTM'][ww_sci[0]], head_primary.comments["EFFINTTM"])
+                    hdul[0].header['SUBARRAY'] = (database.obs[key]['SUBARRAY'][ww_sci[0]], head_primary.comments["SUBARRAY"])
+                    hdul[0].header['APERNAME'] = (database.obs[key]['APERNAME'][ww_sci[0]], head_primary.comments["APERNAME"])
+                    hdul[0].header['PPS_APER'] = (database.obs[key]['PPS_APER'][ww_sci[0]], head_primary.comments["PPS_APER"])
+                    hdul[0].header['PIXSCALE'] = (database.obs[key]['PIXSCALE'][ww_sci[0]], "[arcsec/pixel] Pixel scale")
                     try:
                         hdul[0].header['PIXAR_SR'] = database.obs[key]['PIXAR_SR'][ww_sci[0]]
                     except:
