@@ -23,6 +23,7 @@ from astropy.wcs import WCS
 
 from skimage.color import label2rgb
 from skimage.measure import label, regionprops
+from skimage.segmentation import watershed
 
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
@@ -615,9 +616,26 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
     labeled_nan_mask = label(nan_mask)
     num_nan_cores = np.max(labeled_nan_mask)
 
-    # 2. Isolate and label ONLY the pure bright pixels (excluding the NaNs)
+    # 2. Isolate ONLY the pure bright pixels (excluding the NaNs)
     bright_mask = (nandata > bright_star_thresh) & (~nan_mask)
-    labeled_bright_mask = label(bright_mask)
+
+    # --- NEW: Use watershed to separate touching regions ---
+    # Calculate distance transform (distance to nearest background pixel)
+    distance = distance_transform_edt(bright_mask)
+
+    # Find local maxima as markers for each source
+    from scipy.ndimage import maximum_filter
+    footprint_size = int(np.ceil(3.0 * fwhm))
+    if footprint_size % 2 == 0:
+        footprint_size += 1
+    local_max = (distance == maximum_filter(distance, footprint=np.ones((footprint_size,footprint_size))))
+    local_max = local_max & bright_mask
+
+    # Label the markers
+    markers = label(local_max)
+
+    # Use watershed to separate regions
+    labeled_bright_mask = watershed(-distance, markers=markers, mask=bright_mask)
 
     # 3. Shift the bright pixel IDs up so they do not conflict with NaN IDs
     if num_nan_cores > 0:
