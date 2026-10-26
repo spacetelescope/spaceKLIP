@@ -371,8 +371,18 @@ def fetch_catalog_for_image_fov(path2savetable,
                                     log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
                                     return Table()
 
-                            # fetch tabes...
-                            table = Table.read(path2table)
+                            selection_criteria = table_kwargs.pop('selection_criteria', None)
+                            if selection_criteria is not None:
+                                table = Table.read(path2catalog, **table_kwargs)
+                                ntargets = len(table)
+                                mask = eval(selection_criteria)
+                                table = table[mask]
+                                log.info(f"Filtered catalog from {ntargets} to {len(table)} sources after applying selection criteria to the catalog.")
+                            else:
+                                table = Table.read(path2catalog, **table_kwargs)
+
+                            if 'id' in table.columns:# and use_user_catalog:
+                                table.rename_column('id', 'cat_id')
 
                             # Add detector pixel coordinates from catalog sky coordinates.
                             ra_col = "ra" if "ra" in table.colnames else ("RA" if "RA" in table.colnames else None)
@@ -380,6 +390,26 @@ def fetch_catalog_for_image_fov(path2savetable,
                             if ra_col is None or dec_col is None:
                                 log.warning("Gaia tables does not include ra/dec columns; returning sky-only tables.")
                                 return table
+
+                            if ra_col and dec_col:
+                                # Get WCS footprint corners
+                                corners_x = [0, nx - 1, nx - 1, 0]
+                                corners_y = [0, 0, ny - 1, ny - 1]
+                                corners_ra, corners_dec = cel_wcs.all_pix2world(corners_x, corners_y, 0)
+
+                                # Get RA/DEC bounds
+                                ra_min, ra_max = np.min(corners_ra), np.max(corners_ra)
+                                dec_min, dec_max = np.min(corners_dec), np.max(corners_dec)
+
+                                # Filter catalog to only sources within bounds
+                                within_bounds = (
+                                        (table[ra_col] >= ra_min) & (table[ra_col] <= ra_max) &
+                                        (table[dec_col] >= dec_min) & (table[dec_col] <= dec_max )
+                                )
+                                ntable = len(table)
+                                table = table[within_bounds]
+
+                                log.info(f"Filtered catalog from {ntable} to {len(table)} sources within WCS footprint")
 
                             ra_arr = np.asarray(np.ma.filled(np.ma.asarray(table[ra_col]), np.nan), dtype=float)
                             dec_arr = np.asarray(np.ma.filled(np.ma.asarray(table[dec_col]), np.nan), dtype=float)
