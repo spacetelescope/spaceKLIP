@@ -753,10 +753,6 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         # Calculate how close to a square the region is, strictly bounded between 0 and 1
         boxy_factor = min(dx, dy) / max(1e-5, max(dx, dy))
 
-        # Define independent spatial scales for a rectangular frame
-        sigma_nx = float(nx) / 5.0
-        sigma_ny = float(ny) / 5.0
-
         # Extract centroid/peak coordinates (prop.centroid is ordered as (y, x))
         if np.any(region_nans):
             ry, rx = prop.centroid
