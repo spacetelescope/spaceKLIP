@@ -735,6 +735,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         dx = float(maxc - minc)
         dy = float(maxr - minr)
 
+        #################### Calculate Area Factor ####################
         # Target linear dimension (diameter) based on your 1.5x FWHM radius profile
         target_dim = 3.0 * float(fwhm_temp)
         # Added a wider, gentler standard deviation slope to prevent too quick decay to 0
@@ -748,6 +749,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         # Combine them into a joint spatial scale factor (peaks at 1.0)
         area_factor = max(1e-5, np.exp(-0.5 * (gaussian_dx + gaussian_dy)))
 
+        #################### Calculate Boxy Factor ####################
         # Calculate how close to a square the region is, strictly bounded between 0 and 1
         boxy_factor = min(dx, dy) / max(1e-5, max(dx, dy))
 
@@ -763,12 +765,19 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
             datamasked[~clean_star_mask] = 0
             ry, rx = np.unravel_index(np.argmax(datamasked), datamasked.shape)
 
-        # Evaluate independent 2D Gaussian decay for rectangular geometry
-        dx_norm = ((rx - default_cx) / sigma_nx) ** 2
-        dy_norm = ((ry - default_cy) / sigma_ny) ** 2
+        #################### Calculate Distance Factor ####################
+        # Simple parametrization: what distance and target value do you want?
+        pixels_to_dropoff = max(nx/2,ny//2)  # 5 pixels radial = target value
+        target_value = 1e-2  # target value at that distance
 
-        # Distance factor: 1.0 at center, smoothly dropping toward 0.0 at the edges
-        distance_factor = np.exp(-0.5 * (dx_norm + dy_norm))
+        # Calculate decay_rate for radial Gaussian
+        decay_rate = -np.log(target_value) / (pixels_to_dropoff ** 2)
+
+        # Radial distance squared
+        r_squared = (rx - default_cx) ** 2 + (ry - default_cy) ** 2
+
+        # Distance factor: 1.0 at center, target_value at pixels_to_dropoff
+        distance_factor = np.exp(-decay_rate * r_squared)
 
         # Total Score now uses the dynamically calculated parameters
         total_score = solidity_score * brightness_factor * area_factor * boxy_factor * distance_factor
