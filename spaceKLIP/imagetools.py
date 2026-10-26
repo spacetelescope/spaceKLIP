@@ -4516,7 +4516,7 @@ class ImageTools():
 
                 # Recenter frames. Use different algorithms based on data type.
                 head, tail = os.path.split(fitsfile)
-                incat_path_temp = os.path.join(output_dir, tail.replace('.fits',cat_ext)) if cat_ext is not None else None
+                byproduct_catalogs_path = os.path.join(output_dir, tail.replace('.fits',cat_ext)) if cat_ext is not None else None
                 log.info('  --> Extract Tiles from: ' + tail)
                 if np.sum(np.isnan(data)) != 0:
                     raise UserWarning('Please replace nan pixels before attempting to recenter frames')
@@ -4526,25 +4526,36 @@ class ImageTools():
                         region_name = f'{tail.replace(".fits",".reg")}'
                         region_path = os.path.join(output_dir, region_name)
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
-                        if path2catalog is not None:
-                            log.info(f"Selecting sources from provided catalog: {path2catalog}")
-                            incat_path_temp = region_path.replace(".reg", "_cat.csv")
-                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, npix=npix, fwhm=fwhm, threshold=threshold, use_user_catalog=True, path2catalog=path2catalog, table_kwargs=table_kwargs)
-                        else:
-                            if incat_path_temp is None and use_gaia:
+                        catalogs_to_combine = []
+                        if byproduct_catalogs_path is None:
+                            if path2catalog is not None:
+                                log.info(f"Selecting sources from provided catalog: {path2catalog}")
+                                user_cat_path_temp = region_path.replace(".reg", "_cat.csv")
+                                user_cat_results = fetch_catalog_for_image_fov(user_cat_path_temp, data, head_sci, npix=npix, fwhm=fwhm, threshold=threshold, use_user_catalog=True, path2catalog=path2catalog, table_kwargs=table_kwargs)
+                                catalogs_to_combine.append(user_cat_results)
+                            if use_gaia:
+                                # ToDO: Gaia metod is not working properly, need to fix it. For now it's better to skip it.
                                 log.info("Downloading catalog from GAIA")
-                                incat_path_temp = region_path.replace(".reg", "_gaia.csv")
-                                result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, use_gaia=True, npix=npix, fwhm=fwhm, threshold=threshold, use_allwise=use_allwise)
-                            elif incat_path_temp is None and use_simbad:
+                                gaia_path_temp = region_path.replace(".reg", "_gaia.csv")
+                                gaia_results = fetch_catalog_for_image_fov(gaia_path_temp, data, head_sci, use_gaia=True, npix=npix, fwhm=fwhm, threshold=threshold, use_allwise=use_allwise)
+                                catalogs_to_combine.append(gaia_results)
+                            if use_simbad:
                                 log.info("Downloading catalog from SIMBAD")
-                                incat_path_temp = region_path.replace(".reg", "_simbad.csv")
-                                result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, use_simbad=True, npix=npix, fwhm=fwhm, threshold=threshold)
-                            elif incat_path_temp is not None:
-                                log.info(f"Loading input catalog: {incat_path_temp}")
-                                result = Table.read(incat_path_temp)
+                                simbad_path_temp = region_path.replace(".reg", "_simbad.csv")
+                                simbad_results = fetch_catalog_for_image_fov(simbad_path_temp, data, head_sci, use_simbad=True, npix=npix, fwhm=fwhm, threshold=threshold)
+                                catalogs_to_combine.append(simbad_results)
+                            if catalogs_to_combine:
+                                if len(catalogs_to_combine) > 1:
+                                    result = vstack(catalogs_to_combine, metadata_conflicts='silent')
+                                else:
+                                    result = catalogs_to_combine[0]
                             else:
-                                log.info(f"No catalog provide. incat_path = {incat_path_temp} and use_gaia = {use_gaia}")
+                                log.info(f"No use_* methods for catalog generation provided, or user path2catalog specified. Using DAOStarFinder only.")
                                 result = Table()
+                        else:
+                            log.info(f"Loading catalog from previous processing: {byproduct_catalogs_path}. Ignoring other detection methods.")
+                            result = Table.read(byproduct_catalogs_path)
+                            use_dao = False
 
                         dao = DAO(threshold=threshold,
                                     fwhm=fwhm,
