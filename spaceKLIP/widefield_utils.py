@@ -1418,7 +1418,7 @@ class DAO():
         star_score = np.log1p(catalog['flux']) - roundness_penalty - sharpness_penalty
 
         # 2. Build KDTree for fast spatial queries
-        coords = np.vstack((catalog['x'], catalog['y'])).T
+        coords = np.vstack((catalog['x'].data, catalog['y'].data)).T
         tree = KDTree(coords)
 
         # 3. Sort indices by star_score from best to worst
