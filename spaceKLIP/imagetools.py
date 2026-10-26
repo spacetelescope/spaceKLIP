@@ -4351,6 +4351,11 @@ class ImageTools():
         fwhm : float, optional
             Full-width at half-maximum (FWHM) of the PSF in pixels, used by
             DAOStarFinder for source detection. Default is 2 pixels.
+        path2catalog : str, optional
+            Path to an external catalog file (e.g., CSV) containing known sources
+            in the image FOV. The catalog must contain 'x' and 'y' columns for pixel coordinates.
+            If provided, the catalog is loaded and merged with detections.
+            Default is None.
         cat_ext : str, optional
             File extension for input catalog files (e.g., '.cat', '.csv').
             If provided, catalogs with the naming pattern ``fitsfile.replace('.fits', cat_ext)``
@@ -4374,6 +4379,9 @@ class ImageTools():
         roundness_range : tuple of (float, float), optional
             Acceptable range [min, max] of DAOStarFinder roundness values.
             Detections outside this range are rejected. Default is (-1, 1).
+        r :  float, optional
+            The maximum distance to group sources.
+            The default is None (no grouping).
         ds9_kwargs : dict, optional
             Extra configuration for DS9 region file output. Available keys:
             - ``'region_shape'`` : {'circle', 'square'}
@@ -4391,6 +4399,16 @@ class ImageTools():
             - ``'save_inner_catalogs'`` : bool
                 If True, also write per-threshold CSV catalogs and DS9 region files.
                 The combined products are always written. Default is False.
+
+        table_kwargs : dict, optional
+            Extra configuration for output table formatting.
+            Example of available keys:
+            - ``'table_format'`` : str
+                Output table format for CSV files. Default is 'csv'.
+            - ``'table_delimiter'`` : str
+                Delimiter for CSV files. Default is ','.
+            - ``'fill_values'`` : list of toples
+                Dictionary of fill values for missing data in the output table.
 
         subdir : str, optional
             Name of the sub-directory (inside ``database.output_dir``) where
