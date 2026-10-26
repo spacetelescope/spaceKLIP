@@ -281,7 +281,7 @@ def fetch_catalog_for_image_fov(path2savetable,
                                             #TODO: MOCADB timing out. sqlalchemy.exc.OperationalError: (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on '104.248.106.21' (timed out)")
                                             # if use_mocadb:
                                             #     simbad_table = query_mocadb(simbad_table)
-                                            simbad_table.write(path2table, format="csv", overwrite=True)
+                                            simbad_table.write(path2savetable, format="csv", overwrite=True)
 
                             # def query_mocadb(tables):
                             #     """
@@ -361,13 +361,15 @@ def fetch_catalog_for_image_fov(path2savetable,
                             fov_y_deg = float(ny * pix_scales) / 3600
                             radius_deg = 0.5 * float(np.hypot(fov_x_deg, fov_y_deg))
 
-                            if use_gaia or use_allwise:
-                                query_gaia(path2table, center_ra_deg, center_dec_deg, radius_deg, use_allwise=use_allwise)
-                            elif use_simbad:
-                                query_simbad(path2table, center_ra_deg, center_dec_deg, radius_deg, use_mocadb=use_mocadb)
-                            else:
-                                log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
-                                return Table()
+                            if not use_user_catalog:
+                                path2catalog = path2savetable
+                                if use_gaia or use_allwise:
+                                    query_gaia(path2savetable, center_ra_deg, center_dec_deg, radius_deg, use_allwise=use_allwise)
+                                elif use_simbad:
+                                    query_simbad(path2savetable, center_ra_deg, center_dec_deg, radius_deg)#, use_mocadb=use_mocadb)
+                                else:
+                                    log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
+                                    return Table()
 
                             # fetch tabes...
                             table = Table.read(path2table)
