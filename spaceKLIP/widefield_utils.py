@@ -419,6 +419,10 @@ def fetch_catalog_for_image_fov(path2savetable,
                             table['method'] = np.asarray(['catalog'] * len(table), dtype=str)
                             table['roundness'] = 0.0
                             table['sharpness'] = 0.5
+                            table['flux'] = 0.0
+                            table['coresat'] = 0.0
+                            table['eccsat'] = 0.0
+                            table['solsat'] = 0.0
 
                             mask = (
                                     (table["x"] >= npix[0] + border)
@@ -1211,10 +1215,12 @@ class DAO():
         tbl = dao(data, mask=mask)
         if tbl is None or len(tbl) == 0:
             return None
-        # out = []
-        tbl['coresat'] = 0
+
+        tbl['flux'] = 0.0
+        tbl['coresat'] = 0.0
         tbl['eccsat'] = 0.0
-        tbl['solsat'] = 1.0
+        tbl['solsat'] = 0.0
+
         tbl['method'] = 'dao'
         tbl.rename_column('xcentroid', 'x')
         tbl.rename_column('ycentroid', 'y')
@@ -1244,8 +1250,7 @@ class DAO():
         is_coresat = tbl["coresat"] > 0
         final_mask = np.where(is_coresat, mask1, mask1)
 
-        tbl_selected = tbl[final_mask]['x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness']
-        tbl_selected['flux'] = 0.0
+        tbl_selected = tbl[final_mask]['x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness', 'flux']
         for _c in tbl_selected:
             _cx, _cy = float(_c["x"]), float(_c["y"])
             _xlo = int(_cx) - 31
