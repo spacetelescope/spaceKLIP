@@ -4534,7 +4534,7 @@ class ImageTools():
                                 user_cat_results = fetch_catalog_for_image_fov(user_cat_path_temp, data, head_sci, npix=npix, fwhm=fwhm, threshold=threshold, use_user_catalog=True, path2catalog=path2catalog, table_kwargs=table_kwargs)
                                 catalogs_to_combine.append(user_cat_results)
                             if use_gaia:
-                                # ToDO: Gaia metod is not working properly, need to fix it. For now it's better to skip it.
+                                # ToDO: Gaia method is not working properly, need to fix it. For now it's better to skip it.
                                 log.info("Downloading catalog from GAIA")
                                 gaia_path_temp = region_path.replace(".reg", "_gaia.csv")
                                 gaia_results = fetch_catalog_for_image_fov(gaia_path_temp, data, head_sci, use_gaia=True, npix=npix, fwhm=fwhm, threshold=threshold, use_allwise=use_allwise)
