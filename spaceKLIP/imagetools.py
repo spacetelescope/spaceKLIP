@@ -4357,10 +4357,9 @@ class ImageTools():
             If provided, the catalog is loaded and merged with detections.
             Default is None.
         cat_ext : str, optional
-            File extension for input catalog files (e.g., '.cat', '.csv').
-            If provided, catalogs with the naming pattern ``fitsfile.replace('.fits', cat_ext)``
-            are loaded and merged with detections. The catalog must contain 'x' and 'y'
-            columns for pixel coordinates. Default is None (no input catalog).
+            If not None, load existing catalogs with the naming pattern ``fitsfile.replace('.fits', cat_ext)``.
+            and skip detection or merging with external catalogs. The catalog must contain 'x' and 'y'
+            columns for pixel coordinates. Default is None (no existing byproduct catalogs).
         use_dao : bool, optional
             If True, use DAOStarFinder to detect point sources. Default is True.
             Set to False to use only external catalogs (Gaia/SIMBAD).
