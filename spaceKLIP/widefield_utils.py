@@ -114,6 +114,11 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 Defaults to False.
                             use_simbad : bool, optional
                                Enable Simbad query. Default is False.
+                            use_user_catalog: bool, optional
+                                If True, use a user-provided catalog.
+                                Defaults to False.
+                            path2catalog : str, optional
+                                Path to the user-provided catalog CSV file. Required if ``use_user_catalog`` is True.
                             row_limit : int, optional
                                 Max number of returned rows. Use ``-1`` for no row limit.
                             verbose : bool, optional
@@ -125,8 +130,19 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 number of pixels will be padded on each side. If list of four int,
                                 a different number of pixels can be padded on the [left, right,
                                 bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
-                            use_mocadb : bool, optional
-                                If True, queries the MOCADB database for a MOC of the image footprint.
+                            fwhm : float, optional
+                                FWHM of the PSF in pixels. Default is 2.5.
+                            threshold : float, optional
+                                Detection threshold in units of the background RMS. Default is 2.0.
+                            table_kwargs : dict, optional
+                                Extra configuration for output table formatting.
+                                Example of available keys:
+                                - ``'table_format'`` : str
+                                    Output table format for CSV files. Default is 'csv'.
+                                - ``'table_delimiter'`` : str
+                                    Delimiter for CSV files. Default is ','.
+                                - ``'fill_values'`` : list of toples
+                                    Dictionary of fill values for missing data in the output table.
 
                             Returns
                             -------
@@ -1405,11 +1421,11 @@ class DAO():
 
     def _group_catalog(self, catalog, r=1, ideal_roundness=0.0, ideal_sharpness=0.5):
         """
-        Groups catalog sources within a box_size and selects the best stellar representative.
+        Groups catalog sources within a r and selects the best stellar representative.
 
         Parameters:
         catalog (astropy.tables.Table): Must contain columns 'x', 'y', 'flux', 'roundness', 'sharpness'
-        box_size (float): The maximum distance to group sources.
+        r (float): The maximum distance to group sources.
         """
         # 1. Calculate a custom "star score" (Higher is better)
         # Using np.log1p for flux to balance its weight against shape metrics
@@ -1465,6 +1481,13 @@ class DAO():
             number of pixels will be padded on each side. If list of four int,
             a different number of pixels can be padded on the [left, right,
             bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
+        r:  float, optional
+            The maximum distance to group sources.
+            The default is 1 pixel.
+        flux_cut: float, optional
+            Minimum flux threshold for candidates to be kept. Candidates with
+            flux below this value will be discarded.
+            The default is 0.
 
         Returns
         -------
@@ -1681,6 +1704,9 @@ class DAO():
             Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
         dao : bool, optional
             Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
+        r:  float, optional
+            The maximum distance to group sources.
+            The default is 1 pixel.
 
         Returns
         -------
