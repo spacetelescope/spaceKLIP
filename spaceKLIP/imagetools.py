@@ -4303,13 +4303,16 @@ class ImageTools():
                                      threshold=3,
                                      fwhm=2,
                                      cat_ext=None,
+                                     path2catalog=None,
                                      use_dao=True,
                                      use_gaia=False,
                                      use_allwise=False,
                                      use_simbad=True,
+                                     r=None,
                                      sharpness_range=(0.3, 0.85),
                                      roundness_range=(-1, 1),
-                                     kwargs={},
+                                     ds9_kwargs={},
+                                     table_kwargs={},
                                      subdir='pretiles'):
         """
         Detect candidate point sources and prepare catalogs and DS9 regions for tile extraction.
@@ -4371,14 +4374,15 @@ class ImageTools():
         roundness_range : tuple of (float, float), optional
             Acceptable range [min, max] of DAOStarFinder roundness values.
             Detections outside this range are rejected. Default is (-1, 1).
-        kwargs : dict, optional
+        ds9_kwargs : dict, optional
             Extra configuration for DS9 region file output. Available keys:
-
             - ``'region_shape'`` : {'circle', 'square'}
                 Neighborhood geometry used for region visualization. Default is 'square'.
             - ``'circle_radius'`` : float
                 Radius (pixels) for circular regions. If not provided, defaults to
                 fov_pix // 2.
+
+            The following keys are not implemented yet but are reserved for future use:
             - ``'region_center'`` : {'peak', 'centroid'}
                 Coordinate convention for region centers and de-duplication.
                 Default is 'peak'.
@@ -4468,8 +4472,10 @@ class ImageTools():
         """
 
         #reading kwargs for ds9 region file
-        region_shape = kwargs.get('region_shape', 'square')
-        circle_radius = kwargs.get('circle_radius', fov_pix//2)
+        region_shape = ds9_kwargs.get('region_shape', 'square')
+        circle_radius = ds9_kwargs.get('circle_radius', fov_pix//2)
+        if r is None:
+            r = circle_radius
 
         # Set output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
@@ -4503,20 +4509,25 @@ class ImageTools():
                         region_name = f'{tail.replace(".fits",".reg")}'
                         region_path = os.path.join(output_dir, region_name)
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
-                        if incat_path_temp is None and use_gaia:
-                            log.info("Downloading catalog from GAIA")
-                            incat_path_temp = region_path.replace(".reg", "_gaia.csv")
-                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, use_gaia=True, npix=npix, fwhm=fwhm, threshold=threshold, use_allwise=use_allwise)
-                        elif incat_path_temp is None and use_simbad:
-                            log.info("Downloading catalog from SIMBAD")
-                            incat_path_temp = region_path.replace(".reg", "_simbad.csv")
-                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, use_simbad=True, npix=npix, fwhm=fwhm, threshold=threshold)
-                        elif incat_path_temp is not None:
-                            log.info(f"Loading input catalog: {incat_path_temp}")
-                            result = Table.read(incat_path_temp)
+                        if path2catalog is not None:
+                            log.info(f"Selecting sources from provided catalog: {path2catalog}")
+                            incat_path_temp = region_path.replace(".reg", "_cat.csv")
+                            result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, npix=npix, fwhm=fwhm, threshold=threshold, use_user_catalog=True, path2catalog=path2catalog, table_kwargs=table_kwargs)
                         else:
-                            log.info(f"No catalog provide. incat_path = {incat_path_temp} and use_gaia = {use_gaia}")
-                            result = Table()
+                            if incat_path_temp is None and use_gaia:
+                                log.info("Downloading catalog from GAIA")
+                                incat_path_temp = region_path.replace(".reg", "_gaia.csv")
+                                result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, use_gaia=True, npix=npix, fwhm=fwhm, threshold=threshold, use_allwise=use_allwise)
+                            elif incat_path_temp is None and use_simbad:
+                                log.info("Downloading catalog from SIMBAD")
+                                incat_path_temp = region_path.replace(".reg", "_simbad.csv")
+                                result = fetch_catalog_for_image_fov(incat_path_temp, data, head_sci, use_simbad=True, npix=npix, fwhm=fwhm, threshold=threshold)
+                            elif incat_path_temp is not None:
+                                log.info(f"Loading input catalog: {incat_path_temp}")
+                                result = Table.read(incat_path_temp)
+                            else:
+                                log.info(f"No catalog provide. incat_path = {incat_path_temp} and use_gaia = {use_gaia}")
+                                result = Table()
 
                         dao = DAO(threshold=threshold,
                                     fwhm=fwhm,
@@ -4528,7 +4539,8 @@ class ImageTools():
 
                         objects_tbl_selected = dao.dao_source_extractor(data=data[0],
                                                                         nanmask=nanmask,
-                                                                        use_dao=use_dao)
+                                                                        use_dao=use_dao,
+                                                                        r=r)
                         objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
 
                         out = write_ds9_regions_from_sep_objects(objects_tbl_selected,
