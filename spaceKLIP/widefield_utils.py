@@ -91,6 +91,7 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 use_simbad=False,
                                 use_user_catalog=False,
                                 path2catalog=None,
+                                all_stellar_otypes=None,
                                 border=3,
                                 npix=0,
                                 fwhm: float = 2.5,
@@ -119,6 +120,9 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 Defaults to False.
                             path2catalog : str, optional
                                 Path to the user-provided catalog CSV file. Required if ``use_user_catalog`` is True.
+                            all_stellar_otypes: list, optional
+                                List of stellar object types to filter the Simbad results.
+                                If None, a default list of stellar types will be used.
                             row_limit : int, optional
                                 Max number of returned rows. Use ``-1`` for no row limit.
                             verbose : bool, optional
@@ -221,6 +225,7 @@ def fetch_catalog_for_image_fov(path2savetable,
                                             center_ra_deg,
                                             center_dec_deg,
                                             radius_deg,
+                                            all_stellar_otypes=None
                                             ):
                                             """
                                             Helper to fetch Simbad  source data.
@@ -235,6 +240,9 @@ def fetch_catalog_for_image_fov(path2savetable,
                                                 Declination of the center of the search region in degrees.
                                             radius_deg : float
                                                 Radius of the search region in degrees.
+                                            all_stellar_otypes: list, optional
+                                                List of stellar object types to filter the Simbad results.
+                                                If None, a default list of stellar types will be used.
 
                                             Returns
                                             -------
@@ -273,19 +281,20 @@ def fetch_catalog_for_image_fov(path2savetable,
 
                                             # has_K = ~np.isnan(simbad_table['FLUX_K'])
                                             # simbad_table = simbad_table[has_K]
-                                            all_stellar_otypes = [
-                                                '*', 'MS*', 'sg*', 'gs*', 's*r', 's*y', 's*b', 'PM*', 'HV*',
-                                                'YSO', 'Pr*', 'TTau*', 'HerbigAeBe', 'OrionV*', 'BrownD*',
-                                                'V*', 'IrV*', 'Pu*', 'bCepV*', 'cC*', 'aCeV*', 'delSctV*',
-                                                'gamDorV*', 'RRlyrV*', 'PVTelV*', 'RVTauV*', 'alphaCygV*', 'LPV*',
-                                                'MiraV*', 'SRV*', 'rcbV*', 'RotV*', 'alpha2CVnV*', 'SXAriV*',
-                                                'BYDraV*', 'FKComV*', 'ellVar', 'EclV*', 'AlgolV*', 'betaLyrV*',
-                                                'WUMaV*', 'Er*', 'Fl*', 'FUOriV*', 'Em*', 'Be*', 'Ae*', 'WR*',
-                                                'Pe*', 'HB*', 'HotSubd*', 'C*', 'S*', 'ch*', 'Am*', 'Ap*', 'Ba*',
-                                                '**', 'SB*', 'EB*', 'PMB*', 'VB*', 'AstromB*', 'WD*', 'N*', 'SN*',
-                                                'Psr', 'XB', 'LMXB', 'HMXB', 'out', 'EmO', 'blu','UV','X','NearIR',
-                                                'MidIR','FarIR','mmRad','Low-Mass*', 'YSO_Candidate', 'YSO', 'Star'
-                                            ]
+                                            if all_stellar_otypes is None:
+                                                all_stellar_otypes = [
+                                                    '*', 'MS*', 'sg*', 'gs*', 's*r', 's*y', 's*b', 'PM*', 'HV*',
+                                                    'YSO', 'Pr*', 'TTau*', 'HerbigAeBe', 'OrionV*', 'BrownD*',
+                                                    'V*', 'IrV*', 'Pu*', 'bCepV*', 'cC*', 'aCeV*', 'delSctV*',
+                                                    'gamDorV*', 'RRlyrV*', 'PVTelV*', 'RVTauV*', 'alphaCygV*', 'LPV*',
+                                                    'MiraV*', 'SRV*', 'rcbV*', 'RotV*', 'alpha2CVnV*', 'SXAriV*',
+                                                    'BYDraV*', 'FKComV*', 'ellVar', 'EclV*', 'AlgolV*', 'betaLyrV*',
+                                                    'WUMaV*', 'Er*', 'Fl*', 'FUOriV*', 'Em*', 'Be*', 'Ae*', 'WR*',
+                                                    'Pe*', 'HB*', 'HotSubd*', 'C*', 'S*', 'ch*', 'Am*', 'Ap*', 'Ba*',
+                                                    '**', 'SB*', 'EB*', 'PMB*', 'VB*', 'AstromB*', 'WD*', 'N*', 'SN*',
+                                                    'Psr', 'XB', 'LMXB', 'HMXB', 'out', 'EmO', 'blu','UV','X','NearIR',
+                                                    'MidIR','FarIR','mmRad','Low-Mass*', 'YSO_Candidate', 'YSO', 'Star'
+                                                ]
                                             # Keep only row entries that match the official SIMBAD star taxonomy
                                             simbad_table = simbad_table[np.isin(simbad_table['OTYPE'],all_stellar_otypes)]
 
@@ -383,7 +392,7 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 if use_gaia or use_allwise:
                                     query_gaia(path2savetable, center_ra_deg, center_dec_deg, radius_deg, use_allwise=use_allwise)
                                 elif use_simbad:
-                                    query_simbad(path2savetable, center_ra_deg, center_dec_deg, radius_deg)#, use_mocadb=use_mocadb)
+                                    query_simbad(path2savetable, center_ra_deg, center_dec_deg, radius_deg, all_stellar_otypes=all_stellar_otypes)#, use_mocadb=use_mocadb)
                                 else:
                                     log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
                                     return Table()

@@ -4308,6 +4308,7 @@ class ImageTools():
                                      use_gaia=False,
                                      use_allwise=False,
                                      use_simbad=True,
+                                     all_stellar_otypes=None,
                                      r=None,
                                      sharpness_range=(0.3, 0.85),
                                      roundness_range=(-1, 1),
@@ -4372,6 +4373,9 @@ class ImageTools():
         use_simbad : bool, optional
             If True, query SIMBAD for sources in the image FOV and include them in
             the output catalog and DS9 region file. Default is True.
+        all_stellar_otypes : list of str, optional
+            List of SIMBAD object types to consider as stellar sources. If None,
+            a default list of stellar types is used. Default is None.
         sharpness_range : tuple of (float, float), optional
             Acceptable range [min, max] of DAOStarFinder sharpness values.
             Detections outside this range are rejected. Default is (0.3, 0.85).
@@ -4542,7 +4546,7 @@ class ImageTools():
                             if use_simbad:
                                 log.info("Downloading catalog from SIMBAD")
                                 simbad_path_temp = region_path.replace(".reg", "_simbad.csv")
-                                simbad_results = fetch_catalog_for_image_fov(simbad_path_temp, data, head_sci, use_simbad=True, npix=npix, fwhm=fwhm, threshold=threshold)
+                                simbad_results = fetch_catalog_for_image_fov(simbad_path_temp, data, head_sci, use_simbad=True, npix=npix, fwhm=fwhm, threshold=threshold, all_stellar_otypes=all_stellar_otypes)
                                 catalogs_to_combine.append(simbad_results)
                             if catalogs_to_combine:
                                 if len(catalogs_to_combine) > 1:
