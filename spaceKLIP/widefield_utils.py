@@ -82,23 +82,25 @@ def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, par
     image[distance <= effective_radius] = c
     return image
 
-def fetch_catalog_for_image_fov(path2table,
+def fetch_catalog_for_image_fov(path2savetable,
                                 image: np.ndarray,
                                 header,
                                 use_gaia=False,
                                 use_allwise=False,
                                 use_simbad=False,
+                                use_user_catalog=False,
+                                path2catalog=None,
                                 border=3,
                                 npix=0,
-                                use_mocadb: bool = False,
                                 fwhm: float = 2.5,
                                 threshold: float = 2.0,
+                                table_kwargs={},
                                 ):
                             """Estimate image FOV from WCS and query Gaia over that footprint.
 
                             Parameters
                             ----------
-                            path2table : str, optional
+                            path2savetable : str, optional
                                 Path to save the tables query result CSV file.
                             image : 2D-array
                                 Image data used only for its shape.
@@ -131,7 +133,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 New Astropy tables with selected columns plus WCS-derived ``x`` and ``y``.
 
                             """
-                            def query_gaia(path2table,
+                            def query_gaia(path2savetable,
                                            center_ra_deg,
                                            center_dec_deg,
                                            radius_deg,
@@ -143,7 +145,7 @@ def fetch_catalog_for_image_fov(path2table,
 
                                 Parameters
                                 ----------
-                                path2table : str
+                                path2savetable : str
                                     Path to save the tables query result CSV file.
                                 center_ra_deg : float
                                     Right ascension of the center of the search region in degrees.
@@ -195,21 +197,20 @@ def fetch_catalog_for_image_fov(path2table,
                                     dump_to_file=True,
                                     verbose=False,
                                     output_format='csv',
-                                    output_file=path2table
+                                    output_file=path2savetable
                                 )
 
-                            def query_simbad(path2table,
+                            def query_simbad(path2savetable,
                                             center_ra_deg,
                                             center_dec_deg,
                                             radius_deg,
-                                            use_mocadb=False
                                             ):
                                             """
                                             Helper to fetch Simbad  source data.
 
                                             Parameters
                                             ----------
-                                            path2table : str
+                                            path2savetable : str
                                                 Path to save the tables query result CSV file.
                                             center_ra_deg : float
                                                 Right ascension of the center of the search region in degrees.
@@ -217,9 +218,6 @@ def fetch_catalog_for_image_fov(path2table,
                                                 Declination of the center of the search region in degrees.
                                             radius_deg : float
                                                 Radius of the search region in degrees.
-                                            use_mocadb : bool, optional
-                                                If True, queries and filters for objects with MOCADB measurements.
-                                                Defaults to False.
 
                                             Returns
                                             -------
@@ -396,9 +394,10 @@ def fetch_catalog_for_image_fov(path2table,
                                     & (table["y"] >= npix[2] + border)
                                     & (table["y"] <= ny - (npix[3] + border))
                             )
+                            ntable_selected = len(table)
                             table_selected = table[mask]
-                            table_selected['flux'] = 0.0
-                            table_selected['coresat'] = 0.0
+                            log.info(f"Filtered catalog from {ntable_selected} to {len(table_selected)} sources within XY boundaries")
+
                             for _c in table_selected:
                                 _cx, _cy = float(_c["x"]), float(_c["y"])
                                 _xlo = int(_cx) - 31
@@ -416,7 +415,7 @@ def fetch_catalog_for_image_fov(path2table,
                                 phot_table = aperture_photometry(_patch, apertures, mask=nansat_mask, method='exact')
                                 _c['flux'] = phot_table['aperture_sum'][0]
 
-                            table_selected.write(path2table, format="csv", overwrite=True)
+                            table_selected.write(path2savetable, format="csv", overwrite=True)
                             return table_selected
 
 
@@ -1344,7 +1343,7 @@ class DAO():
         wing_spread = float(np.percentile(d, 95))
         return float(np.clip(max(float(base_radius), wing_spread + 3.0), float(base_radius), 40.0))
 
-    def _group_catalog(self, catalog, ideal_roundness=0.0, ideal_sharpness=0.5):
+    def _group_catalog(self, catalog, r=1, ideal_roundness=0.0, ideal_sharpness=0.5):
         """
         Groups catalog sources within a box_size and selects the best stellar representative.
 
@@ -1379,19 +1378,19 @@ class DAO():
             keep_indices.append(idx)
 
             # Find all neighbors within the box_size
-            neighbors = tree.query_ball_point(coords[idx], r=self.fov / 2.0, p=np.inf)
+            neighbors = tree.query_ball_point(coords[idx], r=r, p=np.inf)
             # Mark the representative and all its neighbors as visited
             visited[neighbors] = True
 
 
         # 5. Return the filtered Astropy Table (sorted by original order)
         keep_indices = sorted(keep_indices)
-        log.info(f"Using {np.sum([i['method']=='catalog' for i in catalog[keep_indices]])} catalog seeds + {np.sum([i['method']!='catalog' for i in catalog[keep_indices]])} DAO detections after selections.")
+        log.info(f"Keeping {np.sum([i['method']=='catalog' for i in catalog[keep_indices]])} catalog seeds + {np.sum([i['method']!='catalog' for i in catalog[keep_indices]])} DAO detections after grouping for sources within {r} pixels.")
         catalog=catalog[keep_indices]
         catalog['id']=[i for i in range(len(catalog))]
         return catalog
 
-    def _clean_catalog(self,candidates, data_arr):
+    def _clean_catalog(self,candidates, data_arr, r=1, flux_cut=0):
         """Group nearby candidates and select one representative per star.
 
         DAOStarFinder often returns several detections for a single bright or
@@ -1472,11 +1471,17 @@ class DAO():
             _c['flux'] = phot_table['aperture_sum'][0]
             _prov_sat.append(float(_sr))
             _rmax.append(float(max(_patch.shape)))
+
+            if flux_cut is not None:
+                if _c['flux'] <= flux_cut:
+                    _keep_mask.append(False)
+                    continue
+
             _keep_mask.append(True)
 
         candidates = candidates[_keep_mask]
         candidates['id']=[i for i in range(len(candidates))]
-        candidates = self._group_catalog(candidates)
+        candidates = self._group_catalog(candidates, r=r)
         return candidates
 
     def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None,fit_radius=71):
@@ -1584,7 +1589,8 @@ class DAO():
         data,
         nanmask,
         use_dao=True,
-        dao=True
+        dao=True,
+        r=1
     ):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
 
@@ -1661,7 +1667,7 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        selected_candidates = self._clean_catalog(all_candidates, data_subtracted)
+        selected_candidates = self._clean_catalog(all_candidates, data_subtracted, r=r)
         # selected_candidates = all_candidates
 
         return selected_candidates
