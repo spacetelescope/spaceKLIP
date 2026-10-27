@@ -584,11 +584,11 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
             # Print detailed stats to console including photometry metrics used in decision
             log.debug(
                 f"Label {label_id:2d}: "
-                f"Solidity={solidity:.2f} | "
+                f"Solidity Factor={solidity:.2f} | "
                 f"Area Factor={area_factor:.2f} | "
                 f"Boxy Factor={boxy_factor:.2f} | "
                 f"Distance Factor={distance_factor:.2f} | "
-                f"Brightness={brightness_factor:.2f} | "
+                f"Brightness Factor={brightness_factor:.2f} | "
                 f"Score={score:.2f} | "
                 f"Centroid=({prop.centroid[1]:.1f}, {prop.centroid[0]:.1f}) {status}"
             )
@@ -712,6 +712,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
     best_prop = None
     best_score = -float('inf')
     yy, xx = np.indices(nandata.shape)
+    brightness_factor_list=[]
 
     for prop in props:
         single_cluster_mask = (labeled_mask == prop.label)
@@ -787,7 +788,6 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         # Target linear dimension (diameter) based on your 1.5x FWHM radius profile
         target_dim = 3.0 * float(fwhm_temp)
         # Added a wider, gentler standard deviation slope to prevent too quick decay to 0
-        # dim_sigma = target_dim * 1.2
         dim_sigma = target_dim / 1.2
 
         # Evaluate independent Gaussian profiles for both X and Y dimensions
@@ -811,7 +811,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
 
         #################### Calculate Distance Factor ####################
         # Simple parametrization: what distance and target value do you want?
-        pixels_to_dropoff = max(nx/2,ny//2)  # 5 pixels radial = target value
+        pixels_to_dropoff = max(nx/2,ny//2)
         target_value = 1e-2  # target value at that distance
 
         # Calculate decay_rate for radial Gaussian
@@ -823,15 +823,19 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         # Distance factor: 1.0 at center, target_value at pixels_to_dropoff
         distance_factor = np.exp(-decay_rate * r_squared)
 
-        # Total Score now uses the dynamically calculated parameters
-        total_score = solidity_score * brightness_factor * area_factor * boxy_factor * distance_factor
-
         prop.custom_solidity = solidity_score
         prop.custom_eccentricity = eccentricity_score
-        prop.brightness_factor = brightness_factor
         prop.area_factor = area_factor
         prop.boxy_factor = boxy_factor
         prop.distance_factor = distance_factor
+        brightness_factor_list.append(brightness_factor)
+
+    brightness_factor_list = np.array(brightness_factor_list)
+    brightness_factor_list/= np.max(brightness_factor_list)  # Normalize brightness factors to [0, 1]
+    for i, prop in enumerate(props):
+        # Total Score now uses the dynamically calculated parameters
+        prop.brightness_factor = brightness_factor_list[i]  # Assign the corresponding brightness factor
+        total_score = prop.custom_solidity * prop.brightness_factor * prop.area_factor * prop.boxy_factor * prop.distance_factor
         prop.score = total_score
 
         r = np.sqrt((rx - center_x) ** 2 + (ry - center_y) ** 2)
