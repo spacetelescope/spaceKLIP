@@ -1767,10 +1767,9 @@ class DAO():
                 dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
             else:
                 dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))
+            dao_catalog.write(path2savetable, format="csv", overwrite=True)
         else:
             dao_catalog = None
-
-        dao_catalog.write(path2savetable, format="csv", overwrite=True)
 
         # Catalog candidates are prepended so they have priority inside each group.
         if self.catalog is not None and dao_catalog is not None:
