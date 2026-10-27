@@ -389,15 +389,23 @@ def fetch_catalog_for_image_fov(path2savetable,
 
                             if not use_user_catalog:
                                 path2catalog = path2savetable
+                                selection_criteria = None
                                 if use_gaia or use_allwise:
+                                    if not use_allwise:
+                                        method = "gaia"
+                                    else:
+                                        method = "gaia+allwise"
                                     query_gaia(path2savetable, center_ra_deg, center_dec_deg, radius_deg, use_allwise=use_allwise)
                                 elif use_simbad:
+                                    method = "simbad"
                                     query_simbad(path2savetable, center_ra_deg, center_dec_deg, radius_deg, all_stellar_otypes=all_stellar_otypes)#, use_mocadb=use_mocadb)
                                 else:
                                     log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
                                     return Table()
+                            else:
+                                method = "user_catalog"
+                                selection_criteria = table_kwargs.pop('selection_criteria', None)
 
-                            selection_criteria = table_kwargs.pop('selection_criteria', None)
                             if selection_criteria is not None:
                                 table = Table.read(path2catalog, **table_kwargs)
                                 ntargets = len(table)
@@ -407,14 +415,14 @@ def fetch_catalog_for_image_fov(path2savetable,
                             else:
                                 table = Table.read(path2catalog, **table_kwargs)
 
-                            if 'id' in table.columns:# and use_user_catalog:
+                            if 'id' in table.columns:
                                 table.rename_column('id', 'cat_id')
 
                             # Add detector pixel coordinates from catalog sky coordinates.
                             ra_col = "ra" if "ra" in table.colnames else ("RA" if "RA" in table.colnames else None)
                             dec_col = "dec" if "dec" in table.colnames else ("DEC" if "DEC" in table.colnames else None)
                             if ra_col is None or dec_col is None:
-                                log.warning("Gaia tables does not include ra/dec columns; returning sky-only tables.")
+                                log.warning(f"{method} catalog does not include ra/dec columns; returning sky-only tables.")
                                 return table
 
                             if ra_col and dec_col:
@@ -442,7 +450,7 @@ def fetch_catalog_for_image_fov(path2savetable,
                             x, y = cel_wcs.all_world2pix(ra_arr, dec_arr, 0)
                             table["x"] = np.asarray(x, dtype=float)
                             table["y"] = np.asarray(y, dtype=float)
-                            table['method'] = np.asarray(['catalog'] * len(table), dtype=str)
+                            table['method'] = np.asarray([method] * len(table), dtype=str)
                             table['roundness'] = 0.0
                             table['sharpness'] = 0.5
                             table['flux'] = 0.0
@@ -1470,9 +1478,11 @@ class DAO():
 
         # 5. Return the filtered Astropy Table (sorted by original order)
         keep_indices = sorted(keep_indices)
-        log.info(f"Keeping {np.sum([i['method']=='catalog' for i in catalog[keep_indices]])} catalog seeds + {np.sum([i['method']!='catalog' for i in catalog[keep_indices]])} DAO detections after grouping for sources within {r} pixels.")
         catalog=catalog[keep_indices]
         catalog['id']=[i for i in range(len(catalog))]
+        unique_methods = np.unique(catalog['method'])
+        method_counts = [f"{np.sum(catalog['method'] == method)} {method}" for method in unique_methods]
+        log.info("Keeping " + ", ".join(method_counts) + f", seeds after grouping for sources within {r} pixels together.")
         return catalog
 
     def _clean_catalog(self,candidates, data_arr, r=1, flux_cut=0):
