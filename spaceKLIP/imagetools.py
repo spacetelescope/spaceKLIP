@@ -4312,6 +4312,7 @@ class ImageTools():
                                      r=None,
                                      sharpness_range=(0.3, 0.85),
                                      roundness_range=(-1, 1),
+                                     border=3,
                                      ds9_kwargs={},
                                      table_kwargs={},
                                      subdir='pretiles'):
@@ -4385,6 +4386,9 @@ class ImageTools():
         r :  float, optional
             The maximum distance to group sources.
             The default is None (no grouping).
+        border: int, optional
+            Exclude border of x pixel from image to confirm coordinates are within the fov.
+            Default is 3.
         ds9_kwargs : dict, optional
             Extra configuration for DS9 region file output. Available keys:
             - ``'region_shape'`` : {'circle', 'square'}
@@ -4534,19 +4538,27 @@ class ImageTools():
                         if byproduct_catalogs_path is None:
                             if path2catalog is not None:
                                 log.info(f"Selecting sources from provided catalog: {path2catalog}")
-                                user_cat_path_temp = region_path.replace(".reg", "_cat.csv")
-                                user_cat_results = fetch_catalog_for_image_fov(user_cat_path_temp, data, head_sci, npix=npix, fwhm=fwhm, threshold=threshold, use_user_catalog=True, path2catalog=path2catalog, table_kwargs=table_kwargs)
+                                user_cat_path_temp = region_path.replace(".reg", "_usercat.csv")
+                                user_cat_results = fetch_catalog_for_image_fov(user_cat_path_temp, data, head_sci,
+                                                                               npix=npix, fwhm=fwhm, threshold=threshold,
+                                                                               use_user_catalog=True, path2catalog=path2catalog,
+                                                                               table_kwargs=table_kwargs,border=border)
                                 catalogs_to_combine.append(user_cat_results)
                             if use_gaia:
                                 # ToDO: Gaia method is not working properly, need to fix it. For now it's better to skip it.
                                 log.info("Downloading catalog from GAIA")
                                 gaia_path_temp = region_path.replace(".reg", "_gaia.csv")
-                                gaia_results = fetch_catalog_for_image_fov(gaia_path_temp, data, head_sci, use_gaia=True, npix=npix, fwhm=fwhm, threshold=threshold, use_allwise=use_allwise)
+                                gaia_results = fetch_catalog_for_image_fov(gaia_path_temp, data, head_sci, use_gaia=True,
+                                                                           npix=npix, fwhm=fwhm, threshold=threshold,
+                                                                           use_allwise=use_allwise,border=border)
                                 catalogs_to_combine.append(gaia_results)
                             if use_simbad:
                                 log.info("Downloading catalog from SIMBAD")
                                 simbad_path_temp = region_path.replace(".reg", "_simbad.csv")
-                                simbad_results = fetch_catalog_for_image_fov(simbad_path_temp, data, head_sci, use_simbad=True, npix=npix, fwhm=fwhm, threshold=threshold, all_stellar_otypes=all_stellar_otypes)
+                                simbad_results = fetch_catalog_for_image_fov(simbad_path_temp, data, head_sci,
+                                                                             use_simbad=True, npix=npix, fwhm=fwhm,
+                                                                             threshold=threshold, all_stellar_otypes=all_stellar_otypes,
+                                                                             border=border)
                                 catalogs_to_combine.append(simbad_results)
                             if catalogs_to_combine:
                                 if len(catalogs_to_combine) > 1:
