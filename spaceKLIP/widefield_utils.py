@@ -307,6 +307,7 @@ def fetch_catalog_for_image_fov(path2savetable,
                                             #TODO: MOCADB timing out. sqlalchemy.exc.OperationalError: (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on '104.248.106.21' (timed out)")
                                             # if use_mocadb:
                                             #     simbad_table = query_mocadb(simbad_table)
+                                            simbad_table['simbad_id'] = [int(i)+1 for i in range(len(simbad_table))]
                                             simbad_table.write(path2savetable, format="csv", overwrite=True)
 
                             # def query_mocadb(tables):
@@ -1292,6 +1293,7 @@ class DAO():
         tbl['solsat'] = 0.0
 
         tbl['method'] = 'dao'
+        tbl.rename_column('id', 'dao_id')
         tbl.rename_column('xcentroid', 'x')
         tbl.rename_column('ycentroid', 'y')
         tbl.rename_column('roundness1', 'roundness')
@@ -1320,7 +1322,7 @@ class DAO():
         is_coresat = tbl["coresat"] > 0
         final_mask = np.where(is_coresat, mask1, mask1)
 
-        tbl_selected = tbl[final_mask]['x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness', 'flux']
+        tbl_selected = tbl[final_mask]['dao_id' ,'x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness', 'flux']
         for _c in tbl_selected:
             _cx, _cy = float(_c["x"]), float(_c["y"])
             _xlo = int(_cx) - 31
@@ -1369,6 +1371,7 @@ class DAO():
         tbl['eccsat'] = 0.0
         tbl['solsat'] = 1.0
         tbl['method'] = 'starfinder'
+        tbl.rename_column('id', 'dao_id')
         tbl.rename_column('xcentroid', 'x')
         tbl.rename_column('ycentroid', 'y')
         tbl.rename_column('max_value', 'peak')
@@ -1412,7 +1415,7 @@ class DAO():
         )
 
         # Filter tables and cleanly select your required columns
-        tbl_selected = tbl[mask_indices]['x', 'y', 'peak', 'coresat', 'eccsat', 'solsat', 'method', 'sharpness', 'roundness']
+        tbl_selected = tbl[mask_indices]['dao_id','x', 'y', 'peak', 'coresat', 'eccsat', 'solsat', 'method', 'sharpness', 'roundness']
 
         return tbl_selected
 
@@ -1701,13 +1704,7 @@ class DAO():
             log.warning(f"No valid sources for CSV/DS9 output.")
         return tbl
 
-    def dao_source_extractor(self,
-        data,
-        nanmask,
-        use_dao=True,
-        dao=True,
-        r=1
-    ):
+    def dao_source_extractor(self,path2savetable,data,nanmask,use_dao=True,dao=True,r=1):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
 
         This routine detects point sources with ``DAOStarFinder``, groups nearby
@@ -1729,6 +1726,8 @@ class DAO():
 
         Parameters
         ----------
+        path2savetable : str
+            Path to save the tables query result CSV file.
         data : 2D-array
             science image.
         nanmask: 2D-array (bool)
@@ -1753,7 +1752,6 @@ class DAO():
         removed from the returned tables before output.
         """
 
-
         data = np.asarray(data, dtype=float)
         data[nanmask==1] = np.nan
 
@@ -1771,6 +1769,8 @@ class DAO():
                 dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))
         else:
             dao_catalog = None
+
+        dao_catalog.write(path2savetable, format="csv", overwrite=True)
 
         # Catalog candidates are prepended so they have priority inside each group.
         if self.catalog is not None and dao_catalog is not None:
