@@ -425,39 +425,45 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 log.warning(f"{method} catalog does not include ra/dec columns; returning sky-only tables.")
                                 return table
 
-                            if ra_col and dec_col:
-                                # Get WCS footprint corners
-                                corners_x = [0, nx - 1, nx - 1, 0]
-                                corners_y = [0, 0, ny - 1, ny - 1]
-                                corners_ra, corners_dec = cel_wcs.all_pix2world(corners_x, corners_y, 0)
-
-                                # Get RA/DEC bounds
-                                ra_min, ra_max = np.min(corners_ra), np.max(corners_ra)
-                                dec_min, dec_max = np.min(corners_dec), np.max(corners_dec)
-
-                                # Filter catalog to only sources within bounds
-                                within_bounds = (
-                                        (table[ra_col] >= ra_min) & (table[ra_col] <= ra_max) &
-                                        (table[dec_col] >= dec_min) & (table[dec_col] <= dec_max )
-                                )
-                                ntable = len(table)
-                                table = table[within_bounds]
-
-                                log.info(f"Filtered catalog from {ntable} to {len(table)} sources within WCS footprint")
-
                             ra_arr = np.asarray(np.ma.filled(np.ma.asarray(table[ra_col]), np.nan), dtype=float)
                             dec_arr = np.asarray(np.ma.filled(np.ma.asarray(table[dec_col]), np.nan), dtype=float)
-                            x, y = cel_wcs.all_world2pix(ra_arr, dec_arr, 0)
-                            table["x"] = np.asarray(x, dtype=float)
-                            table["y"] = np.asarray(y, dtype=float)
-                            table['method'] = np.asarray([method] * len(table), dtype=str)
-                            table['roundness'] = 0.0
-                            table['sharpness'] = 0.5
-                            table['flux'] = 0.0
-                            table['coresat'] = 0.0
-                            table['eccsat'] = 0.0
-                            table['solsat'] = 0.0
 
+                            # Convert sources individually to handle convergence failures
+                            x_list = []
+                            y_list = []
+                            valid_indices = []
+
+                            for i, (ra, dec) in enumerate(zip(ra_arr, dec_arr)):
+                                if not (np.isfinite(ra) and np.isfinite(dec)):
+                                    continue  # Skip NaN coordinates
+
+                                try:
+                                    # Convert single source
+                                    x_single, y_single = cel_wcs.all_world2pix(ra, dec, 0)
+                                    if np.isfinite(x_single) and np.isfinite(y_single):
+                                        x_list.append(x_single)
+                                        y_list.append(y_single)
+                                        valid_indices.append(i)
+                                except Exception:
+                                    # Skip sources that fail WCS conversion
+                                    continue
+
+                            # Keep only successfully converted sources
+                            if len(valid_indices) > 0:
+                                table_valid = table[valid_indices]
+                                table_valid["x"] = np.asarray(x_list, dtype=float)
+                                table_valid["y"] = np.asarray(y_list, dtype=float)
+                                table = table_valid
+                                n_failed = len(table) - len(valid_indices)
+                                if n_failed > 0:
+                                    log.warning(
+                                        f"WCS conversion failed for {n_failed} sources; keeping {len(table)} valid sources")
+                            else:
+                                log.error(
+                                    f"WCS conversion failed for all {len(table)} sources. Returning empty catalog.")
+                                return Table()
+
+                            # Final XY boundary filter to exclude sources outside the FOV
                             mask = (
                                     (table["x"] >= npix[0] + border)
                                     & (table["x"] <= nx - (npix[1] + border))
@@ -466,6 +472,14 @@ def fetch_catalog_for_image_fov(path2savetable,
                             )
                             ntable_selected = len(table)
                             table_selected = table[mask]
+
+                            table_selected['method'] = np.asarray([method] * len(table_selected), dtype=str)
+                            table_selected['roundness'] = 0.0
+                            table_selected['sharpness'] = 0.5
+                            table_selected['flux'] = 0.0
+                            table_selected['coresat'] = 0.0
+                            table_selected['eccsat'] = 0.0
+                            table_selected['solsat'] = 0.0
                             log.info(f"Filtered catalog from {ntable_selected} to {len(table_selected)} sources within XY boundaries")
 
                             for _c in table_selected:
