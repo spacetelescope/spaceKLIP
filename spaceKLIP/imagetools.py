@@ -4581,7 +4581,9 @@ class ImageTools():
                                     npix=npix,
                                     fov=fov_pix)
 
-                        objects_tbl_selected = dao.dao_source_extractor(data=data[0],
+                        dao_path_temp = region_path.replace(".reg", "_dao.csv")
+                        objects_tbl_selected = dao.dao_source_extractor(path2savetable=dao_path_temp,
+                                                                        data=data[0],
                                                                         nanmask=nanmask,
                                                                         use_dao=use_dao,
                                                                         r=r)
