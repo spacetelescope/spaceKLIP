@@ -627,9 +627,9 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
         pass
 
 def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm=2.5, threshold=1.5, peak_fraction=0.33,
-                                 debug=False, id=None,r_max=np.inf):
+                                 debug=False, id=None,r_max=np.inf,fp_multiplier=3,pixels_to_dropoff=None):
     """
-    Inspect a region looking for different props, identify the best one and return it's properties.
+    Inspect a region looking for different props, identify the best one and return its properties.
 
     data: 2D array of image data to analyze
     center: (x, y) tuple for the center of the region to analyze; if None, the function will find the brightest pixel in the data
@@ -637,6 +637,8 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
     nanmask: optional 2D boolean array of the same shape as data, where True indicates pixels to ignore (e.g., NaNs or masked regions)
     debug: if True, will make a plot with additional debug information
     r_max: maximum distance from center to accept a candidate. Default is np.inf.
+    fp_multiplier: Footprint multiplier for the footprint size used in the local maxima detection. Default is 3 times fwhm.
+    pixels_to_dropoff : Number of pixels from the center of the image to the edge where the score drops to a target value (default: max(nx/2, ny/2)).
 
     Returns:
     A list of properties for the best prop in the region
@@ -673,7 +675,7 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
 
     # Find local maxima as markers for each source
     from scipy.ndimage import maximum_filter
-    footprint_size = int(np.ceil(3.0 * fwhm))
+    footprint_size = int(np.ceil(fp_multiplier * fwhm))
     if footprint_size % 2 == 0:
         footprint_size += 1
     local_max = (distance == maximum_filter(distance, footprint=np.ones((footprint_size,footprint_size))))
@@ -811,7 +813,8 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
 
         #################### Calculate Distance Factor ####################
         # Simple parametrization: what distance and target value do you want?
-        pixels_to_dropoff = max(nx/2,ny//2)
+        if pixels_to_dropoff is None:
+            pixels_to_dropoff = max(nx/2,ny//2)
         target_value = 1e-2  # target value at that distance
 
         # Calculate decay_rate for radial Gaussian
@@ -1188,8 +1191,9 @@ class DAO():
                 two_pass=True,
                 showplot=False,
                 psf=None,
-                fov=31
-                 ):
+                fov=31,
+                pixels_to_dropoff=None
+                ):
         """
         Initialize the spaceKLIP DAOStarFinder source extraction tools class.
 
@@ -1227,6 +1231,9 @@ class DAO():
             If True, show a diagnostic plot when refining coordinates for problematic fits.
         psf : 2D-array
             PSF model image passed directly to ``fit_psf``.
+        pixels_to_dropoff : int, optional
+            Number of pixels from the center of the image to the edge where the score drops to a target value (default: max(nx/2, ny/2)).
+            This is used to calculate the distance factor in the scoring function for candidate selection.
         Returns
         -------
         None.
@@ -1240,6 +1247,7 @@ class DAO():
         if len(self.npix) != 4:
             raise UserWarning('Parameter npix must either be an int or a list of four int (left, right, bottom, top)')
         self.oversampling=oversampling
+        self.pixels_to_dropoff=pixels_to_dropoff
         self.threshold=threshold
         self.fwhm=fwhm
         self.sharpness_range=sharpness_range
@@ -1567,7 +1575,7 @@ class DAO():
             #     #for debugging purposes
             #     _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1, fwhm=self.fwhm, threshold=self.threshold,debug=True,id=_c['id'])
             # else:
-            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm, threshold=self.threshold)
+            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm, threshold=self.threshold,pixels_to_dropoff=self.pixels_to_dropoff)
             if _sr > 0:
                 if np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent): #_ecc >=0.7 and _sol>=0.75 and
                     _c['x'] = _x+_xlo

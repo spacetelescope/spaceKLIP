@@ -4313,6 +4313,7 @@ class ImageTools():
                                      sharpness_range=(0.3, 0.85),
                                      roundness_range=(-1, 1),
                                      border=3,
+                                     pixels_to_dropoff=25,
                                      ds9_kwargs={},
                                      table_kwargs={},
                                      subdir='pretiles'):
@@ -4389,6 +4390,10 @@ class ImageTools():
         border: int, optional
             Exclude border of x pixel from image to confirm coordinates are within the fov.
             Default is 3.
+        pixels_to_dropoff : int, optional
+            Number of pixels from the center of the image to the edge where the score drops to a target value (default: max(nx/2, ny/2)).
+            This is used to calculate the distance factor in the scoring function for candidate selection.
+            Default is 25
         ds9_kwargs : dict, optional
             Extra configuration for DS9 region file output. Available keys:
             - ``'region_shape'`` : {'circle', 'square'}
@@ -4579,7 +4584,8 @@ class ImageTools():
                                     roundness_range=roundness_range,
                                     catalog=result,
                                     npix=npix,
-                                    fov=fov_pix)
+                                    fov=fov_pix,
+                                    pixels_to_dropoff=pixels_to_dropoff)
 
                         dao_path_temp = region_path.replace(".reg", "_dao.csv")
                         objects_tbl_selected = dao.dao_source_extractor(path2savetable=dao_path_temp,
