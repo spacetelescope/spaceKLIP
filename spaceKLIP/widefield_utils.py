@@ -589,7 +589,7 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
                 f"Boxy Factor={boxy_factor:.2f} | "
                 f"Distance Factor={distance_factor:.2f} | "
                 f"Brightness Factor={brightness_factor:.2f} | "
-                f"Score={score:.2f} | "
+                f"Score={score:.2e} | "
                 f"Centroid=({prop.centroid[1]:.1f}, {prop.centroid[0]:.1f}) {status}"
             )
 
@@ -616,8 +616,8 @@ def inspect_region(nandata, labeled_mask, props, best_prop=None, x_cent=None, y_
                 maxc + 1,
                 minr,
                 label_text,
-                color="yellow",
-                fontsize=9,
+                color="yellow" if is_winner else "white",
+                fontsize=12 if is_winner else 9,
                 weight="bold",
                 bbox=dict(facecolor="black", alpha=0.6, boxstyle="round,pad=0.2"),
             )
