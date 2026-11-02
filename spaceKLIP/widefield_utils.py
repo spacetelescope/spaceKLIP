@@ -1571,10 +1571,8 @@ class DAO():
             _ylo = int(_cy) - self.fov//2
             _yhi = int(_cy) + self.fov//2+1
             _patch = data_temp[_ylo:_yhi, _xlo:_xhi]
-            # if _c['id'] in [75,79,87]:
-            #     #for debugging purposes
-            #     _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1, fwhm=self.fwhm, threshold=self.threshold,debug=True,id=_c['id'])
-            # else:
+            # For debugging purposes, you can uncomment the following line to visualize the patch and its properties.
+            # _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1, fwhm=self.fwhm, threshold=self.threshold,debug=True,id=_c['id'])
             _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm, threshold=self.threshold,pixels_to_dropoff=self.pixels_to_dropoff)
             if _sr > 0:
                 if np.sum(~np.isfinite(_patch)) <= np.ceil(_patch.shape[0] * _patch.shape[1] * self.nan_lim_percent): #_ecc >=0.7 and _sol>=0.75 and
@@ -1583,8 +1581,6 @@ class DAO():
                     _c['eccsat'] = _ecc
                     _c['solsat'] = _sol
                 else:
-                    # if _c['id'] in [19,74,71,75,79,87,111]:
-                    #     pass
                     _keep_mask.append(False)
                     continue
             else:
