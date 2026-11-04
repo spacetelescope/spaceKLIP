@@ -1351,26 +1351,26 @@ class DAO():
                 & (tbl["x"] <= nx - (self.npix[1] + border))
                 & (tbl["y"] >= self.npix[2] + border)
                 & (tbl["y"] <= ny - (self.npix[3] + border))
-                & (tbl["roundness"] >= self.roundness_range[0])
-                & (tbl["roundness"] <= self.roundness_range[1])
-                & (tbl["sharpness"] >= self.sharpness_range[0])
-                & (tbl["sharpness"] <= self.sharpness_range[1])
+        #         & (tbl["roundness"] >= self.roundness_range[0])
+        #         & (tbl["roundness"] <= self.roundness_range[1])
+        #         & (tbl["sharpness"] >= self.sharpness_range[0])
+        #         & (tbl["sharpness"] <= self.sharpness_range[1])
         )
-        #TODO: figure out how to set up proper mask for saturated sources. For now using the same for both.
-        mask2 = (
-                (tbl["x"] >= self.npix[0] + border)
-                & (tbl["x"] <= nx - (self.npix[1] + border))
-                & (tbl["y"] >= self.npix[2] + border)
-                & (tbl["y"] <= ny - (self.npix[3] + border))
-                & (tbl["roundness"] >= -0.5)
-                & (tbl["roundness"] <= 0.5)
-                & (tbl["sharpness"] >= self.sharpness_range[0])
-                & (tbl["sharpness"] <= self.sharpness_range[1])
-        )
-        is_coresat = tbl["coresat"] > 0
-        final_mask = np.where(is_coresat, mask1, mask1)
+        # #TODO: figure out how to set up proper mask for saturated sources. For now using the same for both.
+        # mask2 = (
+        #         (tbl["x"] >= self.npix[0] + border)
+        #         & (tbl["x"] <= nx - (self.npix[1] + border))
+        #         & (tbl["y"] >= self.npix[2] + border)
+        #         & (tbl["y"] <= ny - (self.npix[3] + border))
+        #         & (tbl["roundness"] >= -0.5)
+        #         & (tbl["roundness"] <= 0.5)
+        #         & (tbl["sharpness"] >= self.sharpness_range[0])
+        #         & (tbl["sharpness"] <= self.sharpness_range[1])
+        # )
+        # is_coresat = tbl["coresat"] > 0
+        # final_mask = np.where(is_coresat, mask1, mask1)
 
-        tbl_selected = tbl[final_mask]['dao_id' ,'x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness', 'flux']
+        tbl_selected = tbl[mask1]['dao_id' ,'x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness', 'flux']
         for _c in tbl_selected:
             _cx, _cy = float(_c["x"]), float(_c["y"])
             _xlo = int(_cx) - 31
