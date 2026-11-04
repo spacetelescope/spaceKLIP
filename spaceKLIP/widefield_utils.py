@@ -860,7 +860,10 @@ def inspect_region_for_best_prop(data, center=None, margin=1, nanmask=None, fwhm
         r_squared = (rx - default_cx) ** 2 + (ry - default_cy) ** 2
 
         # Distance factor: 1.0 at center, target_value at pixels_to_dropoff
-        distance_factor = np.exp(-decay_rate * r_squared)
+        if r_squared > pixels_to_dropoff ** 2:
+            distance_factor = 0.0
+        else:
+            distance_factor = np.exp(-decay_rate * r_squared)
 
         prop.custom_solidity = solidity_score
         prop.custom_eccentricity = eccentricity_score
