@@ -1045,37 +1045,59 @@ class AnalysisTools():
             plt.close()
             return fig
 
-        # Check input.
-        kwargs_temp = {}
-        
-        # Set output directory.
+        #kwargs_temp = {}
+
+        # Set main output directory.
         output_dir = os.path.join(self.database.output_dir, subdir)
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Load companion spectrum.
+        # Keep backward compatibility where planetfile was part of kwargs.
+        if planetfile is None:
+            planetfile = kwargs.get('planetfile')
+        sed = read_spec_file(planetfile) if planetfile is not None else None
+
         # Loop through concatenations.
         for i, key in enumerate(self.database.red.keys()):
             log.info('--> Concatenation ' + key)
-            
-            # Loop through FITS files.
+
+            # Identify input science exposure.
+            ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
+
+            # Loop through KLIPPED FITS files.
             nfitsfiles = len(self.database.red[key])
             for j in range(nfitsfiles):
 
+                # Get information from KLIPPED data.
+                telescope = self.database.red[key]['TELESCOP'][j]
+                instrument = self.database.red[key]['INSTRUME'][j]
+                detector = self.database.red[key]['DETECTOR'][j]
+                exp_type = self.database.red[key]['EXP_TYPE'][j]
+                subarray = self.database.red[key]['SUBARRAY'][j]
+                filt = self.database.red[key]['FILTER'][j]
+                apername = self.database.red[key]['APERNAME'][j]
                 highpass = self.database.red[key]['HIGHPASS'][j]
+                mode = self.database.red[key]['MODE'][j]
+                annuli = int(self.database.red[key]['ANNULI'][j])
+                annuli_spacing = self.database.red[key]['ANNSPACE'][j]
+                subsections = int(self.database.red[key]['SUBSECTS'][j])
+
+                # Check telescope and instrument.
+                if telescope != 'JWST':
+                    raise UserWarning('Data originates from unknown telescope')
+                elif instrument == 'NIRISS':
+                    raise NotImplementedError()
+                elif instrument not in ('NIRCAM', 'MIRI'):
+                    raise UserWarning('Data originates from unknown JWST instrument')
 
                 # Get stellar magnitudes and filter zero points.
                 mstar, fzero, fzero_flam, fzero_wm2um = get_stellar_magnitudes(
-                    starfile, spectral_type,
-                    self.database.red[key]['INSTRUME'][j],
-                    self.database.red[key]['DETECTOR'][j],
-                    self.database.red[key]['EXP_TYPE'][j],
+                    starfile, spectral_type, instrument, detector, exp_type,
                     output_dir=output_dir, **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
 
                 # Get COM substrate throughput.
-                tp_comsubst = ut.get_tp_comsubst(self.database.red[key]['INSTRUME'][j],
-                                                 self.database.red[key]['SUBARRAY'][j],
-                                                 self.database.red[key]['FILTER'][j])
-                
+                tp_comsubst = ut.get_tp_comsubst(instrument, subarray, filt)
+
                 # Compute the pixel area in steradian.
                 pxsc_arcsec = self.database.red[key]['PIXSCALE'][j] # arcsec
                 pxsc_rad = pxsc_arcsec / 3600. / 180. * np.pi  # rad
@@ -1083,25 +1105,19 @@ class AnalysisTools():
                 if np.isnan(pxar):
                     log.warning("PIXAR_SR not found in database, falling back to use PIXSCALE")
                     pxar = pxsc_rad**2  # sr
-                
-                # Compute the resolution element. Account for possible
-                # blurring.
-                if self.database.red[key]['TELESCOP'][j] == 'JWST':
-                    if self.database.red[key]['EXP_TYPE'][j] in ['NRC_CORON']:
-                        diam = 5.2
-                    else:
-                        diam = JWST_CIRCUMSCRIBED_DIAMETER
-                else:
-                    raise UserWarning('Data originates from unknown telescope')
+
+                # Compute the resolution element. Account for possible blurring.
+                diam = 5.2 if exp_type == 'NRC_CORON' else JWST_CIRCUMSCRIBED_DIAMETER
                 resolution = 1e-6 * self.database.red[key]['CWAVEL'][j] / diam / pxsc_rad  # pix
-                if not np.isnan(self.database.obs[key]['BLURFWHM'][j]):
-                    resolution = np.hypot(resolution, self.database.obs[key]['BLURFWHM'][j])
-                
+                blur_fwhm = self.database.red[key]['BLURFWHM'][j]
+                if not np.isnan(blur_fwhm):
+                    resolution = np.hypot(resolution, blur_fwhm)
+
                 # Find science and reference files.
                 filepaths, psflib_filepaths, maxnumbasis = get_pyklip_filepaths(self.database, key, return_maxbasis=True)
-                if 'maxnumbasis' not in kwargs_temp.keys() or kwargs_temp['maxnumbasis'] is None:
-                    kwargs_temp['maxnumbasis'] = maxnumbasis
-                
+                #if 'maxnumbasis' not in kwargs_temp.keys() or kwargs_temp['maxnumbasis'] is None:
+                #    kwargs_temp['maxnumbasis'] = maxnumbasis
+
                 # Initialize pyKLIP dataset.
                 pop_pxar_kw(np.append(filepaths, psflib_filepaths))
                 dataset = JWSTData(filepaths, psflib_filepaths,
@@ -1109,9 +1125,9 @@ class AnalysisTools():
                                    center_include_offset=False,
                                    center_keywords=['STARCENX','STARCENY'])
                 dataset.IWA = self.database.red[key]['IWA'][j]
-                kwargs_temp['dataset'] = dataset
-                kwargs_temp['aligned_center'] = dataset._centers[0]
-                kwargs_temp['psf_library'] = dataset.psflib
+                #kwargs_temp['dataset'] = dataset
+                #kwargs_temp['aligned_center'] = dataset._centers[0]
+                #kwargs_temp['psf_library'] = dataset.psflib
 
                 # Make copy of the original pyKLIP dataset.
                 dataset_orig = copy.deepcopy(dataset)
@@ -1123,291 +1139,128 @@ class AnalysisTools():
                     klindex = np.argmax(klmodes)
                 else:
                     klindex = klmodes.tolist().index(klmode)
-                
-                # Set output directories.
+
+                # Set KL mode output directories.
                 output_dir_kl = os.path.join(output_dir, 'KL%.0f' % klmodes[klindex])
-                if not os.path.exists(output_dir_kl):
-                    os.makedirs(output_dir_kl)
-                
-                # Initialize a function that can generate model offset PSFs.
-                inst = self.database.red[key]['INSTRUME'][j]
-                filt = self.database.red[key]['FILTER'][j]
-                apername = self.database.red[key]['APERNAME'][j]
-                if self.database.red[key]['TELESCOP'][j] == 'JWST':
-                    if inst == 'NIRCAM':
-                        pass
-                        # image_mask = self.database.red[key]['CORONMSK'][j]
-                        # image_mask = image_mask[:4] + image_mask[5:]
-                    elif inst == 'NIRISS':
-                        raise NotImplementedError()
-                    elif inst == 'MIRI':
-                        pass
-                        # image_mask = self.database.red[key]['CORONMSK'][j].replace('4QPM_', 'FQPM')
-                    else:
-                        raise UserWarning('Data originates from unknown JWST instrument')
-                else:
-                    raise UserWarning('Data originates from unknown telescope')
-                if planetfile is None:
-                    # Keep backward compatibility where planetfile was part of
-                    # the kwargs.
-                    if 'planetfile' in kwargs.keys() and kwargs['planetfile'] is not None:
-                        planetfile = kwargs['planetfile']
-                if planetfile is not None:
-                    sed = read_spec_file(planetfile)
-                else:
-                    sed = None
-                ww_sci = np.where(self.database.obs[key]['TYPE'] == 'SCI')[0]
-                if date is not None:
-                    if date == 'auto':
-                        date = fits.getheader(self.database.obs[key]['FITSFILE'][ww_sci[0]], 0)['DATE-BEG']
+                os.makedirs(output_dir_kl, exist_ok=True)
+
+                # Determine observation date for the PSF model.
+                psf_date = (fits.getval(self.database.obs[key]['FITSFILE'][ww_sci[0]], 'DATE-BEG') if date == 'auto' else date)
+
+                # Initialize a stellar PSF model for generating offset PSFs at the expected companion positions.
                 if not use_epsf:
+                    # Generates a theoretical PSF using JWST_PSF.
                     offsetpsf_func = JWST_PSF(apername,
                                               filt,
-                                              date=date,
+                                              date=psf_date,
                                               fov_pix=fov_pix,
                                               oversample=2,
                                               sp=sed,
                                               use_coeff=False)
 
                 else:
+                    # Generate an empirical PSF (ePSF) using the reference-star observations.
                     def star2epsf(stamp, weights=None, wcs_large=None, center=[20, 20]):
                         """Get the stamp and uncertainties from a Star object and provide it to EPSFStar"""
-                        epsf = pupsf.EPSFStar(
-                            stamp,
-                            weights=weights,
-                            wcs_large=wcs_large,
-                            cutout_center=center
-                        )
+                        epsf = pupsf.EPSFStar(stamp, weights=weights, wcs_large=wcs_large, cutout_center=center)
                         return epsf
 
                     list_of_references=[]
                     for filepath in psflib_filepaths:
-                        hdulist = fits.open(filepath)
-                        data = hdulist['SCI'].data[0]
-                        data[np.isnan(data)] = 0
-                        weights = np.ones(data.shape)#/hdulist['ERR'].data[0]
-                        weights[np.isnan(weights) | ~np.isfinite(weights)] = 0
-                        wcs = WCS(hdulist['SCI'].header,naxis=2)
-                        list_of_references.append(star2epsf(data,weights=weights,wcs_large=wcs, center=dataset.centers[0]))
+                        with fits.open(filepath) as hdul:
+                            data = np.nan_to_num(hdul['SCI'].data[0], nan=0.0)
+                            weights = np.ones_like(data)#/hdul['ERR'].data[0]
+                            weights[np.isnan(weights) | ~np.isfinite(weights)] = 0
+                            wcs = WCS(hdul['SCI'].header, naxis=2)
+                        list_of_references.append(star2epsf(data, weights=weights, wcs_large=wcs, center=dataset.centers[0]))
 
                     epsfs = pupsf.EPSFStars(list_of_references)
-                    epsf_builder = pupsf.EPSFBuilder(
-                        oversampling=3,
-                        maxiters=50,
-                        progress_bar=True
-                    )
+                    epsf_builder = pupsf.EPSFBuilder(oversampling=3, maxiters=50, progress_bar=True)
                     offsetpsf_func = epsf_builder(epsfs)[0]
                     offsetpsf_func.image_mask = None
 
-                # NOTE: if minmethod not None, it will split the fit into a fitmethod (e.g. mcmc) for the estimation
-                # of position and flux, and a minmethod (e.g. Powell) to fit the extension of the source using a
-                # psf convolved by a 2D Gaussian and a minimization approach.
-                if minmethod is not None:
-                    split_fit = True
-                else:
-                    split_fit = False
+                # NOTE: If minmethod is not None, the fit is split into two steps:
+                # fitmethod (e.g., MCMC) estimates the position and flux, while
+                # minmethod (e.g., Powell) fits the source extension by convolving
+                # the PSF with a 2D Gaussian and using a minimization approach.
+                split_fit = minmethod is not None
 
                 if split_fit:
-                    if 'sigma_xguess' in kwargs.keys() and kwargs['sigma_xguess'] is not None:
-                        sigma_xguess = kwargs['sigma_xguess']
-                    else:
-                        sigma_xguess = 0.1
-                    if 'sigma_yguess' in kwargs.keys() and kwargs['sigma_yguess'] is not None:
-                        sigma_yguess = kwargs['sigma_yguess']
-                    else:
-                        sigma_yguess = 0.1
-                    if 'theta_guess' in kwargs.keys() and kwargs['theta_guess'] is not None:
-                        theta_guess = kwargs['theta_guess']
-                    else:
-                        theta_guess = 0
-                    if 'scale_guess' in kwargs.keys() and kwargs['scale_guess'] is not None:
-                        scale_guess = kwargs['scale_guess']
-                    else:
-                        scale_guess = 0
-                    gauss_param_guesses = [sigma_xguess, sigma_yguess, theta_guess, scale_guess]
 
-                    if 'sigma_xrange' in kwargs.keys() and kwargs['sigma_xrange'] is not None:
-                        sigma_xrange = kwargs['sigma_xrange']
-                    else:
-                        sigma_xrange = (0.001, 5)
-                    if 'sigma_yrange' in kwargs.keys() and kwargs['sigma_yrange'] is not None:
-                        sigma_yrange = kwargs['sigma_yrange']
-                    else:
-                        sigma_yrange = (0.001, 5)
-                    if 'theta_range' in kwargs.keys() and kwargs['theta_range'] is not None:
-                        theta_range = kwargs['theta_range']
-                    else:
-                        theta_range = (-180, 180)
-                    if 'scale_range' in kwargs.keys() and kwargs['scale_range'] is not None:
-                        scale_range = kwargs['scale_range']
-                    else:
-                        scale_range = (-1, 1)
-                    gauss_param_ranges = [sigma_xrange, sigma_yrange, theta_range, scale_range]
+                    # Default 2D Gaussian parameter guesses and bounds.
+                    gaussian_defaults = {
+                        'sigma_xguess': 0.1,
+                        'sigma_yguess': 0.1,
+                        'theta_guess': 0,
+                        'scale_guess': 0,
+                        'sigma_xrange': (0.001, 5),
+                        'sigma_yrange': (0.001, 5),
+                        'theta_range': (-180, 180),
+                        'scale_range': (-1, 1),
+                    }
 
-                    # Loop through companions.
-                    tab = Table(names=('ID',
-                                       'RA',
-                                       'RA_ERR',
-                                       'DEC',
-                                       'DEC_ERR',
-                                       'FLUX_JY',
-                                       'FLUX_JY_ERR',
-                                       'FLUX_FLAM',
-                                       'FLUX_FLAM_ERR',
-                                       'FLUX_WM2UM',
-                                       'FLUX_WM2UM_ERR',
-                                       'FSTAR_JY',
-                                       'FSTAR_JY_ERR',
-                                       'FSTAR_FLAM',
-                                       'FSTAR_FLAM_ERR',
-                                       'FSTAR_WM2UM',
-                                       'FSTAR_WM2UM_ERR',
-                                       'CON',
-                                       'CON_ERR',
-                                       'DELMAG',
-                                       'DELMAG_ERR',
-                                       'APPMAG',
-                                       'APPMAG_ERR',
-                                       'MSTAR',
-                                       'MSTAR_ERR',
-                                       'SNR',
-                                       'LN(Z/Z0)',
-                                       'TP_CORONMSK',
-                                       'TP_COMSUBST',
-                                       'FITSFILE',
-                                       'GSCALE',
-                                       'GSCALE_ERROR',
-                                       'SIGMA_X',
-                                       'SIGMA_X_ERROR',
-                                       'SIGMA_Y',
-                                       'SIGMA_Y_ERROR',
-                                       'THETA',
-                                       'THETA_ERROR'),
-                                dtype=('int',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'object',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float'))
-                else:
-                    # Loop through companions.
-                    tab = Table(names=('ID',
-                                       'RA',
-                                       'RA_ERR',
-                                       'DEC',
-                                       'DEC_ERR',
-                                       'FLUX_JY',
-                                       'FLUX_JY_ERR',
-                                       'FLUX_FLAM',
-                                       'FLUX_FLAM_ERR',
-                                       'FLUX_WM2UM',
-                                       'FLUX_WM2UM_ERR',
-                                       'FSTAR_JY',
-                                       'FSTAR_JY_ERR',
-                                       'FSTAR_FLAM',
-                                       'FSTAR_FLAM_ERR',
-                                       'FSTAR_WM2UM',
-                                       'FSTAR_WM2UM_ERR',
-                                       'CON',
-                                       'CON_ERR',
-                                       'DELMAG',
-                                       'DELMAG_ERR',
-                                       'APPMAG',
-                                       'APPMAG_ERR',
-                                       'MSTAR',
-                                       'MSTAR_ERR',
-                                       'SNR',
-                                       'LN(Z/Z0)',
-                                       'TP_CORONMSK',
-                                       'TP_COMSUBST',
-                                       'FITSFILE'),
-                                dtype=('int',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'float',
-                                       'object'))
+                    gauss_params = {key: kwargs[key] if kwargs.get(key) is not None else default
+                                      for key, default in gaussian_defaults.items()}
+
+                    gauss_param_guesses = [gauss_params['sigma_xguess'], gauss_params['sigma_yguess'],
+                                           gauss_params['theta_guess'], gauss_params['scale_guess']]
+
+                    gauss_param_ranges = [gauss_params['sigma_xrange'], gauss_params['sigma_yrange'],
+                                          gauss_params['theta_range'], gauss_params['scale_range']]
+
+                # Initialize companion results table.
+                columns = [
+                    'ID',
+                    'RA', 'RA_ERR',
+                    'DEC', 'DEC_ERR',
+                    'FLUX_JY', 'FLUX_JY_ERR',
+                    'FLUX_FLAM', 'FLUX_FLAM_ERR',
+                    'FLUX_WM2UM', 'FLUX_WM2UM_ERR',
+                    'FSTAR_JY', 'FSTAR_JY_ERR',
+                    'FSTAR_FLAM', 'FSTAR_FLAM_ERR',
+                    'FSTAR_WM2UM', 'FSTAR_WM2UM_ERR',
+                    'CON', 'CON_ERR',
+                    'DELMAG', 'DELMAG_ERR',
+                    'APPMAG', 'APPMAG_ERR',
+                    'MSTAR', 'MSTAR_ERR',
+                    'SNR', 'LN(Z/Z0)',
+                    'TP_CORONMSK', 'TP_COMSUBST',
+
+                    # Add extended fit parameter columns to the results table.
+                    *(['GSCALE', 'GSCALE_ERROR',
+                       'SIGMA_X', 'SIGMA_X_ERROR',
+                       'SIGMA_Y', 'SIGMA_Y_ERROR',
+                       'THETA', 'THETA_ERROR'] if split_fit else []),
+
+                    'FITSFILE',
+                ]
+
+                # Set column data types.
+                dtypes = ['float'] * len(columns)
+                dtypes[columns.index('ID')] = 'int'
+                dtypes[columns.index('FITSFILE')] = 'object'
+
+                tab = Table(names=columns, dtype=dtypes)
+
+                # Loop through the companions.
                 for k in range(len(companions)):
+
+                    # Set output directory for each companion.
                     output_dir_comp = os.path.join(output_dir_kl, 'C%.0f' % (k + 1))
-                    if not os.path.exists(output_dir_comp):
-                        os.makedirs(output_dir_comp)
                     output_dir_fm = os.path.join(output_dir_comp, 'KLIP_FM')
-                    if not os.path.exists(output_dir_fm):
-                        os.makedirs(output_dir_fm)
+                    os.makedirs(output_dir_fm, exist_ok=True)
                     if save_preklip:
                         output_dir_pk = os.path.join(output_dir_comp, 'PREKLIP')
-                        if not os.path.exists(output_dir_pk):
-                            os.makedirs(output_dir_pk)
+                        os.makedirs(output_dir_pk, exist_ok=True)
 
-                    if not use_epsf:
-                        # Offset PSF that is not affected by the coronagraphic
-                        # mask, but only the Lyot stop.
-                        psf_no_coronmsk = offsetpsf_func.psf_off
-
-                    # Initial guesses for the fit parameters.
+                    # Initial guesses for the fit parameters for point source.
                     guess_dx = companions[k][0] / pxsc_arcsec  # pix
                     guess_dy = companions[k][1] / pxsc_arcsec  # pix
                     guess_flux = companions[k][2]  # contrast
                     guess_spec = np.array([1.])
                     guess_sep = np.sqrt(guess_dx**2 + guess_dy**2)  # pix
                     guess_pa = np.rad2deg(np.arctan2(guess_dx, guess_dy))  # deg
-                    
+
                     # The initial guesses are made in RA/Dec space, but the
                     # model PSFs are defined by the offset between the
                     # coronagraphic mask center and the companion. Hence, we
@@ -1420,50 +1273,55 @@ class AnalysisTools():
                     scale_factor_avg = []
                     for ww in ww_sci:
                         roll_ref = self.database.obs[key]['ROLL_REF'][ww]  # deg
-                        
-                        # Get shift between star and coronagraphic mask
-                        # position. If positive, the coronagraphic mask center
+
+                        # Get shift between star and coronagraphic mask position.
+                        # If positive, the coronagraphic mask center
                         # is to the left/bottom of the star position.
                         _, _, _, _, _, _, _, _, _, _, maskoffs = ut.read_obs(self.database.obs[key]['FITSFILE'][ww])
-                        
+
                         # NIRCam.
                         if maskoffs is not None:
                             mask_xoff = -maskoffs[:, 0]  # pix
                             mask_yoff = -maskoffs[:, 1]  # pix
-                            
+
                             # Need to rotate by the roll angle (CCW) and flip
                             # the x-axis so that positive RA is to the left.
-                            mask_raoff = -(mask_xoff * np.cos(np.deg2rad(roll_ref)) - mask_yoff * np.sin(np.deg2rad(roll_ref)))  # pix
-                            mask_deoff = mask_xoff * np.sin(np.deg2rad(roll_ref)) + mask_yoff * np.cos(np.deg2rad(roll_ref))  # pix
-                            
+                            roll_rad = np.deg2rad(roll_ref)
+                            mask_raoff = -(mask_xoff * np.cos(roll_rad) - mask_yoff * np.sin(roll_rad))  # pix
+                            mask_deoff = mask_xoff * np.sin(roll_rad) + mask_yoff * np.cos(roll_rad)  # pix
+
                             # Compute the true offset between the companion and
                             # the coronagraphic mask center.
                             sim_dx = guess_dx - mask_raoff  # pix
                             sim_dy = guess_dy - mask_deoff  # pix
                             sim_sep = np.sqrt(sim_dx**2 + sim_dy**2) * pxsc_arcsec  # arcsec
                             sim_pa = np.rad2deg(np.arctan2(sim_dx, sim_dy))  # deg
-                            
+
                             # Take median of observation. Typically, each
                             # dither position is a separate observation.
                             sim_sep = np.median(sim_sep)
                             sim_pa = np.median(sim_pa)
-                        
+
                         # Otherwise.
                         else:
-                            sim_sep = np.sqrt(guess_dx**2 + guess_dy**2) * pxsc_arcsec  # arcsec
-                            sim_pa = np.rad2deg(np.arctan2(guess_dx, guess_dy))  # deg
+                            sim_sep = guess_sep * pxsc_arcsec  # arcsec
+                            sim_pa = guess_pa  # deg
 
+                        # If psf includes the coronagraphic mask, estimate the coronagraphic mask throughput.
                         if  offsetpsf_func.image_mask is not None:
                             # Generate offset PSF for this roll angle. Do not add
                             # the V3Yidl angle as it has already been added to the
-                            # roll angle by spaceKLIP. This is only for estimating
-                            # the coronagraphic mask throughput!
+                            # roll angle by spaceKLIP.
                             offsetpsf_coronmsk = offsetpsf_func.gen_psf([sim_sep, sim_pa],
                                                                         mode='rth',
                                                                         PA_V3=roll_ref,
                                                                         do_shift=False,
                                                                         quick=True,
                                                                         addV3Yidl=False)
+                                                                        
+                            # Offset PSF that is not affected by the coronagraphic
+                            # mask, but only the Lyot stop.
+                            offsetpsf_no_coronmsk = offsetpsf_func.psf_off
 
                             # Coronagraphic mask throughput is not incorporated
                             # into the flux calibration of the JWST pipeline so
@@ -1473,10 +1331,9 @@ class AnalysisTools():
                             # mask throughput (it becomes fainter). Compute scale
                             # factor by comparing a model PSF with and without
                             # coronagraphic mask.
-                            scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(psf_no_coronmsk)
-                            # scale_factor_avg += [scale_factor]
+                            scale_factor = np.sum(offsetpsf_coronmsk) / np.sum(offsetpsf_no_coronmsk)
                         else:
-                            # Since there is no coronagraphic mask, it is 1
+                            # Since there is no coronagraphic mask, it is 1.
                             scale_factor = 1 #/ np.sum(psf_no_coronmsk)
                         scale_factor_avg += [scale_factor]
 
@@ -1492,21 +1349,20 @@ class AnalysisTools():
                                                                addV3Yidl=False,
                                                                normalize='exit_pupil')
 
-                            # Normalize model offset PSF by the flux of the star.
                         else:
-                            # Normalize model EPSF to a total integrated flux
-                            # of 1 at infinity.
-                            # EPSF
+                            # Normalize model EPSF to a total integrated flux of 1 at infinity.
                             y, x = np.mgrid[:fov_pix, :fov_pix]
                             offsetpsf = offsetpsf_func.evaluate(x, y, 1, fov_pix // 2, fov_pix // 2)
+
+                        # Normalize model offset PSF by the flux of the star.
                         offsetpsf *= fzero[filt] / 10**(mstar[filt] / 2.5) / 1e6 / pxar  # MJy/sr
-                        # Apply scale factor to incorporate the coronagraphic
-                        # mask througput.
+
+                        # Apply scale factor to incorporate the coronagraphic mask througput.
                         # NOTE: There is no need to apply a correction for the substrate
                         # as this is accounted for by the pipeline.
                         offsetpsf *= scale_factor
 
-                        # Flip model PSF in x or y direction if requested
+                        # Flip model PSF in x or y direction if requested.
                         if flip_fmpsf_xy is not None:
                             if flip_fmpsf_xy == 'x':
                                 offsetpsf = np.fliplr(offsetpsf)
@@ -1518,58 +1374,58 @@ class AnalysisTools():
                                 raise ValueError('flip_fmpsf_xy must be "x", "y", "xy", or "yx".')
 
                         # Blur frames with a Gaussian filter.
-                        if not np.isnan(self.database.obs[key]['BLURFWHM'][ww]):
-                            gauss_sigma = self.database.obs[key]['BLURFWHM'][j] / np.sqrt(8. * np.log(2.))
+                        blur_fwhm = self.database.obs[key]['BLURFWHM'][ww]
+                        if not np.isnan(blur_fwhm):
+                            gauss_sigma = blur_fwhm / np.sqrt(8. * np.log(2.))
                             offsetpsf = gaussian_filter(offsetpsf, gauss_sigma)
-                        
-                        # Apply high-pass filter.
+
+                        # Apply high-pass filter. Same as was applied in the KLIP subtraction.
                         offsetpsf_nohpf = copy.deepcopy(offsetpsf)
-                        if not isinstance(highpass, bool):
-                            highpass = float(highpass)
-                            fourier_sigma_size = (offsetpsf.shape[0] / highpass) / (2. * np.sqrt(2. * np.log(2.)))
-                            offsetpsf = parallelized.high_pass_filter_imgs(np.array([offsetpsf]), numthreads=None, filtersize=fourier_sigma_size)[0]
+                        if isinstance(highpass, (bool, np.bool_)):
+                            filtersize = 10 * offsetpsf.shape[0] / dataset.input.shape[-1] if highpass else None
                         else:
-                            if highpass:
-                                raise NotImplementedError()
-                        
-                        # Save rotated model offset PSFs in case we do not end
-                        # up using FM.
+                            filtersize = offsetpsf.shape[0] / (float(highpass) * 2 * np.sqrt(2 * np.log(2)))
+                        if filtersize is not None:
+                            offsetpsf = parallelized.high_pass_filter_imgs(np.array([offsetpsf]), filtersize=filtersize)[0]
+
+                        # Save rotated model offset PSFs in case we do not end up using FM.
                         nints = self.database.obs[key]['NINTS'][ww]
                         effinttm = self.database.obs[key]['EFFINTTM'][ww]
                         rot_offsetpsf = rotate(offsetpsf, -roll_ref, reshape=False, mode='constant', cval=0.)
                         rot_offsetpsfs.extend([rot_offsetpsf])  # do not duplicate
                         sci_totinttime.extend([nints * effinttm])
-                        
+
                         # Save non-rotated model offset PSFs for the FM.
                         all_offsetpsfs.extend([offsetpsf for ni in range(nints)])
                         all_offsetpsfs_nohpf.extend([offsetpsf_nohpf for ni in range(nints)])
                         all_pas.extend([roll_ref for ni in range(nints)])
+
                     scale_factor_avg = np.sum([scale_factor_avg[l] * sci_totinttime[l] / np.sum(sci_totinttime)
                                                for l in range(len(scale_factor_avg))])
-                    
-                    # Compute the FM dataset if it does not exist yet, or if
-                    # overwrite is True.
-                    # Compute the FM dataset.
-                    mode = self.database.red[key]['MODE'][j]
-                    annuli = int(self.database.red[key]['ANNULI'][j])
-                    annuli_spacing = self.database.red[key]['ANNSPACE'][j]
-                    subsections = int(self.database.red[key]['SUBSECTS'][j])
+
+                    # Compute the FM dataset if it does not exist yet, or if overwrite is True.
                     fmdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fmpsf-KLmodes-all.fits')
                     klipdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-klipped-KLmodes-all.fits')
-
                     if save_psf:
                         psfdataset = os.path.join(output_dir_fm, 'FM-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-psf-KLmodes-all.fits')
                         hdu = fits.PrimaryHDU(all_offsetpsfs)
                         hdul = fits.HDUList([hdu])
                         hdul.writeto(psfdataset, overwrite=True)
 
+                    # Apply high-pass filtering during the first companion fit only,
+                    # avoiding repeated filtering of the dataset for subsequent companions.
+                    if isinstance(highpass, bool) and highpass:
+                        raise NotImplementedError()
+                    highpass_temp = float(highpass) if not isinstance(highpass, bool) and k == 0 else False
+
                     if overwrite or (not os.path.exists(fmdataset) or not os.path.exists(klipdataset)):
-                        
+
                         # Initialize the pyKLIP FM class. Use sep/pa relative
                         # to the star and not the coronagraphic mask center.
                         input_wvs = np.unique(dataset.wvs)
                         if len(input_wvs) != 1:
                             raise NotImplementedError('Only implemented for broadband photometry')
+
                         fm_class = fmpsf.FMPlanetPSF(inputs_shape=dataset.input.shape,
                                                      numbasis=klmodes,
                                                      sep=guess_sep,
@@ -1582,16 +1438,6 @@ class AnalysisTools():
                                                      field_dependent_correction=None,
                                                      input_psfs_pas=all_pas)
 
-                        if not isinstance(highpass, bool):
-                            if k == 0:
-                                highpass_temp = float(highpass)
-                            else:
-                                highpass_temp = False
-                        else:
-                            if highpass:
-                                raise NotImplementedError()
-                            else:
-                                highpass_temp = False
                         fm.klip_dataset(dataset=dataset,
                                         fm_class=fm_class,
                                         mode=mode,
@@ -1608,7 +1454,7 @@ class AnalysisTools():
                                         psf_library=dataset.psflib,
                                         highpass=highpass_temp,
                                         mute_progression=True)
-                    
+
                     # Open the FM dataset.
                     with fits.open(fmdataset) as hdul:
                         fm_frame = hdul[0].data[klindex]
@@ -1618,10 +1464,9 @@ class AnalysisTools():
                         data_frame = hdul[0].data[klindex]
                         data_centx = hdul[0].header['PSFCENTX']
                         data_centy = hdul[0].header['PSFCENTY']
-                    
+
                     # If use_fm_psf is False, then replace the FM PSF in the
-                    # fm_frame with an integration time-averaged model offset
-                    # PSF.
+                    # fm_frame with an integration time-averaged model offset PSF.
                     if use_fm_psf == False:
                         av_offsetpsf = np.average(rot_offsetpsfs, weights=sci_totinttime, axis=0)
                         sx = av_offsetpsf.shape[1]
@@ -1635,96 +1480,96 @@ class AnalysisTools():
                         xshift = (fm_centx - int(fm_centx)) - (guess_dx - int(guess_dx))
                         yshift = (fm_centy - int(fm_centy)) + (guess_dy - int(guess_dy))
                         stamp = spline_shift(av_offsetpsf, (yshift, xshift), order=3, mode='constant', cval=0.)
-                        
-                        # Also need to scale the model offset PSF by the
-                        # guessed flux.
+
+                        # Also need to scale the model offset PSF by the guessed flux.
                         stamp *= guess_flux
-                        
+
                         # Insert the model offset PSF into the fm_frame.
                         fm_frame[:, :] = 0.
                         fm_frame[int(fm_centy) + int(guess_dy) - sy//2:int(fm_centy) + int(guess_dy) + sy//2 + 1, int(fm_centx) - int(guess_dx) - sx//2:int(fm_centx) - int(guess_dx) + sx//2 + 1] = stamp
-                    
-                    # assign forward model kwargs
-                    if 'boxsize' not in kwargs.keys() or kwargs['boxsize'] is None:
-                        boxsize = 35
-                    else:
-                        boxsize = kwargs['boxsize']
-                    if 'dr' not in kwargs.keys() or kwargs['dr'] is None:
-                        dr = 5
-                    else:
-                        dr = kwargs['dr']
-                    if 'exclr' not in kwargs.keys() or kwargs['exclr'] is None:
-                        exclr = 3*resolution
-                    else:
-                        exclr = kwargs['exclr']*resolution
-                    if 'xrange' not in kwargs.keys() or kwargs['xrange'] is None:
-                        xrange = 3.
-                    else:
-                        xrange = kwargs['xrange']
-                    if 'yrange' not in kwargs.keys() or kwargs['yrange'] is None:
-                        yrange = 3.
-                    else:
-                        yrange = kwargs['yrange']
-                    if 'frange' not in kwargs.keys() or kwargs['frange'] is None:
-                        frange = 2. #i.e. bounds=[guess_flux/(10.**frange),guess_flux*(10**frange)]
-                    else:
-                        frange = kwargs['frange']
-                    if 'corr_len_range' not in kwargs.keys() or kwargs['corr_len_range'] is None:
-                        corr_len_range = 1.
-                    else:
-                        corr_len_range = kwargs['corr_len_range']
-                    if 'corr_len_guess' not in kwargs.keys() or kwargs['corr_len_guess'] is None:
-                        corr_len_guess = 3.
-                    else:
-                        corr_len_guess = kwargs['corr_len_guess']
+
+                    # Assign forward model kwargs.
+                    fm_defaults = {
+                        'boxsize': 35,
+                        'dr': 5,
+                        'exclr': 3,
+                        'xrange': 3.,
+                        'yrange': 3.,
+                        'frange': 2.,
+                        'corr_len_range': 1.,
+                        'corr_len_guess': 3.,
+                    }
+
+                    fm_params = {key: kwargs[key] if kwargs.get(key) is not None else default
+                                for key, default in fm_defaults.items()}
+
+                    boxsize = fm_params['boxsize']
+                    dr = fm_params['dr']
+                    exclr = fm_params['exclr'] * resolution
+                    xrange = fm_params['xrange']
+                    yrange = fm_params['yrange']
+                    frange = fm_params['frange']  #i.e. bounds=[guess_flux/(10.**frange),guess_flux*(10**frange)]
+                    corr_len_range = fm_params['corr_len_range']
+                    corr_len_guess = fm_params['corr_len_guess']
 
                     # Fit the FM PSF to the KLIP-subtracted data.
+                    prefix = f'{mode}_NANNU{annuli}_NSUBS{subsections}_{key}'
                     if inject == False:
+
+                        # Initialize pyKLIP fitting class for MCMC or nested sampling.
+                        def init_fma(data_frame, fitmethod):
+
+                            if fitmethod == 'nested':
+                                output_dir_ns = os.path.join(output_dir_comp, 'temp-multinest/')
+                                fma = fitpsf.PlanetEvidence(guess_sep, guess_pa, boxsize, output_dir_ns)
+                            else:
+                                fma = fitpsf.FMAstrometry(guess_sep=guess_sep, guess_pa=guess_pa, fitboxsize=boxsize)
+
+                            # Generate FM and data stamps.
+                            fma.generate_fm_stamp(fm_image=fm_frame, fm_center=[fm_centx, fm_centy], padding=5)
+                            fma.generate_data_stamp(data=data_frame, data_center=[data_centx, data_centy], dr=dr, exclusion_radius=exclr)
+                            log.info('  --> Generated FM and data stamps')
+
+                            # Set fit bounds.
+                            if fitmethod in ('mcmc', 'nested'):
+                                # Configure fit kernel.
+                                fma.set_kernel(fitkernel, [corr_len_guess], [r'$l$'])
+                                log.info('  --> Set fit kernel to ' + fitkernel)
+
+                                # Set fit bounds.
+                                fma.set_bounds(xrange, yrange, frange, [corr_len_range])
+                                log.info('  --> Set fit bounds')
+
+                            # Clean invalid noise map values for MCMC.
+                            if fitmethod == 'mcmc':
+                                noise_map_max = np.nanmax(fma.noise_map)
+                                fma.noise_map[np.isnan(fma.noise_map)] = noise_map_max
+                                fma.noise_map[fma.noise_map == 0.] = noise_map_max
+
+                            return fma
+
+                        # Define filenames and stellar photometry.
+                        fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
+                        mstar_err_temp = mstar_err[filt] if isinstance(mstar_err, dict) else mstar_err
+                        fstar_jy = fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
+                        fstar_jy_err = fstar_jy * (mstar_err_temp * np.log(10) / 2.5)  # Jy
+                        fstar_flam = fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
+                        fstar_flam_err = fstar_flam * (mstar_err_temp * np.log(10) / 2.5)  # erg/s/cm^2/A
+                        fstar_wm2um = fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
+                        fstar_wm2um_err = fstar_wm2um * (mstar_err_temp * np.log(10) / 2.5)  # W/m^2/um
+
+                        # Set MCMC parameters from kwargs.
+                        nwalkers = 50 if kwargs.get('nwalkers') is None else kwargs['nwalkers']
+                        nburn = 100 if kwargs.get('nburn') is None else kwargs['nburn']
+                        nsteps = 100 if kwargs.get('nsteps') is None else kwargs['nsteps']
+                        nthreads = 4 if kwargs.get('nthreads') is None else kwargs['nthreads']
 
                         # Remove a constant background level from the
                         # KLIP-subtracted data before fitting the FM PSF?
                         if remove_background:
 
-                            # Initialize pyKLIP FMAstrometry class.
-                            fma = fitpsf.FMAstrometry(guess_sep=guess_sep,
-                                                      guess_pa=guess_pa,
-                                                      fitboxsize=boxsize)
-                            fma.generate_fm_stamp(fm_image=fm_frame,
-                                                  fm_center=[fm_centx, fm_centy],
-                                                  padding=5)
-                            fma.generate_data_stamp(data=data_frame,
-                                                    data_center=[data_centx, data_centy],
-                                                    dr=dr,
-                                                    exclusion_radius=exclr)
-                            corr_len_label = r'$l$'
-                            fma.set_kernel(fitkernel, [corr_len_guess], [corr_len_label])
-                            fma.set_bounds(xrange, yrange, frange, [corr_len_range])
-
-                            # Make sure that the noise map is invertible.
-                            noise_map_max = np.nanmax(fma.noise_map)
-                            fma.noise_map[np.isnan(fma.noise_map)] = noise_map_max
-                            fma.noise_map[fma.noise_map == 0.] = noise_map_max
-
-                            # Set MCMC parameters from kwargs.
-                            if 'nwalkers' not in kwargs.keys() or kwargs['nwalkers'] is None:
-                                nwalkers = 50
-                            else:
-                                nwalkers = kwargs['nwalkers']
-                            if 'nburn' not in kwargs.keys() or kwargs['nburn'] is None:
-                                nburn = 100
-                            else:
-                                nburn = kwargs['nburn']
-                            if 'nsteps' not in kwargs.keys() or kwargs['nsteps'] is None:
-                                nsteps = 100
-                            else:
-                                nsteps = kwargs['nsteps']
-                            if 'nthreads' not in kwargs.keys() or kwargs['nthreads'] is None:
-                                nthreads = 4
-                            else:
-                                nthreads = kwargs['nthreads']
-
-                            # Run the MCMC fit.
                             chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-bka_chain_c%.0f' % (k + 1) + '.pkl')
+                            fma = init_fma(data_frame, 'mcmc')
                             fma.fit_astrometry(nwalkers=nwalkers,
                                                nburn=nburn,
                                                nsteps=nsteps,
@@ -1734,10 +1579,7 @@ class AnalysisTools():
                             # Estimate the background level from those pixels
                             # in the KLIP-subtracted data which have a small
                             # flux in the best fit FM PSF.
-                            if 'hsz' not in kwargs.keys() or kwargs['hsz'] is None:
-                                hsz = 35
-                            else:
-                                hsz = kwargs['hsz']
+                            hsz = kwargs.get('hsz') if kwargs.get('hsz') is not None else 35
                             stamp = data_frame.copy()
                             xp = int(round(data_centx - guess_dx))
                             yp = int(round(data_centy + guess_dy))
@@ -1756,56 +1598,19 @@ class AnalysisTools():
                             bg = np.nanmedian(stamp[np.abs(psf_shift) < thresh])
                             data_frame -= bg
 
-                        # MCMC.
+                        evidence_ratio = np.nan
+                        result = None
+
                         if fitmethod == 'mcmc':
 
-                            # Initialize pyKLIP FMAstrometry class.
-                            fma = fitpsf.FMAstrometry(guess_sep=guess_sep,
-                                                      guess_pa=guess_pa,
-                                                      fitboxsize=boxsize,
-                                                      )
-                            fma.generate_fm_stamp(fm_image=fm_frame,
-                                                  fm_center=[fm_centx, fm_centy],
-                                                  padding=5)
-                            fma.generate_data_stamp(data=data_frame,
-                                                    data_center=[data_centx, data_centy],
-                                                    dr=dr,
-                                                    exclusion_radius=exclr)
-                            corr_len_label = r'$l$'
-                            fma.set_kernel(fitkernel, [corr_len_guess], [corr_len_label])
-                            fma.set_bounds(xrange, yrange, frange, [corr_len_range])
-                            
-                            # Make sure that the noise map is invertible.
-                            noise_map_max = np.nanmax(fma.noise_map)
-                            fma.noise_map[np.isnan(fma.noise_map)] = noise_map_max
-                            fma.noise_map[fma.noise_map == 0.] = noise_map_max
-                            
-                            # Set MCMC parameters from kwargs.
-                            if 'nwalkers' not in kwargs.keys() or kwargs['nwalkers'] is None:
-                                nwalkers = 50
-                            else:
-                                nwalkers = kwargs['nwalkers']
-                            if 'nburn' not in kwargs.keys() or kwargs['nburn'] is None:
-                                nburn = 100
-                            else:
-                                nburn = kwargs['nburn']
-                            if 'nsteps' not in kwargs.keys() or kwargs['nsteps'] is None:
-                                nsteps = 100
-                            else:
-                                nsteps = kwargs['nsteps']
-                            if 'nthreads' not in kwargs.keys() or kwargs['nthreads'] is None:
-                                nthreads = 4
-                            else:
-                                nthreads = kwargs['nthreads']
-
-                            # Run the MCMC fit.
-                            chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-bka_chain_c%.0f' % (k + 1) + '.pkl')
+                            chain_output = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-chain_c%.0f' % (k + 1) + '.pkl')
+                            fma = init_fma(data_frame, fitmethod)
                             fma.fit_astrometry(nwalkers=nwalkers,
                                                nburn=nburn,
                                                nsteps=nsteps,
                                                numthreads=nthreads,
                                                chain_output=chain_output)
-                            
+
                             # Plot the MCMC fit results.
                             fig = fma.make_corner_plot()
                             if save_figures:
@@ -1822,149 +1627,22 @@ class AnalysisTools():
                             plt.show()
                             plt.close(fig)
 
-                            # Write the MCMC fit results into a table.
-                            if isinstance(mstar_err, dict):
-                                mstar_err_temp = mstar_err[filt]
-                            else:
-                                mstar_err_temp = mstar_err
-                            rel_err = np.sqrt((fma.fit_flux.error / fma.fit_flux.bestfit)**2 + (mstar_err_temp * np.log(10) / 2.5)**2)
-                            flux_jy = fma.fit_flux.bestfit * guess_flux * fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            flux_jy_err = flux_jy * rel_err  # Jy
-                            flux_flam = fma.fit_flux.bestfit * guess_flux * fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
-                            flux_flam_err = flux_flam * rel_err  # erg/s/cm^2/A
-                            flux_wm2um = fma.fit_flux.bestfit * guess_flux * fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
-                            flux_wm2um_err = flux_wm2um * rel_err  # W/m^2/um
-                            fstar_jy = fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            fstar_jy_err = fstar_jy * (mstar_err_temp * np.log(10) / 2.5)  # Jy
-                            fstar_flam = fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
-                            fstar_flam_err = fstar_flam * (mstar_err_temp * np.log(10) / 2.5)  # erg/s/cm^2/A
-                            fstar_wm2um = fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
-                            fstar_wm2um_err = fstar_wm2um * (mstar_err_temp * np.log(10) / 2.5)  # W/m^2/um
-                            delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
-                            delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
-                            appmag = mstar[filt] + delmag  # vegamag
-                            appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
-                            fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
-
-                            if split_fit:
-                                # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
-                                fig, result = best_convfit_and_residuals(fma,
-                                                                         minmethod=minmethod,
-                                                                         initial_params=gauss_param_guesses,
-                                                                         bounds=gauss_param_ranges)
-
-                                if save_figures:
-                                    path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_conv_c%.0f' % (k + 1) + '.pdf')
-                                    fig.suptitle(mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
-                                    fig.savefig(path)
-                                plt.show()
-                                plt.close(fig)
-
-                                tab.add_row((k + 1,
-                                             fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
-                                             flux_jy,
-                                             flux_jy_err,
-                                             flux_flam,
-                                             flux_flam_err,
-                                             flux_wm2um,
-                                             flux_wm2um_err,
-                                             fstar_jy,
-                                             fstar_jy_err,
-                                             fstar_flam,
-                                             fstar_flam_err,
-                                             fstar_wm2um,
-                                             fstar_wm2um_err,
-                                             fma.raw_flux.bestfit * guess_flux,
-                                             fma.raw_flux.error * guess_flux,
-                                             delmag,  # mag
-                                             delmag_err,  # mag
-                                             appmag,  # mag
-                                             appmag_err,  # mag
-                                             mstar[filt],  # mag
-                                             mstar_err_temp,  # mag
-                                             np.nan,
-                                             np.nan,
-                                             scale_factor_avg,
-                                             tp_comsubst,
-                                             fitsfile,
-                                             result.x[3],
-                                             np.nan,
-                                             result.x[0],
-                                             np.nan,
-                                             result.x[1],
-                                             np.nan,
-                                             result.x[2],
-                                             np.nan,
-                                             ))
-                            else:
-                                tab.add_row((k + 1,
-                                             fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
-                                             flux_jy,
-                                             flux_jy_err,
-                                             flux_flam,
-                                             flux_flam_err,
-                                             flux_wm2um,
-                                             flux_wm2um_err,
-                                             fstar_jy,
-                                             fstar_jy_err,
-                                             fstar_flam,
-                                             fstar_flam_err,
-                                             fstar_wm2um,
-                                             fstar_wm2um_err,
-                                             fma.raw_flux.bestfit * guess_flux,
-                                             fma.raw_flux.error * guess_flux,
-                                             delmag,  # mag
-                                             delmag_err,  # mag
-                                             appmag,  # mag
-                                             appmag_err,  # mag
-                                             mstar[filt],  # mag
-                                             mstar_err_temp,  # mag
-                                             np.nan,
-                                             np.nan,
-                                             scale_factor_avg,
-                                             tp_comsubst,
-                                             fitsfile))
-
-                            # Write the FM PSF to a file for future plotting.
-                            ut.write_fitpsf_images(fma, fitsfile, tab[-1])
-
                         # Nested sampling.
                         elif fitmethod == 'nested':
-                            output_dir_ns = os.path.join(output_dir_comp, 'temp-multinest/')
 
-                            # Initialize PlanetEvidence module.
+                            # Initialize PlanetEvidence and configure fit.
                             try:
-                                fit = fitpsf.PlanetEvidence(guess_sep, guess_pa, boxsize, output_dir_ns)
+                                fma = init_fma(data_frame, fitmethod)
                             except ModuleNotFoundError:
                                 raise ModuleNotFoundError('Pymultinest is not installed, try\n\"conda install -c conda-forge pymultinest\"')
-                            log.info('  --> Initialized PlanetEvidence module')
-
-                            # Generate FM and data stamps.
-                            fit.generate_fm_stamp(fm_frame, [fm_centx, fm_centy], padding=5)
-                            fit.generate_data_stamp(data_frame, [data_centx, data_centy], dr=dr, exclusion_radius=exclr)
-                            log.info('  --> Generated FM and data stamps')
-
-                            # Set fit kernel.
-                            corr_len_label = 'l'
-                            fit.set_kernel(fitkernel, [corr_len_guess], [corr_len_label])
-                            log.info('  --> Set fit kernel to ' + fitkernel)
-
-                            # Set fit bounds.
-                            fit.set_bounds(xrange, yrange, frange, [corr_len_range])
-                            log.info('  --> Set fit bounds')
+                            log.info('  --> Initialized PlanetEvidence and configured fit')
 
                             # Run the pymultinest fit.
-                            fit.multifit()
+                            fma.multifit()
                             log.info('  --> Finished pymultinest fit')
 
                             # Get model evidence and posteriors.
-                            evidence = fit.fit_stats()
+                            evidence = fma.fit_stats()
                             fm_evidence = evidence[0]['nested sampling global log-evidence']  # FM evidence
                             fm_posteriors = evidence[0]['marginals']  # FM posteriors
                             null_evidence = evidence[1]['nested sampling global log-evidence']  # null evidence
@@ -1972,7 +1650,7 @@ class AnalysisTools():
                             evidence_ratio = fm_evidence - null_evidence
 
                             # Plot the pymultinest fit results.
-                            H1, H0 = fit.fit_plots()
+                            H1, H0 = fma.fit_plots()
                             if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-corner_c%.0f' % (k + 1) + '.pdf')
                                 H1.savefig(path)
@@ -1982,179 +1660,96 @@ class AnalysisTools():
                             plt.close(H1)
                             plt.close(H0)
 
-                            fig, _ = fit.fm_residuals()
+                            fig, _ = fma.fm_residuals()
                             if save_figures:
                                 path = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-model_c%.0f' % (k + 1) + '.pdf')
                                 plt.savefig(path)
                             plt.show()
                             plt.close(fig)
 
-                            # Write the pymultinest fit results into a table.
-                            if isinstance(mstar_err, dict):
-                                mstar_err_temp = mstar_err[filt]
-                            else:
-                                mstar_err_temp = mstar_err
-                            rel_err = np.sqrt((fit.fit_flux.error / fit.fit_flux.bestfit)**2 + (mstar_err_temp * np.log(10) / 2.5)**2)
-                            flux_jy = fit.fit_flux.bestfit * guess_flux * fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            flux_jy_err = flux_jy * rel_err  # Jy
-                            flux_flam = fit.fit_flux.bestfit * guess_flux * fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
-                            flux_flam_err = flux_flam * rel_err  # erg/s/cm^2/A
-                            flux_wm2um = fit.fit_flux.bestfit * guess_flux * fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
-                            flux_wm2um_err = flux_wm2um * rel_err  # W/m^2/um
-                            fstar_jy = fzero[filt] / 10**(mstar[filt] / 2.5)  # Jy
-                            fstar_jy_err = fstar_jy * (mstar_err_temp * np.log(10) / 2.5)  # Jy
-                            fstar_flam = fzero_flam[filt] / 10**(mstar[filt] / 2.5)  # erg/s/cm^2/A
-                            fstar_flam_err = fstar_flam * (mstar_err_temp * np.log(10) / 2.5)  # erg/s/cm^2/A
-                            fstar_wm2um = fzero_wm2um[filt] / 10**(mstar[filt] / 2.5)  # W/m^2/um
-                            fstar_wm2um_err = fstar_wm2um * (mstar_err_temp * np.log(10) / 2.5)  # W/m^2/um
-                            delmag = -2.5 * np.log10(fit.fit_flux.bestfit * guess_flux)  # mag
-                            delmag_err = 2.5 / np.log(10.) * fit.fit_flux.error / fit.fit_flux.bestfit  # mag
-                            appmag = mstar[filt] + delmag  # vegamag
-                            appmag_err = np.sqrt(mstar_err_temp**2 + delmag_err**2)
-                            fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
-                            tab.add_row((k + 1,
-                                         -(fit.fit_x.bestfit - data_centx) * pxsc_arcsec,  # arcsec
-                                         fit.fit_x.error * pxsc_arcsec,  # arcsec
-                                         (fit.fit_y.bestfit - data_centy) * pxsc_arcsec,  # arcsec
-                                         fit.fit_y.error * pxsc_arcsec,  # arcsec
-                                         flux_jy,
-                                         flux_jy_err,
-                                         flux_flam,
-                                         flux_flam_err,
-                                         flux_wm2um,
-                                         flux_wm2um_err,
-                                         fstar_jy,
-                                         fstar_jy_err,
-                                         fstar_flam,
-                                         fstar_flam_err,
-                                         fstar_wm2um,
-                                         fstar_wm2um_err,
-                                         fit.fit_flux.bestfit * guess_flux,
-                                         fit.fit_flux.error * guess_flux,
-                                         delmag,  # mag
-                                         delmag_err,  # mag
-                                         appmag,  # mag
-                                         appmag_err,  # mag
-                                         mstar[filt],  # mag
-                                         mstar_err_temp,  # mag
-                                         np.nan,
-                                         evidence_ratio,
-                                         scale_factor_avg,
-                                         tp_comsubst,
-                                         fitsfile))
-
-                            # Write the FM PSF to a file for future plotting.
-                            ut.write_fitpsf_images(fit, fitsfile, tab[-1])
-
-                        # Otherwise.
+                        elif split_fit:
+                            # Extended-source-only path: mock the Bayesian fit, then fit a Gaussian.
+                            log.info('  --> Skipping MCMC/nested fit; fitting extended source only')
+                            fma = init_fma(data_frame, 'mock')
+                            fma.fit_flux = fitpsf.ParamRange(1, [0, 0])
+                            fma.fit_x = fitpsf.ParamRange(fma.data_stamp_x_center, [0, 0])
+                            fma.fit_y = fitpsf.ParamRange(fma.data_stamp_y_center, [0, 0])
+                            fma.raw_RA_offset = fitpsf.ParamRange(-(fma.fit_x.bestfit - fma.data_center[0]),
+                                                                    fma.fit_x.error_2sided[::-1])
+                            fma.raw_Dec_offset = fitpsf.ParamRange(fma.fit_y.bestfit - fma.data_center[1],
+                                                                   fma.fit_y.error_2sided[::-1])
+                            fma.raw_flux = fma.fit_flux
                         else:
-                            if split_fit:
-                                # Mocking the MCMC fit results using the initial guesses and perform only the Gaussian fit.
-                                log.info('  --> Skipping  mcmc and pymultinest fit, just fitting for extended source.')
-                                # Initialize pyKLIP FMAstrometry class.
-                                fma = fitpsf.FMAstrometry(guess_sep=guess_sep,
-                                                          guess_pa=guess_pa,
-                                                          fitboxsize=boxsize,
-                                                          )
-                                fma.generate_fm_stamp(fm_image=fm_frame,
-                                                      fm_center=[fm_centx, fm_centy],
-                                                      padding=5)
-                                fma.generate_data_stamp(data=data_frame,
-                                                        data_center=[data_centx, data_centy],
-                                                        dr=dr,
-                                                        exclusion_radius=exclr)
+                            raise NotImplementedError(f'Unsupported fitmethod: {fitmethod}')
+                            
+                        # Optional Gaussian convolution fit, as in the original MCMC/mock paths.
+                        if split_fit and fitmethod != 'nested':
+                            fig, result = best_convfit_and_residuals(fma, minmethod=minmethod,
+                                                                     initial_params=gauss_param_guesses,
+                                                                     bounds=gauss_param_ranges if fitmethod == 'mcmc' else None)
+                            if save_figures:
+                                fig.suptitle(prefix)
+                                fig.savefig(os.path.join(output_dir_comp, f'{prefix}-model_conv_c{k + 1}.pdf'))
+                            plt.show()
+                            plt.close(fig)
 
-                                fma.fit_flux = fitpsf.ParamRange(1, [0, 0])
-                                fma.fit_x  = fitpsf.ParamRange(fma.data_stamp_x_center,[0,0])
-                                fma.fit_y  = fitpsf.ParamRange(fma.data_stamp_y_center,[0,0])
-                                fma.raw_RA_offset = fitpsf.ParamRange(-(fma.fit_x.bestfit - fma.data_center[0]),
-                                                                        fma.fit_x.error_2sided[::-1])
-                                fma.raw_Dec_offset = fitpsf.ParamRange(fma.fit_y.bestfit - fma.data_center[1],
-                                                                       fma.fit_y.error_2sided[::-1])
-                                fma.raw_flux = fma.fit_flux
+                        # Shared photometry.
+                        fitted_flux = fma.fit_flux.bestfit
+                        fitted_flux_err = fma.fit_flux.error
+                        rel_err = np.sqrt((fitted_flux_err / fitted_flux)**2 + (mstar_err_temp * np.log(10) / 2.5)**2)
+                        flux_jy = fitted_flux * guess_flux * fstar_jy
+                        flux_jy_err = flux_jy * rel_err
+                        flux_flam = fitted_flux * guess_flux * fstar_flam
+                        flux_flam_err = flux_flam * rel_err
+                        flux_wm2um = flux_flam * guess_flux * fstar_wm2um
+                        flux_wm2um_err = flux_wm2um * rel_err
+                        delmag = -2.5 * np.log10(fitted_flux * guess_flux)
+                        delmag_err = 2.5 / np.log(10) * fitted_flux_err / fitted_flux
+                        appmag = mstar[filt] + delmag
+                        appmag_err = np.sqrt(mstar_err_temp ** 2 + delmag_err ** 2)
 
-                                if isinstance(mstar_err, dict):
-                                    mstar_err_temp = mstar_err[filt]
-                                else:
-                                    mstar_err_temp = mstar_err
-                                rel_err = np.sqrt((fma.fit_flux.error / fma.fit_flux.bestfit)**2 + (mstar_err_temp * np.log(10) / 2.5)**2) if fma.fit_flux.bestfit != 0 else 0.0
-                                flux_jy = fma.fit_flux.bestfit * guess_flux * fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
-                                flux_jy_err = flux_jy * rel_err  # Jy
-                                flux_flam = fma.fit_flux.bestfit * guess_flux * fzero_flam[filt] / 10 ** (mstar[filt] / 2.5)  # erg/s/cm^2/A
-                                flux_flam_err = flux_flam * rel_err  # erg/s/cm^2/A
-                                flux_wm2um = fma.fit_flux.bestfit * guess_flux * fzero_wm2um[filt] / 10 ** (mstar[filt] / 2.5)  # W/m^2/um
-                                flux_wm2um_err = flux_wm2um * rel_err  # W/m^2/um
-                                fstar_jy = fzero[filt] / 10 ** (mstar[filt] / 2.5)  # Jy
-                                fstar_jy_err = fstar_jy * (mstar_err_temp * np.log(10) / 2.5)  # Jy
-                                fstar_flam = fzero_flam[filt] / 10 ** (mstar[filt] / 2.5)  # erg/s/cm^2/A
-                                fstar_flam_err = fstar_flam * (mstar_err_temp * np.log(10) / 2.5)  # erg/s/cm^2/A
-                                fstar_wm2um = fzero_wm2um[filt] / 10 ** (mstar[filt] / 2.5)  # W/m^2/um
-                                fstar_wm2um_err = fstar_wm2um * (mstar_err_temp * np.log(10) / 2.5)  # W/m^2/um
-                                delmag = -2.5 * np.log10(fma.fit_flux.bestfit * guess_flux)  # mag
-                                delmag_err = 2.5 / np.log(10.) * fma.fit_flux.error / fma.fit_flux.bestfit  # mag
-                                appmag = mstar[filt] + delmag  # vegamag
-                                appmag_err = np.sqrt(mstar_err_temp ** 2 + delmag_err ** 2)
-                                fitsfile = os.path.join(output_dir_comp, mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                                    subsections) + '_' + key + '-fitpsf_c%.0f' % (k + 1) + '.fits')
+                        # Astrometry and raw contrast depend on the class used for fitting.
+                        if fitmethod == 'nested':
+                            ra = -(fma.fit_x.bestfit - data_centx) * pxsc_arcsec
+                            ra_err = fma.fit_x.error * pxsc_arcsec
+                            dec = (fma.fit_y.bestfit - data_centy) * pxsc_arcsec
+                            dec_err = fma.fit_y.error * pxsc_arcsec
+                            con = fma.fit_flux.bestfit * guess_flux
+                            con_err = fma.fit_flux.error * guess_flux
+                        else:
+                            ra = fma.raw_RA_offset.bestfit * pxsc_arcsec
+                            ra_err = fma.raw_RA_offset.error * pxsc_arcsec
+                            dec = fma.raw_Dec_offset.bestfit * pxsc_arcsec
+                            dec_err = fma.raw_Dec_offset.error * pxsc_arcsec
+                            con = fma.raw_flux.bestfit * guess_flux
+                            con_err = fma.raw_flux.error * guess_flux
 
-                                # fit the sources with a 2D gaussian only to evaluate the sigma_x, sigma_y and theta
-                                fig, result = best_convfit_and_residuals(fma,
-                                                                         minmethod=minmethod,
-                                                                         initial_params=gauss_param_guesses)
+                        # Save the results to table.
+                        row = [
+                                k + 1, ra, ra_err, dec, dec_err,
+                                flux_jy, flux_jy_err, flux_flam, flux_flam_err,
+                                flux_wm2um, flux_wm2um_err,
+                                fstar_jy, fstar_jy_err, fstar_flam, fstar_flam_err,
+                                fstar_wm2um, fstar_wm2um_err, con, con_err,
+                                delmag, delmag_err, appmag, appmag_err,
+                                mstar[filt], mstar_err_temp,
+                                np.nan, evidence_ratio, scale_factor_avg, tp_comsubst,
+                                
+                                # Add extended fit parameter columns to the results table.
+                                *([result.x[3], np.nan,
+                                   result.x[0], np.nan,
+                                   result.x[1], np.nan,
+                                   result.x[2], np.nan] if fitmethod != 'nested' and result is not None
+                                   else [np.nan] * 8
+                                   if split_fit
+                                   else []),
 
-                                if save_figures:
-                                    path = os.path.join(output_dir_comp,
-                                                        mode + '_NANNU' + str(annuli) + '_NSUBS' + str(
-                                                            subsections) + '_' + key + '-model_conv_c%.0f' % (
-                                                                    k + 1) + '.pdf')
-                                    fig.suptitle(
-                                        mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key)
-                                    fig.savefig(path)
-                                plt.show()
-                                plt.close(fig)
+                                fitsfile,
+                            ]
 
-                                tab.add_row((k + 1,
-                                             fma.raw_RA_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_RA_offset.error * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.bestfit * pxsc_arcsec,  # arcsec
-                                             fma.raw_Dec_offset.error * pxsc_arcsec,  # arcsec
-                                             flux_jy,
-                                             flux_jy_err,
-                                             flux_flam,
-                                             flux_flam_err,
-                                             flux_wm2um,
-                                             flux_wm2um_err,
-                                             fstar_jy,
-                                             fstar_jy_err,
-                                             fstar_flam,
-                                             fstar_flam_err,
-                                             fstar_wm2um,
-                                             fstar_wm2um_err,
-                                             fma.raw_flux.bestfit * guess_flux,
-                                             fma.raw_flux.error * guess_flux,
-                                             delmag,  # mag
-                                             delmag_err,  # mag
-                                             appmag,  # mag
-                                             appmag_err,  # mag
-                                             mstar[filt],  # mag
-                                             mstar_err_temp,  # mag
-                                             np.nan,
-                                             np.nan,
-                                             scale_factor_avg,
-                                             tp_comsubst,
-                                             fitsfile,
-                                             result.x[3],
-                                             np.nan,
-                                             result.x[0],
-                                             np.nan,
-                                             result.x[1],
-                                             np.nan,
-                                             result.x[2],
-                                             np.nan,
-                                             ))
-                            else:
-                                raise NotImplementedError()
-
+                        tab.add_row(row)
+                        ut.write_fitpsf_images(fma, fitsfile, tab[-1])
+                        
                         # Plot estimated background level.
                         if remove_background:
                             f, ax = plt.subplots(1, 4, figsize=(4 * 6.4, 4.8))
@@ -2191,40 +1786,46 @@ class AnalysisTools():
                                 log.info(f" Plot saved in {path}")
                                 plt.close()
 
-                    # Subtract companion before fitting the next one.
+                    # Subtract or inject companion before fitting the next one.
                     if subtract or inject:
 
                         # Subtract companion from pyKLIP dataset. Use offset
                         # PSFs w/o high-pass filtering because this will be
                         # applied by the klip_dataset routine below.
                         if inject:
-                            ra = companions[k][0]  # arcsec
-                            dec = companions[k][1]  # arcsec
-                            con = companions[k][2]
-                            inputflux = con * np.array(all_offsetpsfs_nohpf)  # positive to inject companion
-                            fileprefix = 'INJECTED-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key
+                            ra, dec, con = companions[k]
+                            sign = 1
+                            label = 'INJECTED'
                         else:
-                            ra = tab[-1]['RA']  # arcsec
-                            dec = tab[-1]['DEC']  # arcsec
+                            ra = tab[-1]['RA']
+                            dec = tab[-1]['DEC']
                             con = tab[-1]['CON']
-                            inputflux = -con * np.array(all_offsetpsfs_nohpf)  # negative to remove companion
-                            fileprefix = 'KILLED-' + mode + '_NANNU' + str(annuli) + '_NSUBS' + str(subsections) + '_' + key
+                            sign = -1
+                            label = 'KILLED'
+
+                        # Use positive flux for injection, negative for subtraction.
+                        inputflux = sign * con * np.array(all_offsetpsfs_nohpf)
+                        fileprefix = f'{label}-{prefix}'
+
+                        # Convert companion position to separation and position angle.
                         sep = np.sqrt(ra**2 + dec**2) / pxsc_arcsec  # pix
                         pa = np.rad2deg(np.arctan2(ra, dec))  # deg
                         thetas = [pa + 90. - all_pa for all_pa in all_pas]
-                        fakes.inject_planet(frames=dataset_orig.input, centers=dataset_orig.centers, inputflux=inputflux, astr_hdrs=dataset_orig.wcs, radius=sep, pa=pa, thetas=np.array(thetas), field_dependent_correction=None)
+
+                        # Inject or subtract companion from the pyKLIP dataset.
+                        fakes.inject_planet(frames=dataset_orig.input,
+                                            centers=dataset_orig.centers,
+                                            inputflux=inputflux,
+                                            astr_hdrs=dataset_orig.wcs,
+                                            radius=sep,
+                                            pa=pa,
+                                            thetas=thetas,
+                                            field_dependent_correction=None)
 
                         if save_preklip:
-
-                            # Copy pre-KLIP files.
-                            for filepath in filepaths:
-                                src = filepath
-                                dst = os.path.join(output_dir_pk, os.path.split(src)[1])
-                                shutil.copy(src, dst)
-                            for psflib_filepath in psflib_filepaths:
-                                src = psflib_filepath
-                                dst = os.path.join(output_dir_pk, os.path.split(src)[1])
-                                shutil.copy(src, dst)
+                            # Copy pre-KLIP science and PSF library files.
+                            for filepath in list(filepaths) + list(psflib_filepaths):
+                                shutil.copy(filepath, os.path.join(output_dir_pk, os.path.basename(filepath)))
 
                             # Update content of pre-KLIP files.
                             filenames = dataset_orig.filenames.copy()
@@ -2250,25 +1851,21 @@ class AnalysisTools():
                             self.database.obs = temp
 
                         # Reduce companion-subtracted data.
-                        mode = self.database.red[key]['MODE'][j]
-                        annuli = self.database.red[key]['ANNULI'][j]
-                        annuli_spacing = self.database.red[key]['ANNSPACE'][j]
-                        subsections = self.database.red[key]['SUBSECTS'][j]
                         parallelized.klip_dataset(dataset=dataset_orig,
-                                                  mode=mode,
-                                                  outputdir=output_dir_fm,
-                                                  fileprefix=fileprefix,
-                                                  annuli=annuli,
-                                                  annuli_spacing=annuli_spacing,
-                                                  subsections=subsections,
-                                                  movement=1.,
-                                                  numbasis=klmodes,
-                                                  maxnumbasis=maxnumbasis,
-                                                  calibrate_flux=False,
-                                                  aligned_center=dataset_orig._centers[0],
-                                                  psf_library=dataset_orig.psflib,
-                                                  highpass=highpass_temp,
-                                                  verbose=False)
+                                                    mode=mode,
+                                                    outputdir=output_dir_fm,
+                                                    fileprefix=fileprefix,
+                                                    annuli=annuli,
+                                                    annuli_spacing=annuli_spacing,
+                                                    subsections=subsections,
+                                                    movement=1.,
+                                                    numbasis=klmodes,
+                                                    maxnumbasis=maxnumbasis,
+                                                    calibrate_flux=False,
+                                                    aligned_center=dataset_orig._centers[0],
+                                                    psf_library=dataset_orig.psflib,
+                                                    highpass=highpass_temp,
+                                                    verbose=False)
                         head = fits.getheader(self.database.red[key]['FITSFILE'][j], 0)
                         temp = os.path.join(output_dir_fm, fileprefix + '-KLmodes-all.fits')
                         hdul = fits.open(temp)
@@ -2279,7 +1876,7 @@ class AnalysisTools():
                     # Restore original pyKLIP dataset.
                     if subtract:
                         dataset = dataset_orig
-
+                        
                 # Update source database.
                 self.database.update_src(key, j, tab)
 
