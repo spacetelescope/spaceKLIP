@@ -32,6 +32,9 @@ from typing import Literal
 
 from pathlib import Path
 
+import one_pass_fitting
+
+import stpsf
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -86,10 +89,12 @@ def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, par
 def fetch_catalog_for_image_fov(path2savetable,
                                 image: np.ndarray,
                                 header,
+                                dq=None,
                                 use_gaia=False,
                                 use_allwise=False,
                                 use_simbad=False,
                                 use_user_catalog=False,
+                                use_onepassfit=False,
                                 path2catalog=None,
                                 all_stellar_otypes=None,
                                 border=3,
@@ -364,6 +369,34 @@ def fetch_catalog_for_image_fov(path2savetable,
                             #
                             #     return tables
 
+
+
+                            def onepassfit(data, wcs, outname, dq, det = 'nrcalong', filt = 'F444W', pupil = 'CLEAR'):
+
+                                def make_nircam_psf(detector: str, filt: str, pupil: str, npsf: int = 9):
+                                    """Get GriddedPSFModel for a given combination of nircam detector/optical element"""
+                                    if detector.lower() in ['along', 'blong']:
+                                        detector = detector.lower().replace('long', '5')
+                                    nrc.detector = 'nrc' + detector.upper()
+
+                                    if pupil.upper() == 'CLEAR':
+                                        nrc.filter = filt.lower()
+                                    else:
+                                        nrc.filter = pupil.lower()
+                                    # 9 is likely too low, probably make it 25
+                                    grid = nrc.psf_grid(num_psfs=npsf, all_detectors=False)
+                                    return grid
+
+                                nrc = stpsf.NIRCam()
+                                model = make_nircam_psf(det.replace('nrc', ''), filt, pupil,
+                                                        npsf=16)  # Change this line for MIRI, or if you want a finer PSF grid
+
+                                opf = one_pass_fitting.OnePassPhot(model, fmin=50,
+                                                                   pmax=500)  # fmin and pmax are in data units, so MJy/sr by default for JWST
+                                tbl = opf(data, data_wcs=wcs, do_sat=False, dq=dq)
+                                tbl.write(outname, format="csv", overwrite=True)
+                                pass
+
                             if isinstance(npix, int):
                                 npix = [npix, npix, npix, npix]  # left, right, bottom, top
                             else:
@@ -400,6 +433,9 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 elif use_simbad:
                                     method = "simbad"
                                     query_simbad(path2savetable, center_ra_deg, center_dec_deg, radius_deg, all_stellar_otypes=all_stellar_otypes)#, use_mocadb=use_mocadb)
+                                elif use_onepassfit:
+                                    method = "onepassfit"
+                                    onepassfit(data, cel_wcs, path2savetable, dq)
                                 else:
                                     log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
                                     return Table()
@@ -421,7 +457,7 @@ def fetch_catalog_for_image_fov(path2savetable,
 
                             # Add detector pixel coordinates from catalog sky coordinates.
                             ra_col = "ra" if "ra" in table.colnames else ("RA" if "RA" in table.colnames else None)
-                            dec_col = "dec" if "dec" in table.colnames else ("DEC" if "DEC" in table.colnames else None)
+                            dec_col = "dec" if "dec" in table.colnames else ("DEC" if "DEC" in table.colnames else ("Dec" if "Dec" in table.colnames else None))
                             if ra_col is None or dec_col is None:
                                 log.warning(f"{method} catalog does not include ra/dec columns; returning sky-only tables.")
                                 return table

@@ -4308,6 +4308,7 @@ class ImageTools():
                                      use_gaia=False,
                                      use_allwise=False,
                                      use_simbad=True,
+                                     use_onepassfit=False,
                                      all_stellar_otypes=None,
                                      r=None,
                                      sharpness_range=(0.3, 0.85),
@@ -4565,6 +4566,17 @@ class ImageTools():
                                                                              threshold=threshold, all_stellar_otypes=all_stellar_otypes,
                                                                              border=border)
                                 catalogs_to_combine.append(simbad_results)
+                            if use_onepassfit:
+                                # TODO: Implement one-pass fit for source detection. This is not working yet, for example, we do not have the dq after we perform the bpcleaned_sigclip. We need to implement a way to get the dq after the bpcleaned_sigclip.
+                                hdulist2 = fits.open(fitsfile.replace('bpcleaned_sigclip', 'stage2'))
+                                dq = hdulist2[3].data[0]
+                                log.info("Running one-pass fit for source detection")
+                                onepassfit_path_temp = region_path.replace(".reg", "_onepassfit.csv")
+                                onepassfit_results = fetch_catalog_for_image_fov(onepassfit_path_temp, data, head_sci, dq=dq,
+                                                                             use_onepassfit=True, npix=npix, fwhm=fwhm,
+                                                                             threshold=threshold,
+                                                                             border=border)
+                                catalogs_to_combine.append(onepassfit_results)
                             if catalogs_to_combine:
                                 if len(catalogs_to_combine) > 1:
                                     result = vstack(catalogs_to_combine, metadata_conflicts='silent')
