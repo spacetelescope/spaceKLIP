@@ -1823,7 +1823,8 @@ class DAO():
         elif  self.catalog is not None and dao_catalog is None:
             all_candidates = self.catalog
         else:
-            raise ValueError(f"No candidate detected in DAOStarFinder and not cstalog parsed for this data.")
+            raise ValueError(f"No candidate detected in DAOStarFinder and not catalog parsed for this data.")
+
         # Group detections from the same star (bright stars produce multiple wing
         # detections) and select one representative per group.  The representative
         # is the catalog seed (if provided), the saturated NaN core, or the
