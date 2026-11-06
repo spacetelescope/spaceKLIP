@@ -1154,6 +1154,7 @@ class ImageTools():
     def find_bad_pixels(self,
                         method='dqarr',
                         set_dq_zero=True,
+                        merge_dq=False,
                         dqarr_kwargs=None,
                         sigclip_kwargs=None,
                         custom_kwargs=None,
@@ -1186,6 +1187,11 @@ class ImageTools():
         set_dq_zero : bool, optional
             Toggle to start a new empty DQ array, or built upon the existing array.
             The default is True.
+
+        merge_dq: bool, optional
+            Toggle to merge the new DQ array created with set_dq_zero with the existing one, or replace with it.
+            The default is True.
+
         dqarr_kwargs : dict, optional
             Keyword arguments for the 'dqarr' identification method. Available keywords are:
 
@@ -1522,7 +1528,7 @@ class ImageTools():
                         else:
                             log.info('  --> Unknown method ' + method_split[k] + ': skipped')
 
-                if set_dq_zero:
+                if set_dq_zero and not merge_dq:
                     # The new DQ will just be the pxdq_temp we've been modifying
                     new_dq = pxdq_temp.astype(np.uint32)
                 else:
