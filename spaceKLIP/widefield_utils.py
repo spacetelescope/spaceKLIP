@@ -371,7 +371,7 @@ def fetch_catalog_for_image_fov(path2savetable,
 
 
 
-                            def onepassfit(data, wcs, outname, dq, det = 'nrcalong', filt = 'F444W', pupil = 'CLEAR'):
+                            def onepassfit(data, wcs, outname, dq, det = 'nrcalong', filt = 'F444W', pupil = 'CLEAR', fmin=80, pmax=500):
 
                                 def make_nircam_psf(detector: str, filt: str, pupil: str, npsf: int = 9):
                                     """Get GriddedPSFModel for a given combination of nircam detector/optical element"""
@@ -388,12 +388,10 @@ def fetch_catalog_for_image_fov(path2savetable,
                                     return grid
 
                                 nrc = stpsf.NIRCam()
-                                model = make_nircam_psf(det.replace('nrc', ''), filt, pupil,
-                                                        npsf=16)  # Change this line for MIRI, or if you want a finer PSF grid
+                                model = make_nircam_psf(det.replace('nrc', ''), filt, pupil, npsf=25)  # Change this line for MIRI, or if you want a finer PSF grid
 
-                                opf = one_pass_fitting.OnePassPhot(model, fmin=50,
-                                                                   pmax=500)  # fmin and pmax are in data units, so MJy/sr by default for JWST
-                                tbl = opf(data, data_wcs=wcs, do_sat=False, dq=dq)
+                                opf = one_pass_fitting.OnePassPhot(model, fmin=fmin, pmax=pmax)  # fmin and pmax are in data units, so MJy/sr by default for JWST
+                                tbl = opf(data, data_wcs=wcs, do_sat=True, dq=dq)
                                 tbl.write(outname, format="csv", overwrite=True)
                                 pass
 
