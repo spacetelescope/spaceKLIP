@@ -1225,7 +1225,8 @@ class DAO():
                 fwhm=2.5,
                 catalog=None,
                 nan_lim_percent=0.75,
-                two_pass=True,
+                use_dao=True,
+                dao=True,
                 showplot=False,
                 psf=None,
                 fov=31,
@@ -1261,9 +1262,10 @@ class DAO():
         nan_lim_percent : float, optional
             When checking for NaN pixels near a candidate (to identify sources to close to the edge, or outside),
             the candidate is excluded if more than this fraction of the total pixels in the tile are NaN.
-        two_pass : bool, optional
-            If True and ``fit_radius`` is set, do a broad pass followed by a tighter
-            pass when refining coordinates.
+        use_dao : bool, optional
+            Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
+        dao : bool, optional
+            Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
         showplot : bool, optional
             If True, show a diagnostic plot when refining coordinates for problematic fits.
         psf : 2D-array
@@ -1291,7 +1293,8 @@ class DAO():
         self.roundness_range=roundness_range
         self.catalog=catalog
         self.nan_lim_percent=nan_lim_percent
-        self.two_pass = two_pass
+        self.use_dao=use_dao
+        self.dao=dao
         self.showplot = showplot
         self.psf=psf
         self.fov=fov
@@ -1749,7 +1752,7 @@ class DAO():
             log.warning(f"No valid sources for CSV/DS9 output.")
         return tbl
 
-    def dao_source_extractor(self,path2savetable,data,nanmask,use_dao=True,dao=True,r=1):
+    def dao_source_extractor(self,path2savetable,data,nanmask,r=1):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
 
         This routine detects point sources with ``DAOStarFinder``, groups nearby
@@ -1777,10 +1780,6 @@ class DAO():
             science image.
         nanmask: 2D-array (bool)
             Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
-        use_dao : bool, optional
-            Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
-        dao : bool, optional
-            Whether to run DAOStarFinder or StarFinder. If False, run StarFinder. Default is True.
         r:  float, optional
             The maximum distance to group sources.
             The default is 1 pixel.
@@ -1807,8 +1806,8 @@ class DAO():
         data_subtracted = data - bkg
         data_subtracted[data_subtracted<0]=0
         #Candidate detection via DAOStarFinder, or StarFinder
-        if use_dao:
-            if dao:
+        if self.use_dao:
+            if self.dao:
                 dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
             else:
                 dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))

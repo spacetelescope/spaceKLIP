@@ -4603,13 +4603,13 @@ class ImageTools():
                                     catalog=result,
                                     npix=npix,
                                     fov=fov_pix,
-                                    pixels_to_dropoff=pixels_to_dropoff)
+                                    pixels_to_dropoff=pixels_to_dropoff,
+                                    use_dao=use_dao,
+                                    dao=dao)
 
                         dao_path_temp = region_path.replace(".reg", "_dao.csv")
                         objects_tbl_selected = dao.dao_source_extractor(path2savetable=dao_path_temp,
                                                                         data=data[0],
-                                                                        nanmask=nanmask,
-                                                                        use_dao=use_dao,
                                                                         r=r)
                         objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
 
