@@ -517,22 +517,22 @@ def fetch_catalog_for_image_fov(path2savetable,
                             table_selected['solsat'] = 0.0
                             log.info(f"Filtered catalog from {ntable_selected} to {len(table_selected)} sources within XY boundaries")
 
-                            for _c in table_selected:
-                                _cx, _cy = float(_c["x"]), float(_c["y"])
-                                _xlo = int(_cx) - 31
-                                _xhi = int(_cx) + 32
-                                _ylo = int(_cy) - 31
-                                _yhi = int(_cy) + 32
-                                _patch = data[_ylo:_yhi, _xlo:_xhi]
-                                _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=fwhm,threshold=threshold)
-                                _c['coresat'] = _sr
-                                # Extract quick aperture photometry
-                                positions = np.transpose((_x, _y))
-                                apertures = CircularAperture(positions, r=15)
-                                nansat_mask = np.isnan(_patch)
-                                _patch[_patch < 0] = 0
-                                phot_table = aperture_photometry(_patch, apertures, mask=nansat_mask, method='exact')
-                                _c['flux'] = phot_table['aperture_sum'][0]
+                            # for _c in table_selected:
+                            #     _cx, _cy = float(_c["x"]), float(_c["y"])
+                            #     _xlo = int(_cx) - 31
+                            #     _xhi = int(_cx) + 32
+                            #     _ylo = int(_cy) - 31
+                            #     _yhi = int(_cy) + 32
+                            #     _patch = data[_ylo:_yhi, _xlo:_xhi]
+                            #     _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=fwhm,threshold=threshold)
+                            #     _c['coresat'] = _sr
+                            #     # Extract quick aperture photometry
+                            #     positions = np.transpose((_x, _y))
+                            #     apertures = CircularAperture(positions, r=15)
+                            #     nansat_mask = np.isnan(_patch)
+                            #     _patch[_patch < 0] = 0
+                            #     phot_table = aperture_photometry(_patch, apertures, mask=nansat_mask, method='exact')
+                            #     _c['flux'] = phot_table['aperture_sum'][0]
 
                             table_selected.write(path2savetable, format="csv", overwrite=True)
                             return table_selected
