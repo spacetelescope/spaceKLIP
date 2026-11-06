@@ -550,7 +550,7 @@ def estimate_bkg_and_rms(data,mask,n=25):
     mask: 2D-array
         Boolean mask for data. True indicate bad pixels to ignore.
     n : int, optional
-        Number of boxes to use to define box_size. The default is 11.
+        Number of boxes to use to define box_size. The default is 25.
 
     Returns
     -------
