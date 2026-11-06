@@ -99,8 +99,6 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 all_stellar_otypes=None,
                                 border=3,
                                 npix=0,
-                                fwhm: float = 2.5,
-                                threshold: float = 2.0,
                                 table_kwargs={},
                                 ):
                             """Estimate image FOV from WCS and query Gaia over that footprint.
@@ -1375,22 +1373,22 @@ class DAO():
         # final_mask = np.where(is_coresat, mask1, mask1)
 
         tbl_selected = tbl[mask1]['dao_id' ,'x','y','peak','coresat','eccsat','solsat','method','sharpness','roundness', 'flux']
-        for _c in tbl_selected:
-            _cx, _cy = float(_c["x"]), float(_c["y"])
-            _xlo = int(_cx) - 31
-            _xhi = int(_cx) + 32
-            _ylo = int(_cy) - 31
-            _yhi = int(_cy) + 32
-            _patch = data[_ylo:_yhi, _xlo:_xhi]
-            _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm,threshold=self.threshold)
-            _c['coresat'] = _sr
-            # Extract quick aperture photometry
-            positions = np.transpose((_x, _y))
-            apertures = CircularAperture(positions, r=15)
-            nansat_mask = np.isnan(_patch)
-            _patch[_patch < 0] = 0
-            phot_table = aperture_photometry(_patch, apertures, mask=nansat_mask, method='exact')
-            _c['flux'] = phot_table['aperture_sum'][0]
+        # for _c in tbl_selected:
+        #     _cx, _cy = float(_c["x"]), float(_c["y"])
+        #     _xlo = int(_cx) - 31
+        #     _xhi = int(_cx) + 32
+        #     _ylo = int(_cy) - 31
+        #     _yhi = int(_cy) + 32
+        #     _patch = data[_ylo:_yhi, _xlo:_xhi]
+        #     _sr, _x, _y, _ecc, _sol = inspect_region_for_best_prop(_patch, margin=1,fwhm=self.fwhm,threshold=self.threshold)
+        #     _c['coresat'] = _sr
+        #     # Extract quick aperture photometry
+        #     positions = np.transpose((_x, _y))
+        #     apertures = CircularAperture(positions, r=15)
+        #     nansat_mask = np.isnan(_patch)
+        #     _patch[_patch < 0] = 0
+        #     phot_table = aperture_photometry(_patch, apertures, mask=nansat_mask, method='exact')
+        #     _c['flux'] = phot_table['aperture_sum'][0]
 
         return tbl_selected
 
@@ -1554,7 +1552,7 @@ class DAO():
         log.info("Keeping " + ", ".join(method_counts) + f", seeds after grouping for sources within {r} pixels together.")
         return catalog
 
-    def _clean_catalog(self,candidates, data_arr, r=1, flux_cut=0):
+    def _clean_catalog(self,candidates, data_arr, dq, r=1, flux_cut=0):
         """Group nearby candidates and select one representative per star.
 
         DAOStarFinder often returns several detections for a single bright or
@@ -1564,11 +1562,10 @@ class DAO():
         ----------
         candidates : list of dict
             Full (ungrouped) candidate list from ``_dao``.
-        npix : int or list of four int, optional
-            Number of pixels used to pad around the frames. If int, the same
-            number of pixels will be padded on each side. If list of four int,
-            a different number of pixels can be padded on the [left, right,
-            bottom, top] of the frames. The default is 1.Need to evaluate the true border of the real data
+        data_arr: 2D-array
+            Background-subtracted science image.
+        dq: 2D-array
+            DQ array of the science image.
         r:  float, optional
             The maximum distance to group sources.
             The default is 1 pixel.
@@ -1603,7 +1600,7 @@ class DAO():
         _prov_sat = []
         _rmax = []
         _keep_mask = []
-        # candidates['flux'] = 0.0
+
         for _c in candidates:
             _cx, _cy = float(_c["x"]), float(_c["y"])
             _xlo = int(_cx) - self.fov//2
@@ -1752,7 +1749,7 @@ class DAO():
             log.warning(f"No valid sources for CSV/DS9 output.")
         return tbl
 
-    def dao_source_extractor(self,path2savetable,data,nanmask,r=1):
+    def dao_source_extractor(self,path2savetable,data,dq,nanmask,r=1):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
 
         This routine detects point sources with ``DAOStarFinder``, groups nearby
@@ -1778,6 +1775,8 @@ class DAO():
             Path to save the tables query result CSV file.
         data : 2D-array
             science image.
+        dq: 2D-array
+            Data quality array.
         nanmask: 2D-array (bool)
             Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
         r:  float, optional
@@ -1805,7 +1804,7 @@ class DAO():
         bkg, rms = estimate_bkg_and_rms(data,mask=dilated_mask)
         data_subtracted = data - bkg
         data_subtracted[data_subtracted<0]=0
-        #Candidate detection via DAOStarFinder, or StarFinder
+        # Candidate detection via DAOStarFinder, or StarFinder
         if self.use_dao:
             if self.dao:
                 dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
@@ -1830,7 +1829,7 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        selected_candidates = self._clean_catalog(all_candidates, data_subtracted, r=r)
+        selected_candidates = self._clean_catalog(all_candidates, data_subtracted, dq, r=r)
         # selected_candidates = all_candidates
 
         return selected_candidates
