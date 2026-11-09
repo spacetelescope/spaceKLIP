@@ -65,7 +65,7 @@ from spaceKLIP import mcmc_tools,database
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.plotting import load_plt_style
-from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms
+from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms,onepassfit,find_saturated_sources
 
 # pyklip imports
 import pyklip.fakes as fakes
@@ -4535,6 +4535,7 @@ class ImageTools():
                 # Read FITS file and PSF mask.
                 fitsfile = self.database.obs[key]['FITSFILE'][j]
                 data, erro, pxdq, head_pri, head_sci, is2d, align_shift, center_shift, align_mask, center_mask, maskoffs = ut.read_obs(fitsfile)
+                wcs = WCS(head_sci, naxis=2).celestial
                 maskfile = self.database.obs[key]['MASKFILE'][j]
                 mask = ut.read_msk(maskfile)
                 nanmaskfile = self.database.obs[key]['NANMASKFILE'][j]
@@ -4557,7 +4558,7 @@ class ImageTools():
                             if path2catalog is not None:
                                 log.info(f"Selecting sources from provided catalog: {path2catalog}")
                                 user_cat_path_temp = region_path.replace(".reg", "_usercat.csv")
-                                user_cat_results = fetch_catalog_for_image_fov(user_cat_path_temp, data, head_sci,
+                                user_cat_results = fetch_catalog_for_image_fov(user_cat_path_temp, data, head_sci,wcs,
                                                                                npix=npix, use_user_catalog=True,
                                                                                path2catalog=path2catalog,
                                                                                table_kwargs=table_kwargs,border=border)
@@ -4566,13 +4567,14 @@ class ImageTools():
                                 # ToDO: Gaia method is not working properly, need to fix it. For now it's better to skip it.
                                 log.info("Downloading catalog from GAIA")
                                 gaia_path_temp = region_path.replace(".reg", "_gaia.csv")
-                                gaia_results = fetch_catalog_for_image_fov(gaia_path_temp, data, head_sci, use_gaia=True,
-                                                                           npix=npix, use_allwise=use_allwise,border=border)
+                                gaia_results = fetch_catalog_for_image_fov(gaia_path_temp, data, head_sci,wcs,
+                                                                           use_gaia=True, npix=npix, use_allwise=use_allwise,
+                                                                           border=border)
                                 catalogs_to_combine.append(gaia_results)
                             if use_simbad:
                                 log.info("Downloading catalog from SIMBAD")
                                 simbad_path_temp = region_path.replace(".reg", "_simbad.csv")
-                                simbad_results = fetch_catalog_for_image_fov(simbad_path_temp, data, head_sci,
+                                simbad_results = fetch_catalog_for_image_fov(simbad_path_temp, data, head_sci,wcs,
                                                                              use_simbad=True, npix=npix,
                                                                              all_stellar_otypes=all_stellar_otypes,
                                                                              border=border)
@@ -4580,31 +4582,11 @@ class ImageTools():
                             if use_onepassfit:
                                 # TODO: Implement one-pass fit for source detection.It's still a WIP.
                                 log.info("Running one-pass fit for source detection")
-                                onepassfit_path_temp = region_path.replace(".reg", "_onepassfit.csv")
-                                onepassfit_results = fetch_catalog_for_image_fov(onepassfit_path_temp, data, head_sci, dq=pxdq[0],
-                                                                             use_onepassfit=True, npix=npix,
-                                                                             border=border)
+                                onepassfit_results = onepassfit(data, wcs, pxdq)
                                 catalogs_to_combine.append(onepassfit_results)
-
                             if find_sat:
-                                # Find saturated sources
-                                sat = (np.bitwise_and(pxdq[0], 2) / 2).astype(bool)  # Bit 1 (value 2)
-                                sat1 = np.logical_and(np.bitwise_and(pxdq[0], 1).astype(bool),
-                                                      (pxdq[0] < 8192))  # Bit 0 (value 1) with pipeline fix
-                                sat_combined = np.logical_or(sat, sat1).astype(float)  # Combine both flags
-                                sat_combined = np.logical_and(sat_combined, nanmask).astype(float)
-                                finder = SourceFinder(npixels=2, connectivity=4, deblend=False)
-                                segmap_combined = finder(sat_combined, threshold=0.5)
-                                sat_catalog = SourceCatalog(sat_combined, segmap_combined).to_table()
-                                sat_catalog.rename_column('xcentroid', 'x')
-                                sat_catalog.rename_column('ycentroid', 'y')
-                                sat_catalog['roundness'] = 0.0
-                                sat_catalog['sharpness'] = 0.5
-                                sat_catalog['flux'] = 0.0
-                                sat_catalog['coresat'] = 0.0
-                                sat_catalog['eccsat'] = 0.0
-                                sat_catalog['solsat'] = 0.0
-                                sat_catalog['method'] = 'saturated'
+                                # Find saturated sources using nanmask and pixel data quality flags.
+                                sat_catalog = find_saturated_sources(pxdq, nanmask)
                                 catalogs_to_combine.append(sat_catalog)
 
                             if catalogs_to_combine:
@@ -4632,10 +4614,12 @@ class ImageTools():
 
                         dao_path_temp = region_path.replace(".reg", "_dao.csv")
                         objects_tbl_selected = dao.dao_source_extractor(path2savetable=dao_path_temp,
-                                                                        data=data[0],
-                                                                        dq=pxdq[0],
+                                                                        data=data,
+                                                                        pxdq=pxdq,
                                                                         nanmask=nanmask,
                                                                         r=r)
+                        objects_tbl_selected = dao._group_catalog(objects_tbl_selected, r=r)
+
                         objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
 
                         out = write_ds9_regions_from_sep_objects(objects_tbl_selected,
