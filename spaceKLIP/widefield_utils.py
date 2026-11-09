@@ -1829,8 +1829,8 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        selected_candidates = self._clean_catalog(all_candidates, data_subtracted, dq, r=r)
-        # selected_candidates = all_candidates
+        # selected_candidates = self._clean_catalog(all_candidates, data_subtracted, dq, r=r)
+        selected_candidates = all_candidates
 
         return selected_candidates
 
