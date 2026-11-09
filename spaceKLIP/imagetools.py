@@ -65,7 +65,7 @@ from spaceKLIP import mcmc_tools,database
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.plotting import load_plt_style
-from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms,onepassfit,find_saturated_sources
+from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms,onepassfit,find_saturated_sources,group_catalog_sources
 
 # pyklip imports
 import pyklip.fakes as fakes
@@ -4588,47 +4588,46 @@ class ImageTools():
                                 # Find saturated sources using nanmask and pixel data quality flags.
                                 sat_catalog = find_saturated_sources(pxdq, nanmask)
                                 catalogs_to_combine.append(sat_catalog)
+                            if use_dao:
+                                log.info("Running DAO for source detection")
+                                dao = DAO(threshold=threshold,
+                                          fwhm=fwhm,
+                                          sharpness_range=sharpness_range,
+                                          roundness_range=roundness_range,
+                                          npix=npix,
+                                          fov=fov_pix,
+                                          pixels_to_dropoff=pixels_to_dropoff,
+                                          use_dao=use_dao)
 
+                                dao_path_temp = region_path.replace(".reg", "_dao.csv")
+                                dao_catalog = dao.dao_source_extractor(path2savetable=dao_path_temp,
+                                                                       data=data,
+                                                                       pxdq=pxdq,
+                                                                       nanmask=nanmask,
+                                                                       r=r)
+                                catalogs_to_combine.append(dao_catalog)
                             if catalogs_to_combine:
                                 if len(catalogs_to_combine) > 1:
-                                    result = vstack(catalogs_to_combine, metadata_conflicts='silent')
+                                    result_temp = vstack(catalogs_to_combine, metadata_conflicts='silent')
                                 else:
-                                    result = catalogs_to_combine[0]
+                                    result_temp = catalogs_to_combine[0]
+                                result = group_catalog_sources(result_temp, r=r)
+                                result['id']=[int(i) for i in range(len(result))]
                             else:
-                                log.info(f"No use_* methods for catalog generation provided, or user path2catalog specified. Using DAOStarFinder only.")
-                                result = Table()
+                                raise ValueError(f"No use_* methods for catalog generation provided, or user path2catalog specified.")
                         else:
                             log.info(f"Loading catalog from previous processing: {byproduct_catalogs_path}. Ignoring other detection methods.")
                             result = Table.read(byproduct_catalogs_path)
-                            use_dao = False
 
-                        dao = DAO(threshold=threshold,
-                                    fwhm=fwhm,
-                                    sharpness_range=sharpness_range,
-                                    roundness_range=roundness_range,
-                                    catalog=result,
-                                    npix=npix,
-                                    fov=fov_pix,
-                                    pixels_to_dropoff=pixels_to_dropoff,
-                                    use_dao=use_dao)
+                        result.write(catalog_path, format="csv", overwrite=True)
 
-                        dao_path_temp = region_path.replace(".reg", "_dao.csv")
-                        objects_tbl_selected = dao.dao_source_extractor(path2savetable=dao_path_temp,
-                                                                        data=data,
-                                                                        pxdq=pxdq,
-                                                                        nanmask=nanmask,
-                                                                        r=r)
-                        objects_tbl_selected = dao._group_catalog(objects_tbl_selected, r=r)
-
-                        objects_tbl_selected.write(catalog_path, format="csv", overwrite=True)
-
-                        out = write_ds9_regions_from_sep_objects(objects_tbl_selected,
+                        out = write_ds9_regions_from_sep_objects(result,
                                                                 region_path,
                                                                 shape=region_shape,
                                                                 circle_radius=circle_radius,
                                                                 color="green",
                                                                 )
-                log.info(f"Wrote COMBINED DS9 region file: {out} ({len(objects_tbl_selected)} detections)")
+                log.info(f"Wrote COMBINED DS9 region file: {out} ({len(result)} detections)")
 
                 fitsfile = ut.write_obs(fitsfile, output_dir, data, erro, pxdq, head_pri, head_sci, is2d,
                                         align_shift=align_shift, center_shift=center_shift, align_mask=align_mask,
