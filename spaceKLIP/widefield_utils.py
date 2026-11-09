@@ -8,6 +8,7 @@ from spaceKLIP.plotting import load_plt_style
 from photutils.detection import DAOStarFinder,StarFinder
 from photutils.aperture import CircularAperture, aperture_photometry
 from photutils.background import Background2D, MedianBackground
+from photutils.segmentation import SourceFinder, SourceCatalog
 
 from scipy.ndimage import binary_fill_holes, distance_transform_edt, center_of_mass, binary_dilation
 from scipy.optimize import minimize
@@ -38,6 +39,85 @@ import stpsf
 # Set up log.
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+
+def find_saturated_sources(pxdq,nanmask):
+    pxdq = np.asarray(pxdq)
+    if pxdq.ndim == 3:
+        pxdq = pxdq[0, :, :]
+    if pxdq.ndim == 2:
+        pass
+    else:
+        raise ValueError(f"pxdq must be a 3D or 2D, got shape {pxdq.shape}")
+    # Find saturated sources
+    sat = (np.bitwise_and(pxdq, 2) / 2).astype(bool)  # Bit 1 (value 2)
+    sat1 = np.logical_and(np.bitwise_and(pxdq, 1).astype(bool),
+                          (pxdq < 8192))  # Bit 0 (value 1) with pipeline fix
+    sat_combined = np.logical_or(sat, sat1).astype(float)  # Combine both flags
+    sat_combined = np.logical_and(sat_combined, nanmask).astype(float)
+    finder = SourceFinder(npixels=2, connectivity=4, deblend=False)
+    segmap_combined = finder(sat_combined, threshold=0.5)
+    tbl = SourceCatalog(sat_combined, segmap_combined).to_table()
+    tbl.rename_column('label', 'sat_id')
+    tbl.rename_column('xcentroid', 'x')
+    tbl.rename_column('ycentroid', 'y')
+    tbl['roundness'] = 0.0
+    tbl['sharpness'] = 0.5
+    tbl['flux'] = 0.0
+    tbl['coresat'] = 0.0
+    tbl['eccsat'] = 0.0
+    tbl['solsat'] = 0.0
+    tbl['method'] = 'saturated'
+    return tbl
+
+def onepassfit(data, wcs, pxdq, det='nrcalong', filt='F444W', pupil='CLEAR', fmin=80, pmax=500, outname =None):
+    def make_nircam_psf(detector: str, filt: str, pupil: str, npsf: int = 9):
+        """Get GriddedPSFModel for a given combination of nircam detector/optical element"""
+        if detector.lower() in ['along', 'blong']:
+            detector = detector.lower().replace('long', '5')
+        nrc.detector = 'nrc' + detector.upper()
+
+        if pupil.upper() == 'CLEAR':
+            nrc.filter = filt.lower()
+        else:
+            nrc.filter = pupil.lower()
+        # 9 is likely too low, probably make it 25
+        grid = nrc.psf_grid(num_psfs=npsf, all_detectors=False)
+        return grid
+
+    data = np.asarray(data)
+    if data.ndim == 3:
+        data = data[0, :, :]
+    if data.ndim == 2:
+        pass
+    else:
+        raise ValueError(f"image must be a 3D or 2D, got shape {data.shape}")
+
+    pxdq = np.asarray(pxdq)
+    if pxdq.ndim == 3:
+        pxdq = pxdq[0, :, :]
+    if pxdq.ndim == 2:
+        pass
+    else:
+        raise ValueError(f"pxdq must be a 3D or 2D, got shape {pxdq.shape}")
+
+    nrc = stpsf.NIRCam()
+    model = make_nircam_psf(det.replace('nrc', ''), filt, pupil, npsf=25)  # Change this line for MIRI, or if you want a finer PSF grid
+
+    opf = one_pass_fitting.OnePassPhot(model, fmin=fmin,
+                                       pmax=pmax)  # fmin and pmax are in data units, so MJy/sr by default for JWST
+    tbl = opf(data, data_wcs=wcs, do_sat=True, dq=pxdq)
+    tbl['roundness'] = 0.0
+    tbl['sharpness'] = 0.5
+    tbl['flux'] = 0.0
+    tbl['coresat'] = 0.0
+    tbl['eccsat'] = 0.0
+    tbl['solsat'] = 0.0
+    tbl['method'] = "onepassfit"
+
+    if outname is not None:
+        tbl.write(outname, format="csv", overwrite=True)
+    else:
+        return tbl
 
 def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, partial=False):
     """
@@ -87,30 +167,31 @@ def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, par
     return image
 
 def fetch_catalog_for_image_fov(path2savetable,
-                                image: np.ndarray,
+                                data: np.ndarray,
                                 header,
-                                dq=None,
+                                wcs,
                                 use_gaia=False,
                                 use_allwise=False,
                                 use_simbad=False,
                                 use_user_catalog=False,
-                                use_onepassfit=False,
                                 path2catalog=None,
                                 all_stellar_otypes=None,
                                 border=3,
                                 npix=0,
                                 table_kwargs={},
                                 ):
-                            """Estimate image FOV from WCS and query Gaia over that footprint.
+                            """Estimate data FOV from WCS and query Gaia over that footprint.
 
                             Parameters
                             ----------
                             path2savetable : str, optional
                                 Path to save the tables query result CSV file.
-                            image : 2D-array
+                            data : 2D-array
                                 Image data used only for its shape.
                             header : astropy.io.fits.Header
-                                FITS header containing the celestial WCS for the image.
+                                FITS header containing the celestial WCS for the data.
+                            wcs: astropy.wcs.WCS
+                                WCS object for the data.
                             use_gaia : bool, optional
                                Enable Gaia query. Default is False.
                             use_allwise : bool, optional
@@ -131,7 +212,7 @@ def fetch_catalog_for_image_fov(path2savetable,
                             verbose : bool, optional
                                 Passed to ``Gaia.launch_job_async``.
                             border: int, optional
-                                exclude border of x pixel from image to confirm coordinates are within the fov
+                                exclude border of x pixel from data to confirm coordinates are within the fov
                             npix : int or list of four int, optional
                                 Number of pixels used to pad around the frames. If int, the same
                                 number of pixels will be padded on each side. If list of four int,
@@ -367,51 +448,24 @@ def fetch_catalog_for_image_fov(path2savetable,
                             #
                             #     return tables
 
-
-
-                            def onepassfit(data, wcs, outname, dq, det = 'nrcalong', filt = 'F444W', pupil = 'CLEAR', fmin=80, pmax=500):
-
-                                def make_nircam_psf(detector: str, filt: str, pupil: str, npsf: int = 9):
-                                    """Get GriddedPSFModel for a given combination of nircam detector/optical element"""
-                                    if detector.lower() in ['along', 'blong']:
-                                        detector = detector.lower().replace('long', '5')
-                                    nrc.detector = 'nrc' + detector.upper()
-
-                                    if pupil.upper() == 'CLEAR':
-                                        nrc.filter = filt.lower()
-                                    else:
-                                        nrc.filter = pupil.lower()
-                                    # 9 is likely too low, probably make it 25
-                                    grid = nrc.psf_grid(num_psfs=npsf, all_detectors=False)
-                                    return grid
-
-                                nrc = stpsf.NIRCam()
-                                model = make_nircam_psf(det.replace('nrc', ''), filt, pupil, npsf=25)  # Change this line for MIRI, or if you want a finer PSF grid
-
-                                opf = one_pass_fitting.OnePassPhot(model, fmin=fmin, pmax=pmax)  # fmin and pmax are in data units, so MJy/sr by default for JWST
-                                tbl = opf(data, data_wcs=wcs, do_sat=True, dq=dq)
-                                tbl.write(outname, format="csv", overwrite=True)
-                                pass
-
                             if isinstance(npix, int):
                                 npix = [npix, npix, npix, npix]  # left, right, bottom, top
                             else:
                                 npix = npix
 
-                            data = np.asarray(image)
+                            data = np.asarray(data)
                             if data.ndim == 3:
                                 data = data[0, :, :]
                             if data.ndim == 2:
                                 pass
                             else:
-                                raise ValueError(f"image must be a 3D or 2D, got shape {data.shape}")
+                                raise ValueError(f"data must be a 3D or 2D, got shape {data.shape}")
 
-                            cel_wcs = WCS(header, naxis=2).celestial
                             ny, nx = data.shape
                             x_center = (nx-1) / 2.0
                             y_center = (ny-1) / 2.0
 
-                            center_ra_deg, center_dec_deg = cel_wcs.all_pix2world(x_center, y_center, 0)
+                            center_ra_deg, center_dec_deg = wcs.all_pix2world(x_center, y_center, 0)
                             pix_scales = np.sqrt(header['PIXAR_A2'])
                             fov_x_deg = float(nx * pix_scales) / 3600
                             fov_y_deg = float(ny * pix_scales) / 3600
@@ -429,9 +483,6 @@ def fetch_catalog_for_image_fov(path2savetable,
                                 elif use_simbad:
                                     method = "simbad"
                                     query_simbad(path2savetable, center_ra_deg, center_dec_deg, radius_deg, all_stellar_otypes=all_stellar_otypes)#, use_mocadb=use_mocadb)
-                                elif use_onepassfit:
-                                    method = "onepassfit"
-                                    onepassfit(data, cel_wcs, path2savetable, dq)
                                 else:
                                     log.error("Neither Gaia nor Simbad query was requested. No catalog will be fetched.")
                                     return Table()
@@ -472,7 +523,7 @@ def fetch_catalog_for_image_fov(path2savetable,
 
                                 try:
                                     # Convert single source
-                                    x_single, y_single = cel_wcs.all_world2pix(ra, dec, 0)
+                                    x_single, y_single = wcs.all_world2pix(ra, dec, 0)
                                     if np.isfinite(x_single) and np.isfinite(y_single):
                                         x_list.append(x_single)
                                         y_list.append(y_single)
@@ -1552,7 +1603,7 @@ class DAO():
         log.info("Keeping " + ", ".join(method_counts) + f", seeds after grouping for sources within {r} pixels together.")
         return catalog
 
-    def _clean_catalog(self,candidates, data_arr, dq, r=1, flux_cut=0):
+    def _clean_catalog(self,candidates, data_arr, r=1, flux_cut=0):
         """Group nearby candidates and select one representative per star.
 
         DAOStarFinder often returns several detections for a single bright or
@@ -1564,8 +1615,6 @@ class DAO():
             Full (ungrouped) candidate list from ``_dao``.
         data_arr: 2D-array
             Background-subtracted science image.
-        dq: 2D-array
-            DQ array of the science image.
         r:  float, optional
             The maximum distance to group sources.
             The default is 1 pixel.
@@ -1645,7 +1694,7 @@ class DAO():
 
         candidates = candidates[_keep_mask]
         candidates['id']=[i for i in range(len(candidates))]
-        candidates = self._group_catalog(candidates, r=r)
+        # candidates = self._group_catalog(candidates, r=r)
         return candidates
 
     def _refine_coordinates(self,candidates, data, nanmask, psf,search_radius=None,fit_radius=71):
@@ -1749,7 +1798,7 @@ class DAO():
             log.warning(f"No valid sources for CSV/DS9 output.")
         return tbl
 
-    def dao_source_extractor(self,path2savetable,data,dq,nanmask,r=1):
+    def dao_source_extractor(self,path2savetable,data,pxdq,nanmask,r=1):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
 
         This routine detects point sources with ``DAOStarFinder``, groups nearby
@@ -1775,7 +1824,7 @@ class DAO():
             Path to save the tables query result CSV file.
         data : 2D-array
             science image.
-        dq: 2D-array
+        pxdq: 2D-array
             Data quality array.
         nanmask: 2D-array (bool)
             Mask of NaN pixels  used to identify candidates with saturated cores or candidates too close to the edge.
@@ -1796,6 +1845,21 @@ class DAO():
         """
 
         data = np.asarray(data, dtype=float)
+        if data.ndim == 3:
+            data = data[0, :, :]
+        if data.ndim == 2:
+            pass
+        else:
+            raise ValueError(f"data must be a 3D or 2D, got shape {data.shape}")
+
+        pxdq = np.asarray(pxdq)
+        if pxdq.ndim == 3:
+            pxdq = pxdq[0, :, :]
+        if pxdq.ndim == 2:
+            pass
+        else:
+            raise ValueError(f"pxdq must be a 3D or 2D, got shape {pxdq.shape}")
+
         data[nanmask==1] = np.nan
 
         struct_element = np.ones((3, 3), dtype=bool)
@@ -1829,7 +1893,7 @@ class DAO():
         # is the catalog seed (if provided), the saturated NaN core, or the
         # PSF-correlation peak for unsaturated sources.
         all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        # selected_candidates = self._clean_catalog(all_candidates, data_subtracted, dq, r=r)
+        # selected_candidates = self._clean_catalog(all_candidates, data_subtracted, pxdq, r=r)
         selected_candidates = all_candidates
 
         return selected_candidates
