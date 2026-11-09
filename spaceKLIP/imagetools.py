@@ -4312,7 +4312,7 @@ class ImageTools():
                                      fwhm=2,
                                      cat_ext=None,
                                      path2catalog=None,
-                                     do_sat=True,
+                                     find_sat=True,
                                      use_dao=True,
                                      use_gaia=False,
                                      use_allwise=False,
@@ -4373,7 +4373,7 @@ class ImageTools():
             If not None, load existing catalogs with the naming pattern ``fitsfile.replace('.fits', cat_ext)``.
             and skip detection or merging with external catalogs. The catalog must contain 'x' and 'y'
             columns for pixel coordinates. Default is None (no existing byproduct catalogs).
-        do_sat : bool, optional
+        find_sat : bool, optional
             If True,Combine dataquality array and nanmask to identify saturated sources in image.
             Default is True.
         use_dao : bool, optional
@@ -4578,9 +4578,7 @@ class ImageTools():
                                                                              border=border)
                                 catalogs_to_combine.append(simbad_results)
                             if use_onepassfit:
-                                # TODO: Implement one-pass fit for source detection. This is not working yet, for example, we do not have the dq after we perform the bpcleaned_sigclip. We need to implement a way to get the dq after the bpcleaned_sigclip.
-                                # hdulist2 = fits.open(fitsfile.replace('bpcleaned_sigclip', 'stage2'))
-                                # dq = hdulist2[3].data[0]
+                                # TODO: Implement one-pass fit for source detection.It's still a WIP.
                                 log.info("Running one-pass fit for source detection")
                                 onepassfit_path_temp = region_path.replace(".reg", "_onepassfit.csv")
                                 onepassfit_results = fetch_catalog_for_image_fov(onepassfit_path_temp, data, head_sci, dq=pxdq[0],
@@ -4588,7 +4586,7 @@ class ImageTools():
                                                                              border=border)
                                 catalogs_to_combine.append(onepassfit_results)
 
-                            if do_sat:
+                            if find_sat:
                                 # Find saturated sources
                                 sat = (np.bitwise_and(pxdq[0], 2) / 2).astype(bool)  # Bit 1 (value 2)
                                 sat1 = np.logical_and(np.bitwise_and(pxdq[0], 1).astype(bool),
