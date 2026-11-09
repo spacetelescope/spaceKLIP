@@ -1355,7 +1355,7 @@ class ImageTools():
                 pxdq_temp = np.zeros_like(pxdq) if set_dq_zero else pxdq.copy()
                 
                 # NON SCIENCE and DO_NOT_USE pixels.
-                pxmask_nonsci = ut.get_dqmask(pxdq_temp, 'NON_SCIENCE', return_bool=True)
+                pxmask_nonsci = ut.get_dqmask(pxdq, 'NON_SCIENCE', return_bool=True)
                 pxmask_donotuse = ut.get_dqmask(pxdq_temp, 'DO_NOT_USE', return_bool=True)
 
                 # Skip file types that are not in the list of types.
@@ -1427,7 +1427,7 @@ class ImageTools():
                                     # Combine original DO_NOT_USE with newly flagged neighbors.
                                     #log.info(f"    Integration {i + 1}: neighbors flagged = {added_count}")
                                     total_added += added_count
-                                pxdq[i] = (np.isnan(data[i]) | temp_donotuse) & (~temp_nonsci)
+                                pxdq_temp[i] = (np.isnan(data[i]) | temp_donotuse) & (~temp_nonsci)
 
                             if dqarr_kwargs.get('flag_neighbors', False):
                                 log.info(f"  --> Total neighbor pixels flagged: {total_added}")
@@ -2826,8 +2826,12 @@ class ImageTools():
                 #print(f"Number of training set pixels: {np.count_nonzero(TS)}")
             else:
                 # Remaining integrations: interpolate using parameters from first
-                fixed_img[i] = astrofix.Interpolate(para[0], para[1], integration, BP="asnan")
-                fixed_erro[i] = astrofix.Interpolate(erro_para[0], erro_para[1], erro_temp[i], BP="asnan")
+                fixed_img[i] = astrofix.Interpolate(para[0], para[1], integration, BP="asnan",
+                                                    sig_data=astrofix_kwargs['sig_data'],
+                                                    width=astrofix_kwargs['width'])
+                fixed_erro[i] = astrofix.Interpolate(erro_para[0], erro_para[1], erro_temp[i], BP="asnan",
+                                                     sig_data=astrofix_kwargs['sig_data'],
+                                                     width=astrofix_kwargs['width'])
 
             # Update the original data using bad pixel mask.
             data[i][ww[i]] = fixed_img[i][ww[i]]
@@ -2955,12 +2959,13 @@ class ImageTools():
                         ebox = erro_temp[i][y_min:y_max, x_min:x_max]
 
                         # Extract coordinates and values from the box
+                        # np.where returns (row, col), so the offsets are (y_min, x_min)
                         box_coords = np.array(np.where(~np.isnan(box))).T \
-                            + np.array([[x_min, y_min]])
+                            + np.array([[y_min, x_min]])
                         box_values = box[~np.isnan(box)]
 
                         ebox_coords = np.array(np.where(~np.isnan(ebox))).T \
-                            + np.array([[x_min, y_min]])
+                            + np.array([[y_min, x_min]])
                         ebox_values = ebox[~np.isnan(ebox)]
 
                         # Perform interpolation if there are valid values in the box
@@ -2968,10 +2973,10 @@ class ImageTools():
                            and len(ebox_values) > interp2d_kwargs['size']:
                             # Extract x and y coordinates of valid values, same coords for
                             # data and err
-                            x_coords = box_coords[:, 0]
-                            y_coords = box_coords[:, 1]
-                            ex_coords = ebox_coords[:, 0]
-                            ey_coords = ebox_coords[:, 1]
+                            x_coords = box_coords[:, 1]
+                            y_coords = box_coords[:, 0]
+                            ex_coords = ebox_coords[:, 1]
+                            ey_coords = ebox_coords[:, 0]
 
                             # Perform interpolation of data
                             data_interp = griddata((x_coords, y_coords),
