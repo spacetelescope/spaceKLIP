@@ -4619,7 +4619,7 @@ class ImageTools():
                                 result = group_catalog_sources(result_temp, r=r)
                                 result['id']=[int(i) for i in range(len(result))]
                             else:
-                                raise ValueError(f"No use_* methods for catalog generation provided, or user path2catalog specified.")
+                                raise ValueError(f"No methods for catalog generation provided, or user path2catalog specified.")
                         else:
                             #Skip detection/fetching methods and load previously generated catalog instead.
                             log.info(f"Loading catalog from previous processing: {byproduct_catalogs_path}. Ignoring other detection/fetching methods.")
