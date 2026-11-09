@@ -4608,8 +4608,7 @@ class ImageTools():
                                 dao_catalog = dao.dao_source_extractor(path2savetable=dao_path_temp,
                                                                        data=data,
                                                                        pxdq=pxdq,
-                                                                       nanmask=nanmask,
-                                                                       r=r)
+                                                                       nanmask=nanmask)
                                 catalogs_to_combine.append(dao_catalog)
                             if catalogs_to_combine:
                                 if len(catalogs_to_combine) > 1:

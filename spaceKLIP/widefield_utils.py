@@ -1846,7 +1846,7 @@ class DAO():
             log.warning(f"No valid sources for CSV/DS9 output.")
         return tbl
 
-    def dao_source_extractor(self,path2savetable,data,pxdq,nanmask,r=1):
+    def dao_source_extractor(self,path2savetable,data,pxdq,nanmask):
         """Run DAOStarFinder source extraction with PSF-fitting refinement.
 
         This routine detects point sources with ``DAOStarFinder``, groups nearby
