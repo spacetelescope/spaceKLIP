@@ -4555,6 +4555,7 @@ class ImageTools():
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
                         catalogs_to_combine = []
                         if byproduct_catalogs_path is None:
+                            # These are methods to fetch online catalogs for the image FOV. They can be used in combination or separately.
                             if path2catalog is not None:
                                 log.info(f"Selecting sources from provided catalog: {path2catalog}")
                                 user_cat_path_temp = region_path.replace(".reg", "_usercat.csv")
@@ -4579,14 +4580,18 @@ class ImageTools():
                                                                              all_stellar_otypes=all_stellar_otypes,
                                                                              border=border)
                                 catalogs_to_combine.append(simbad_results)
+                            # These are methods to detect sources for the image FOV and list them in a catalog. They can be used in combination or separately.
                             if use_onepassfit:
                                 # TODO: Implement one-pass fit for source detection.It's still a WIP.
                                 log.info("Running one-pass fit for source detection")
-                                onepassfit_results = onepassfit(data, wcs, pxdq)
+                                onepassfitt_path_temp = region_path.replace(".reg", "_onepassfit.csv")
+                                onepassfit_results = onepassfit(data, wcs, pxdq,onepassfitt_path_temp)
                                 catalogs_to_combine.append(onepassfit_results)
                             if find_sat:
                                 # Find saturated sources using nanmask and pixel data quality flags.
-                                sat_catalog = find_saturated_sources(pxdq, nanmask)
+                                log.info("Running find_saturated_sources for source detection")
+                                findsat_path_temp = region_path.replace(".reg", "_saturated.csv")
+                                sat_catalog = find_saturated_sources(pxdq, nanmask, findsat_path_temp)
                                 catalogs_to_combine.append(sat_catalog)
                             if use_dao:
                                 log.info("Running DAO for source detection")
@@ -4616,7 +4621,8 @@ class ImageTools():
                             else:
                                 raise ValueError(f"No use_* methods for catalog generation provided, or user path2catalog specified.")
                         else:
-                            log.info(f"Loading catalog from previous processing: {byproduct_catalogs_path}. Ignoring other detection methods.")
+                            #Skip detection/fetching methods and load previously generated catalog instead.
+                            log.info(f"Loading catalog from previous processing: {byproduct_catalogs_path}. Ignoring other detection/fetching methods.")
                             result = Table.read(byproduct_catalogs_path)
 
                         result.write(catalog_path, format="csv", overwrite=True)
