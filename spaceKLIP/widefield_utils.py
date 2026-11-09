@@ -40,7 +40,56 @@ import stpsf
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-def find_saturated_sources(pxdq,nanmask):
+
+def group_catalog_sources(catalog, r=1, ideal_roundness=0.0, ideal_sharpness=0.5):
+    """
+    Groups catalog sources within a r and selects the best stellar representative.
+
+    Parameters:
+    catalog (astropy.tables.Table): Must contain columns 'x', 'y', 'flux', 'roundness', 'sharpness'
+    r (float): The maximum distance to group sources.
+    """
+    # 1. Calculate a custom "star score" (Higher is better)
+    # Using np.log1p for flux to balance its weight against shape metrics
+    roundness_penalty = np.abs(catalog['roundness'] - ideal_roundness)
+    sharpness_penalty = np.abs(catalog['sharpness'] - ideal_sharpness)
+    star_score = np.log1p(catalog['flux']) - roundness_penalty - sharpness_penalty
+
+    # 2. Build KDTree for fast spatial queries
+    coords = np.vstack((catalog['x'].data, catalog['y'].data)).T
+    tree = KDTree(coords)
+
+    # 3. Sort indices by star_score from best to worst
+    sorted_indices = np.argsort(star_score)[::-1]
+
+    # Track visited points using a fast boolean mask
+    num_entries = len(catalog)
+    visited = np.zeros(num_entries, dtype=bool)
+    keep_indices = []
+
+    # 4. Greedy elimination loop
+    for idx in sorted_indices:
+        if visited[idx]:
+            continue
+
+        # Keep this source as the group representative
+        keep_indices.append(idx)
+
+        # Find all neighbors within the box_size
+        neighbors = tree.query_ball_point(coords[idx], r=r, p=np.inf)
+        # Mark the representative and all its neighbors as visited
+        visited[neighbors] = True
+
+    # 5. Return the filtered Astropy Table (sorted by original order)
+    keep_indices = sorted(keep_indices)
+    catalog = catalog[keep_indices]
+    catalog['id'] = [i for i in range(len(catalog))]
+    unique_methods = np.unique(catalog['method'])
+    method_counts = [f"{np.sum(catalog['method'] == method)} {method}" for method in unique_methods]
+    log.info("Keeping " + ", ".join(method_counts) + f", seeds after grouping for sources within {r} pixels together.")
+    return catalog
+
+def find_saturated_sources(pxdq,nanmask, outname):
     pxdq = np.asarray(pxdq)
     if pxdq.ndim == 3:
         pxdq = pxdq[0, :, :]
@@ -67,9 +116,10 @@ def find_saturated_sources(pxdq,nanmask):
     tbl['eccsat'] = 0.0
     tbl['solsat'] = 0.0
     tbl['method'] = 'saturated'
+    tbl.write(outname, format="csv", overwrite=True)
     return tbl
 
-def onepassfit(data, wcs, pxdq, det='nrcalong', filt='F444W', pupil='CLEAR', fmin=80, pmax=500, outname =None):
+def onepassfit(data, wcs, pxdq, outname, det='nrcalong', filt='F444W', pupil='CLEAR', fmin=80, pmax=500):
     def make_nircam_psf(detector: str, filt: str, pupil: str, npsf: int = 9):
         """Get GriddedPSFModel for a given combination of nircam detector/optical element"""
         if detector.lower() in ['along', 'blong']:
@@ -114,10 +164,8 @@ def onepassfit(data, wcs, pxdq, det='nrcalong', filt='F444W', pupil='CLEAR', fmi
     tbl['solsat'] = 0.0
     tbl['method'] = "onepassfit"
 
-    if outname is not None:
-        tbl.write(outname, format="csv", overwrite=True)
-    else:
-        return tbl
+    tbl.write(outname, format="csv", overwrite=True)
+    return tbl
 
 def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, partial=False):
     """
@@ -1869,34 +1917,12 @@ class DAO():
         data_subtracted = data - bkg
         data_subtracted[data_subtracted<0]=0
         # Candidate detection via DAOStarFinder, or StarFinder
-        if self.use_dao:
-            if self.dao:
-                dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
-            else:
-                dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))
-            dao_catalog.write(path2savetable, format="csv", overwrite=True)
+        if self.dao:
+            dao_catalog = self._dao(data_subtracted,mask=dilated_mask,mrms=np.nanmedian(rms))
         else:
-            dao_catalog = None
-
-        # Catalog candidates are prepended so they have priority inside each group.
-        if self.catalog is not None and dao_catalog is not None:
-            all_candidates = vstack([self.catalog , dao_catalog])
-        elif  self.catalog is None and dao_catalog is not None:
-            all_candidates = dao_catalog
-        elif  self.catalog is not None and dao_catalog is None:
-            all_candidates = self.catalog
-        else:
-            raise ValueError(f"No candidate detected in DAOStarFinder and not catalog parsed for this data.")
-
-        # Group detections from the same star (bright stars produce multiple wing
-        # detections) and select one representative per group.  The representative
-        # is the catalog seed (if provided), the saturated NaN core, or the
-        # PSF-correlation peak for unsaturated sources.
-        all_candidates['id']=[int(i) for i in range(len(all_candidates))]
-        # selected_candidates = self._clean_catalog(all_candidates, data_subtracted, pxdq, r=r)
-        selected_candidates = all_candidates
-
-        return selected_candidates
+            dao_catalog = self._starfinder(data,mask=dilated_mask,mrms=np.nanmedian(rms))
+        dao_catalog.write(path2savetable, format="csv", overwrite=True)
+        return dao_catalog
 
 class FITPSF:
     """
