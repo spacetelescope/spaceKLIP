@@ -65,7 +65,7 @@ from spaceKLIP import mcmc_tools,database
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.plotting import load_plt_style
-from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms,onepassfit,find_saturated_sources,group_catalog_sources
+from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms,onepassfit,group_catalog_sources,find_saturated_sources,flag_saturated_sources
 
 # pyklip imports
 import pyklip.fakes as fakes
@@ -4317,7 +4317,6 @@ class ImageTools():
                                      use_gaia=False,
                                      use_allwise=False,
                                      use_simbad=False,
-                                     use_onepassfit=False,
                                      all_stellar_otypes=None,
                                      r=None,
                                      sharpness_range=(0.3, 0.85),
@@ -4581,12 +4580,6 @@ class ImageTools():
                                                                              border=border)
                                 catalogs_to_combine.append(simbad_results)
                             # These are methods to detect sources for the image FOV and list them in a catalog. They can be used in combination or separately.
-                            if use_onepassfit:
-                                # TODO: Implement one-pass fit for source detection.It's still a WIP.
-                                log.info("Running one-pass fit for source detection")
-                                onepassfitt_path_temp = region_path.replace(".reg", "_onepassfit.csv")
-                                onepassfit_results = onepassfit(data, wcs, pxdq,onepassfitt_path_temp)
-                                catalogs_to_combine.append(onepassfit_results)
                             if find_sat:
                                 # Find saturated sources using nanmask and pixel data quality flags.
                                 log.info("Running find_saturated_sources for source detection")
@@ -4615,7 +4608,7 @@ class ImageTools():
                                     result_temp = vstack(catalogs_to_combine, metadata_conflicts='silent')
                                 else:
                                     result_temp = catalogs_to_combine[0]
-                                result = group_catalog_sources(result_temp, r=r)
+                                result = result_temp#group_catalog_sources(result_temp, r=r)
                                 result['id']=[int(i) for i in range(len(result))]
                             else:
                                 raise ValueError(f"No methods for catalog generation provided, or user path2catalog specified.")

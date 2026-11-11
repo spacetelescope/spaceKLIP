@@ -33,7 +33,7 @@ from typing import Literal
 
 from pathlib import Path
 
-import one_pass_fitting
+# import one_pass_fitting
 
 import stpsf
 # Set up log.
@@ -119,21 +119,22 @@ def find_saturated_sources(pxdq,nanmask, outname):
     tbl.write(outname, format="csv", overwrite=True)
     return tbl
 
-def onepassfit(data, wcs, pxdq, outname, det='nrcalong', filt='F444W', pupil='CLEAR', fmin=80, pmax=500):
-    def make_nircam_psf(detector: str, filt: str, pupil: str, npsf: int = 9):
-        """Get GriddedPSFModel for a given combination of nircam detector/optical element"""
-        if detector.lower() in ['along', 'blong']:
-            detector = detector.lower().replace('long', '5')
-        nrc.detector = 'nrc' + detector.upper()
+def make_nircam_psf(detector: str, filt: str, pupil: str, npsf: int = 9):
+    """Get GriddedPSFModel for a given combination of nircam detector/optical element"""
+    nrc = stpsf.NIRCam()
+    if detector.lower() in ['along', 'blong']:
+        detector = detector.lower().replace('long', '5')
+    nrc.detector = 'nrc' + detector.upper()
 
-        if pupil.upper() == 'CLEAR':
-            nrc.filter = filt.lower()
-        else:
-            nrc.filter = pupil.lower()
-        # 9 is likely too low, probably make it 25
-        grid = nrc.psf_grid(num_psfs=npsf, all_detectors=False)
-        return grid
+    if pupil.upper() == 'CLEAR':
+        nrc.filter = filt.lower()
+    else:
+        nrc.filter = pupil.lower()
+    # 9 is likely too low, probably make it 25
+    grid = nrc.psf_grid(num_psfs=npsf, all_detectors=False)
+    return grid
 
+def onepassfit(data, candidates, wcs, pxdq, det='nrcalong', filt='F444W', pupil='CLEAR'):
     data = np.asarray(data)
     if data.ndim == 3:
         data = data[0, :, :]
@@ -150,21 +151,18 @@ def onepassfit(data, wcs, pxdq, outname, det='nrcalong', filt='F444W', pupil='CL
     else:
         raise ValueError(f"pxdq must be a 3D or 2D, got shape {pxdq.shape}")
 
-    nrc = stpsf.NIRCam()
     model = make_nircam_psf(det.replace('nrc', ''), filt, pupil, npsf=25)  # Change this line for MIRI, or if you want a finer PSF grid
+    opf = one_pass_fitting.OnePassPhot(model)  # fmin and pmax are in data units, so MJy/sr by default for JWST
 
-    opf = one_pass_fitting.OnePassPhot(model, fmin=fmin,
-                                       pmax=pmax)  # fmin and pmax are in data units, so MJy/sr by default for JWST
-    tbl = opf(data, data_wcs=wcs, do_sat=True, dq=pxdq)
-    tbl['roundness'] = 0.0
-    tbl['sharpness'] = 0.5
-    tbl['flux'] = 0.0
-    tbl['coresat'] = 0.0
-    tbl['eccsat'] = 0.0
-    tbl['solsat'] = 0.0
-    tbl['method'] = "onepassfit"
+    unsat_tbl = opf.fit_stars(data,  candidates['x'][candidates['saturated'] == False],  candidates['y'][candidates['saturated'] == False], data_wcs=wcs)
+    sat_tbl = opf.sat_phot(data, pxdq, data_wcs=wcs, xs=candidates[candidates['saturated'] == True]['x'], ys=candidates[candidates['saturated'] == True]['y'])
+    if (len(unsat_tbl) == 0) or (len(sat_tbl) == 0):
+        tbl = vstack([unsat_tbl, sat_tbl])
+    else:
+        tbl = opf._merge_unsat_sat(unsat_tbl, sat_tbl)
 
-    tbl.write(outname, format="csv", overwrite=True)
+    # tbl = tbl[tbl['f'] > 0]  # Filter out any sources with non-positive flux
+
     return tbl
 
 def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, partial=False):
