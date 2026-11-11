@@ -40,10 +40,9 @@ import stpsf
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-
 def group_catalog_sources(catalog, r=1, ideal_roundness=0.0, ideal_sharpness=0.5):
     """
-    Groups catalog sources within a r and selects the best stellar representative.
+    Groups catalog sources within an r distance and selects the best stellar representative.
 
     Parameters:
     catalog (astropy.tables.Table): Must contain columns 'x', 'y', 'flux', 'roundness', 'sharpness'
@@ -89,7 +88,54 @@ def group_catalog_sources(catalog, r=1, ideal_roundness=0.0, ideal_sharpness=0.5
     log.info("Keeping " + ", ".join(method_counts) + f", seeds after grouping for sources within {r} pixels together.")
     return catalog
 
-def find_saturated_sources(pxdq,nanmask, outname):
+def flag_saturated_sources(pxdq,nanmask,catalog,distance_threshold=1.0):
+    pxdq = np.asarray(pxdq)
+    if pxdq.ndim == 3:
+        pxdq = pxdq[0, :, :]
+    if pxdq.ndim == 2:
+        pass
+    else:
+        raise ValueError(f"pxdq must be a 3D or 2D, got shape {pxdq.shape}")
+    # Find saturated sources
+    sat = (np.bitwise_and(pxdq, 2) / 2).astype(bool)  # Bit 1 (value 2)
+    sat1 = np.logical_and(np.bitwise_and(pxdq, 1).astype(bool),
+                          (pxdq < 8192))  # Bit 0 (value 1) with pipeline fix
+    sat_combined = np.logical_or(sat, sat1).astype(float)  # Combine both flags
+    sat_combined = np.logical_and(sat_combined, nanmask).astype(float)
+    finder = SourceFinder(npixels=2, connectivity=4, deblend=False)
+    segmap_combined = finder(sat_combined, threshold=0.5)
+    tbl = SourceCatalog(sat_combined, segmap_combined).to_table()
+
+    # Initialize flag column (all False)
+    catalog['saturated'] = 'n'
+    catalog['n_sat_pixels'] = 0
+
+    # Build KDTree from table coordinates
+    table_coords = np.vstack((tbl['x_centroid'].data, tbl['y_centroid'].data)).T
+    tree = KDTree(table_coords)
+
+    # Get catalog coordinates
+    catalog_coords = np.vstack((catalog['x'].data, catalog['y'].data)).T
+
+    # Query: for each catalog source, find if any table source is within distance_threshold
+    distances, indices = tree.query(catalog_coords, k=1)
+
+    # Flag sources with matches within threshold
+    matches = distances <= distance_threshold
+    catalog['saturated'] =  ['y' if m else 'n' for m in matches]
+    # Count saturated pixels for each matched source
+    for i, (is_saturated, idx) in enumerate(zip(matches, indices)):
+        if is_saturated:
+            # idx points to the nearest saturated region in `tbl`
+            # Count the actual pixels in that segmentation region
+            region_label = tbl['label'][idx]
+            catalog['n_sat_pixels'][i] = np.sum(segmap_combined == region_label)
+        else:
+            catalog['n_sat_pixels'][i] = 0
+
+    return catalog
+
+def find_saturated_sources(pxdq,nanmask,outname):
     pxdq = np.asarray(pxdq)
     if pxdq.ndim == 3:
         pxdq = pxdq[0, :, :]

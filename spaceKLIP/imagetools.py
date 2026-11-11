@@ -4554,6 +4554,7 @@ class ImageTools():
                         catalog_path = os.path.join(region_path.replace(".reg", ".csv"))
                         catalogs_to_combine = []
                         if byproduct_catalogs_path is None:
+                            # TODO: I need to keep track of which source land on saturated pixels for future onepassfit photometry.
                             # These are methods to fetch online catalogs for the image FOV. They can be used in combination or separately.
                             if path2catalog is not None:
                                 log.info(f"Selecting sources from provided catalog: {path2catalog}")
@@ -4617,6 +4618,13 @@ class ImageTools():
                             log.info(f"Loading catalog from previous processing: {byproduct_catalogs_path}. Ignoring other detection/fetching methods.")
                             result = Table.read(byproduct_catalogs_path)
 
+                        log.info("Flagging saturated sources")
+                        result=flag_saturated_sources(pxdq, nanmask, result)
+                        # log.info("Running one-pass fit for source photometry")
+                        # result = onepassfit(data, result, wcs, pxdq)
+                        result['id'] = [int(i) for i in range(len(result))]
+                        locked_cols = ['id','x','y','saturated','n_sat_pixels','method']
+                        result = result[locked_cols+[col for col in result.colnames if col not in locked_cols]]
                         result.write(catalog_path, format="csv", overwrite=True)
 
                         out = write_ds9_regions_from_sep_objects(result,
