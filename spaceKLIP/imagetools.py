@@ -65,7 +65,8 @@ from spaceKLIP import mcmc_tools,database
 from spaceKLIP.target_acq_tools import ta_analysis
 from spaceKLIP.starphot import get_stellar_magnitudes, read_spec_file
 from spaceKLIP.plotting import load_plt_style
-from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms,onepassfit,group_catalog_sources,find_saturated_sources,flag_saturated_sources
+from spaceKLIP.widefield_utils import DAO,FITPSF,write_ds9_regions_from_sep_objects,stars_extractor,fetch_catalog_for_image_fov,inspect_region_for_best_prop,estimate_bkg_and_rms,find_saturated_sources,flag_saturated_sources
+# from spaceKLIP.widefield_utils import onepassfit,group_catalog_sources
 
 # pyklip imports
 import pyklip.fakes as fakes
