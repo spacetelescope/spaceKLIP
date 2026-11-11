@@ -4779,7 +4779,7 @@ class ImageTools():
         ...                          subtract_bkg=False)
 
         """
-        #TODO: This should be part of the prepare_tiles step: setting the border of the nantile to a different vlaue so we can keep trak of it
+        #TODO: This should be part of the prepare_tiles step: setting the border of the nantile to a different value so we can keep track of it
         def create_border_mask(shape, npix):
             """
             Create a mask that isolates all pixels within npx distance from the border.
