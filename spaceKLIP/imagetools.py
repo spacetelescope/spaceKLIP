@@ -4651,9 +4651,6 @@ class ImageTools():
     def extract_tiles(self,
                       fov_pixels=101,
                       subdir='tiles',
-                      fwhm=2.5,
-                      threshold=1.5,
-                      coresat_r_max=5,
                       single_max_separation=1.5,
                       bin_max_separation=np.inf,
                       bin_min_separation=2.5,
@@ -4661,7 +4658,6 @@ class ImageTools():
                       y_limits=(-3,-3),
                       subtract_bkg=True,
                       method='spline',
-                      npix=0,
                       debug_id=None,
                       showplot=False,
                       debug=False):
@@ -4696,9 +4692,6 @@ class ImageTools():
         threshold : float, optional
             Detection threshold (in units of background sigma) for saturation
             core identification. Default is 1.5.
-        r_max : float, optional
-            Maximum distance from center to accept a candidate when estimating
-            saturation radius. Default is np.inf (no limit).
         single_max_separation : float, optional
             Maximum separation (pixels) to consider two detections as the same
             source across FITS files. Used for building source groups.
@@ -4724,7 +4717,11 @@ class ImageTools():
         showplot : bool, optional
             If True, display final diagnostic plots for the tile extraction.
             Default is False.
-
+        debug: bool, optional
+            If True, print additional debug information during processing.
+            Default is False.
+        debug_id: int, optional
+            If provided, only process the source with this ID for debugging purposes.
         Returns
         -------
         None
