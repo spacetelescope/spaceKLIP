@@ -5130,8 +5130,8 @@ class ImageTools():
                         psfs = offsetpsf_func.gen_psf([x_extract, y_extract], return_oversample=True, do_shift=False, quick=False, coord_frame='sci')
 
                         # Extract tiles around the coordinate of the stars. We initially extract a tile that is slightly larger than the requested FOV to allow for shifting later.
-                        tile = stars_extractor(data_filled[k], [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room, method=method, showplot=showplot,no_shift=True)
-                        sattile = stars_extractor(sat_combined[k], [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,method='nearest-neighbor',showplot=showplot,no_shift=True)
+                        tile = stars_extractor(data_filled[k], [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room, method=method, showplot=showplot)
+                        sattile = stars_extractor(sat_combined[k], [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,method='nearest-neighbor',showplot=showplot)
 
                         if subtract_bkg:
                             # struct_element = np.ones((3, 3), dtype=bool)
