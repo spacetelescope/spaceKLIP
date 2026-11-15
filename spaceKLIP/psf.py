@@ -521,7 +521,7 @@ class JWST_PSF():
         return psfs.squeeze()
     
     def gen_psf(self, loc, mode='xy', PA_V3=0, return_oversample=False, 
-                do_shift=True, addV3Yidl=True, normalize='first', **kwargs):
+                do_shift=True, addV3Yidl=True, normalize='first', coord_frame='idl', **kwargs):
         """
         Generate offset PSF rotated by PA to N-E orientation.
         
@@ -548,6 +548,12 @@ class JWST_PSF():
                 * 'exit_pupil': Normalize to 1.0 at exit pupil
 
             Only works for `quick=False`.
+        coord_frame : str
+            Type of input coordinates. Default is 'idl'.
+                * 'tel': arcsecs V2,V3
+                * 'sci': pixels, in DMS axes orientation; aperture-dependent
+                * 'det': pixels, in raw detector read out axes orientation
+                * 'idl': arcsecs relative to aperture reference location.
                         
         Keyword Args
         ------------
@@ -581,7 +587,7 @@ class JWST_PSF():
             xidl, yidl = loc
         
         # Perform shift in idl frame then rotate to sky coords
-        psf = self.gen_psf_idl((xidl, yidl), coord_frame='idl', do_shift=do_shift, 
+        psf = self.gen_psf_idl((xidl, yidl), coord_frame=coord_frame, do_shift=do_shift,
                                 return_oversample=True, normalize=normalize, **kwargs)
         
         if do_shift:
