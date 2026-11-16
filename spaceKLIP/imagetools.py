@@ -5056,13 +5056,20 @@ class ImageTools():
 
         for key in np.unique(catalog['key']):
             if debug_id is not None:
-                if isinstance(debug_id, (list,np.ndarray)):
-                    list_of_ids = debug_id
-                else:
-                    list_of_ids = [debug_id]
+                # Get the key and its associated values
+                search_key = list(debug_id.keys())[0]
+                search_values = debug_id[search_key]
+                # Check if the key is contained in each filepath
+                mask = np.array([search_key in f for f in catalog['fitsfile']])
+                # Additionally filter by the values (group_id or closest_neighbor_group_id)
+                # Assuming one of these columns contains the values you want to match
+                mask_values = np.isin(catalog['id'], search_values)
+                final_mask = catalog['group_id'] == catalog[mask & mask_values]['group_id']
+                list_of_ids = np.unique(catalog[final_mask]['group_id'])
                 debug = True
             else:
                 list_of_ids = np.unique(catalog[(catalog['key']==key)]['group_id'])
+
             for group_i in list_of_ids:
                 log.info(f'Working on median star: ID {group_i}, key {key}')
                 ii=0
