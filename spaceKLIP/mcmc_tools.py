@@ -62,6 +62,7 @@ class MCMCTools:
             - 'theta_limits': list, limits for the angle in the MCMC fit (if binarity is True). Default is [0, 360].
             - 'psi_limits': list, limits for the rotation angle in the MCMC fit (if rotate is True). Default is [0, 360].
             - 'binarity': bool, whether to fit a binary model (two PSFs) to the data. Default is True if type is 'SCI', otherwise False.
+            - 'oversample': int, the amount of oversampling of the PSF. Default is 4.
             - 'debug': bool, whether to show debug plots_bk during the MCMC fit. Default is False.
             - 'burnin': int, number of burn-in steps to discard in the MCMC fit. Default is None (automatically set to 60% of nsteps).
             - 'thin': int, thinning factor for the MCMC samples. Default is None (automatically set to 0.5 times the minimum autocorrelation time).
@@ -209,6 +210,10 @@ class MCMCTools:
             else:
                 self.initial_guess = [0, 0, self.flux_guess]  # x, y, flux
                 self.limits = [self.dx_limits, self.dy_limits, self.flux_limits]  # x, y, flux
+        if 'oversample' in kwargs:
+            self.oversample = kwargs['oversample']
+        else:
+            self.oversample = 4
         if 'debug' in kwargs:
             self.debug = kwargs['debug']
         else:
