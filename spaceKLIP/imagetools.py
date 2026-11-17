@@ -5064,7 +5064,7 @@ class ImageTools():
                 # Additionally filter by the values (group_id or closest_neighbor_group_id)
                 # Assuming one of these columns contains the values you want to match
                 mask_values = np.isin(catalog['id'], search_values)
-                final_mask = catalog['group_id'] == catalog[mask & mask_values]['group_id']
+                final_mask = (catalog['group_id'] == catalog[mask & mask_values]['group_id'])
                 list_of_ids = np.unique(catalog[final_mask]['group_id'])
                 debug = True
             else:
@@ -5166,7 +5166,6 @@ class ImageTools():
                         else:
                             skies = 0
 
-
                         det_method = source['method']
                         roundness = source['roundness']
                         sharpness = source['sharpness']
@@ -5174,9 +5173,9 @@ class ImageTools():
                         fit_psf = FITPSF(max_separation=bin_max_separation, min_separation=bin_min_separation,
                                          x_limits=x_limits, y_limits=y_limits, background=skies, debug=debug)
                         if group['closest_neighbor_group_id'][0] != -1:
-                            comp_id = group['closest_neighbor_group_id']
-                            dx2_guess = catalog[catalog['id'] == comp_id]['x'].value[0] -x_extract
-                            dy2_guess = catalog[catalog['id'] == comp_id]['y'].value[0] -y_extract
+                            comp_id = group['closest_neighbor_group_id'][0]
+                            dx2_guess = catalog[(catalog['group_id'] == comp_id)&(catalog['fitsfile'] == fitsfile)]['x'].value[0] -x_extract
+                            dy2_guess = catalog[(catalog['group_id'] == comp_id)&(catalog['fitsfile'] == fitsfile)]['y'].value[0] -y_extract
                         else:
                             comp_id = None
                             dx2_guess = None
@@ -5278,7 +5277,8 @@ class ImageTools():
                         ii+=1
 
                 if len(success_list)==0:
-                    success_list = [i for i in range(len(tile_list))]
+                    log.warning(f"No successful fits found for group_i:{group_i}.")
+                    continue
 
                 pri_hdr = template_pri_header_list[success_list[0]].copy()
                 combined_tile_fitsfile = f"jwtile_{pri_hdus_list[0]['DETECTOR'].lower()}_{group_i}_calints.fits"
