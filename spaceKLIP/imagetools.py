@@ -5345,15 +5345,15 @@ class ImageTools():
                     comp_y_list = [hdul['COMPCENY'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul.get('COMPCENY') is not None]
                     comp_f_list = [hdul['COMPFLUX'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul.get('COMPFLUX') is not None]
 
-                    if len(comp_x_list)>1 and len(comp_y_list)>1:
-                        good_idx = filter_companion_outliers_by_limits(comp_x_list, comp_y_list, x_limits=x_limits, y_limits=y_limits)
-
-                        if len(good_idx) <= 1:
-                            is_binary = False
-                        else:
-                            comp_x_list = [comp_x_list[i] for i in good_idx]
-                            comp_y_list = [comp_y_list[i] for i in good_idx]
-                            comp_f_list = [comp_f_list[i] for i in good_idx]
+                    # if len(comp_x_list)>1 and len(comp_y_list)>1:
+                    #     good_idx = filter_companion_outliers_by_limits(comp_x_list, comp_y_list, x_limits=x_limits, y_limits=y_limits)
+                    #
+                    #     if len(good_idx) <= 1:
+                    #         is_binary = False
+                    #     else:
+                    #         comp_x_list = [comp_x_list[i] for i in good_idx]
+                    #         comp_y_list = [comp_y_list[i] for i in good_idx]
+                    #         comp_f_list = [comp_f_list[i] for i in good_idx]
                 s_count = np.sum([hdul.get('SUCCESS') for hdul in [sci_hdus_list[i] for i in success_list]])
                 is_success = True if s_count > 0 else False
 
