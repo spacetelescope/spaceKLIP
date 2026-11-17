@@ -5175,8 +5175,13 @@ class ImageTools():
                                          x_limits=x_limits, y_limits=y_limits, background=skies, debug=debug,do_mcmc=False)
                         if group['closest_neighbor_group_id'][0] != -1:
                             comp_id = group['closest_neighbor_group_id'][0]
-                            dx2_guess = catalog[(catalog['group_id'] == comp_id)&(catalog['fitsfile'] == fitsfile)]['x'].value[0] -x_extract
-                            dy2_guess = catalog[(catalog['group_id'] == comp_id)&(catalog['fitsfile'] == fitsfile)]['y'].value[0] -y_extract
+                            if len(catalog[(catalog['group_id'] == comp_id)&(catalog['fitsfile'] == fitsfile)]):
+                                dx2_guess = catalog[(catalog['group_id'] == comp_id)&(catalog['fitsfile'] == fitsfile)]['x'].value[0] -x_extract
+                                dy2_guess = catalog[(catalog['group_id'] == comp_id)&(catalog['fitsfile'] == fitsfile)]['y'].value[0] -y_extract
+                            else:
+                                comp_id = None
+                                dx2_guess = None
+                                dy2_guess = None
                         else:
                             comp_id = None
                             dx2_guess = None
