@@ -210,6 +210,7 @@ class AnalysisTools():
                 # star.
                 filt = self.database.red[key]['FILTER'][j]
                 offsetpsf = get_offsetpsf(self.database.obs[key])
+                # TODO: fzero[filt] / 10.**(mstar[filt] / 2.5) [this could be the scaling factor that we evaluate during the extraction step. Check units!] is the flux in Jy, divide by 1e6 to convert to MJy, multiply by the peak of the offset PSF to get the peak flux in MJy
                 fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
 
                # Get PSF subtraction strategy used, for use in plot labels below.
