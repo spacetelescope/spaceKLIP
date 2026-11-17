@@ -3763,7 +3763,7 @@ class FITPSF:
 
     def __init__(self, max_separation=25, min_separation=1, x_limits=(-3, 3), y_limits=(-3, 3),
                  background=0, oversample=4, nsteps=500, nwalkers=30,
-                 _do_mcmc= False, debug=False, showplot=False):
+                 do_mcmc= False, debug=False, showplot=False):
         """
         Initialize FITPSF fitter with solver options and gating thresholds.
 
@@ -3823,7 +3823,7 @@ class FITPSF:
         self.debug = debug
         self.showplot = showplot
         self.oversample=oversample
-        self._do_mcmc = _do_mcmc
+        self.do_mcmc = do_mcmc
         self.nsteps=nsteps
         self.nwalkers=nwalkers
         # Extracted parameters results containers (filled by fitpsf)
@@ -3865,9 +3865,13 @@ class FITPSF:
 
         # Plot Diagnostics Window
         ny, nx = tile.shape
-        fitted_x1_pos = (nx - 1) / 2 + self.dx1
-        fitted_y1_pos = (ny - 1) / 2 + self.dy1
 
+        try:
+            fitted_x1_pos = self.best_fit_params[0]
+            fitted_y1_pos = self.best_fit_params[1]
+        except:
+            fitted_x1_pos = (nx - 1) / 2 + self.dx1
+            fitted_y1_pos = (ny - 1) / 2 + self.dy1
         # 1. Safely extract the data min and max bounds
         tile_min = float(np.nanmin(tile))
         tile_max = float(np.nanmax(tile))
@@ -4055,7 +4059,7 @@ class FITPSF:
                       binarity=mcmc_tool.binarity,
                       filename='./mcmc_fit_results')
 
-        return mcmc_tool.best_fit_params
+        self.best_fit_params =  mcmc_tool.best_fit_params
 
     def fitpsf(self, tile, mask, imaging_psf, dx2_guess=None, dy2_guess=None):
         if self.debug:
@@ -4074,11 +4078,12 @@ class FITPSF:
             self.bintest = False
             if self.debug:
                 self._plot_final_fit(tile)
-            if self._do_mcmc:
+            if self.do_mcmc:
                 initial_guess = [self.dx1, self.dy1, self.peak1]
-                limits = [[-2, 2], [-2, 2], [self.peak1*1e-1, self.peak1*1e1]]
+                limits = [[-1, 1], [-1, 1], [self.peak1*1e-1, self.peak1*1e1]]
                 self._one_source_model_mcmc(tile, imaging_psf, initial_guess, limits, oversample=self.oversample,
                                             nsteps=self.nsteps, nwalkers=self.nwalkers, verbose=self.debug)
-
+                if self.debug:
+                    self._plot_final_fit(tile)
         pass
 
