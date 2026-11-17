@@ -37,7 +37,7 @@ from typing import Literal
 
 from pathlib import Path
 
-import one_pass_fitting
+# import one_pass_fitting
 
 import stpsf
 # Set up log.
@@ -185,36 +185,36 @@ def make_nircam_psf(detector: str, filt: str, pupil: str, npsf: int = 9, fov_pix
     grid = nrc.psf_grid(num_psfs=npsf, all_detectors=False)
     return grid
 
-def onepassfit(data, candidates, wcs, pxdq, det='nrcalong', filt='F444W', pupil='CLEAR'):
-    data = np.asarray(data)
-    if data.ndim == 3:
-        data = data[0, :, :]
-    if data.ndim == 2:
-        pass
-    else:
-        raise ValueError(f"image must be a 3D or 2D, got shape {data.shape}")
-
-    pxdq = np.asarray(pxdq)
-    if pxdq.ndim == 3:
-        pxdq = pxdq[0, :, :]
-    if pxdq.ndim == 2:
-        pass
-    else:
-        raise ValueError(f"pxdq must be a 3D or 2D, got shape {pxdq.shape}")
-
-    model = make_nircam_psf(det.replace('nrc', ''), filt, pupil, npsf=25)  # Change this line for MIRI, or if you want a finer PSF grid
-    opf = one_pass_fitting.OnePassPhot(model)  # fmin and pmax are in data units, so MJy/sr by default for JWST
-
-    unsat_tbl = opf.fit_stars(data,  candidates['x'][candidates['saturated'] == False],  candidates['y'][candidates['saturated'] == False], data_wcs=wcs)
-    sat_tbl = opf.sat_phot(data, pxdq, data_wcs=wcs, xs=candidates[candidates['saturated'] == True]['x'], ys=candidates[candidates['saturated'] == True]['y'])
-    if (len(unsat_tbl) == 0) or (len(sat_tbl) == 0):
-        tbl = vstack([unsat_tbl, sat_tbl])
-    else:
-        tbl = opf._merge_unsat_sat(unsat_tbl, sat_tbl)
-
-    # tbl = tbl[tbl['f'] > 0]  # Filter out any sources with non-positive flux
-
-    return tbl
+# def onepassfit(data, candidates, wcs, pxdq, det='nrcalong', filt='F444W', pupil='CLEAR'):
+#     data = np.asarray(data)
+#     if data.ndim == 3:
+#         data = data[0, :, :]
+#     if data.ndim == 2:
+#         pass
+#     else:
+#         raise ValueError(f"image must be a 3D or 2D, got shape {data.shape}")
+#
+#     pxdq = np.asarray(pxdq)
+#     if pxdq.ndim == 3:
+#         pxdq = pxdq[0, :, :]
+#     if pxdq.ndim == 2:
+#         pass
+#     else:
+#         raise ValueError(f"pxdq must be a 3D or 2D, got shape {pxdq.shape}")
+#
+#     model = make_nircam_psf(det.replace('nrc', ''), filt, pupil, npsf=25)  # Change this line for MIRI, or if you want a finer PSF grid
+#     opf = one_pass_fitting.OnePassPhot(model)  # fmin and pmax are in data units, so MJy/sr by default for JWST
+#
+#     unsat_tbl = opf.fit_stars(data,  candidates['x'][candidates['saturated'] == False],  candidates['y'][candidates['saturated'] == False], data_wcs=wcs)
+#     sat_tbl = opf.sat_phot(data, pxdq, data_wcs=wcs, xs=candidates[candidates['saturated'] == True]['x'], ys=candidates[candidates['saturated'] == True]['y'])
+#     if (len(unsat_tbl) == 0) or (len(sat_tbl) == 0):
+#         tbl = vstack([unsat_tbl, sat_tbl])
+#     else:
+#         tbl = opf._merge_unsat_sat(unsat_tbl, sat_tbl)
+#
+#     # tbl = tbl[tbl['f'] > 0]  # Filter out any sources with non-positive flux
+#
+#     return tbl
 
 def mask_within_radius(image, xdat, ydat, xcen, ycen, r, x=0, y=0, c=np.nan, partial=False):
     """

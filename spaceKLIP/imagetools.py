@@ -5141,31 +5141,32 @@ class ImageTools():
                         sattile = stars_extractor(sat_combined[k], [x_extract, y_extract],fov=fov_pixels + breathing_room + 1 if (fov_pixels) % 2 == 0 else fov_pixels + breathing_room,method='nearest-neighbor',showplot=showplot)
 
                         if subtract_bkg:
-                            # struct_element = np.ones((3, 3), dtype=bool)
-                            # dilated_mask = binary_dilation(nantile.astype(bool), structure=struct_element)
-                            # bkg, rms = estimate_bkg_and_rms(tile_with_nans, mask=dilated_mask)
-                            # log.info(f"--> Estimated median subtracted bkg before extraction: {np.median(bkg)}")
-                            # tile_with_nans-=bkg
-                            if np.sum(sattile) ==0:
-                                rin  = 8.5
-                                rout = 13.5
-                            else:
-                                rin  = 8.5*2.5
-                                rout = 13.5*3.5
-
-                            from one_pass_fitting.background_measurement import estimate_all_backgrounds
-                            skies = estimate_all_backgrounds(
-                                [x_extract],
-                                [y_extract],
-                                rin,
-                                rout,
-                                data_filled[k],
-                                stat=f"aperture_mode",
-                                progress_bar=False,
-                            )
+                            # TODO: fix background estimation.
+                            struct_element = np.ones((3, 3), dtype=bool)
+                            dilated_mask = binary_dilation(sattile.astype(bool), structure=struct_element)
+                            bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
+                            skies = np.median(bkg)
+                            # if np.sum(sattile) ==0:
+                            #     rin  = 8.5
+                            #     rout = 13.5
+                            # else:
+                            #     rin  = 8.5*2.5
+                            #     rout = 13.5*3.5
+                            #
+                            # from one_pass_fitting.background_measurement import estimate_all_backgrounds
+                            # skies = estimate_all_backgrounds(
+                            #     [x_extract],
+                            #     [y_extract],
+                            #     rin,
+                            #     rout,
+                            #     data_filled[k],
+                            #     stat=f"aperture_mode",
+                            #     progress_bar=False,
+                            # )
                         else:
                             skies = 0
 
+                        log.info(f"--> Estimated median subtracted bkg before extraction: {skies}")
                         det_method = source['method']
                         roundness = source['roundness']
                         sharpness = source['sharpness']
