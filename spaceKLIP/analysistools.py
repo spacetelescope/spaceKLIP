@@ -100,6 +100,7 @@ class AnalysisTools():
                      plot_ylim=(None,1),
                      save_figures=True,
                      plot_style=None,
+                     flux = None,
                      **kwargs):
         """
         Compute the raw contrast relative to the provided host star flux.
@@ -150,21 +151,22 @@ class AnalysisTools():
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-        # Copy the starfile that will be used into this directory
-        new_starfile_path = output_dir+'/'+starfile.split('/')[-1]
-        if starfile[-4:] == '.vot':
-            # Will be using the input spectral type, should record it
-            spectype_str = 'Spectral Type: {}'.format(spectral_type)
-        else:
-            # Spectral type won't be relevant, don't record misleading info
-            spectype_str = 'Spectral Type: N/A'
-        new_header = '#'+starfile.split('/')[-1] + f' /// {spectype_str}'+'\n'
-        contrast_curve_info_path = output_dir+'/contrast_curve_info.txt'
-        # Also copy this info to the contrast curve file
-        with open(contrast_curve_info_path, 'w') as ccinfo:
-            ccinfo.write(new_header)
-        log.info('Copying starfile {} to {}'.format(starfile, new_starfile_path))
-        write_starfile(starfile, new_starfile_path)
+        if starfile is not None:
+            # Copy the starfile that will be used into this directory
+            new_starfile_path = output_dir+'/'+starfile.split('/')[-1]
+            if starfile[-4:] == '.vot':
+                # Will be using the input spectral type, should record it
+                spectype_str = 'Spectral Type: {}'.format(spectral_type)
+            else:
+                # Spectral type won't be relevant, don't record misleading info
+                spectype_str = 'Spectral Type: N/A'
+            new_header = '#'+starfile.split('/')[-1] + f' /// {spectype_str}'+'\n'
+            contrast_curve_info_path = output_dir+'/contrast_curve_info.txt'
+            # Also copy this info to the contrast curve file
+            with open(contrast_curve_info_path, 'w') as ccinfo:
+                ccinfo.write(new_header)
+            log.info('Copying starfile {} to {}'.format(starfile, new_starfile_path))
+            write_starfile(starfile, new_starfile_path)
 
         # Loop through concatenations.
         for i, key in enumerate(self.database.red.keys()):
@@ -175,14 +177,14 @@ class AnalysisTools():
             for j in range(nfitsfiles):
                 
                 log.info('Analyzing file ' + self.database.red[key]['FITSFILE'][j])
-
-                # Get stellar magnitudes and filter zero points.
-                mstar, fzero, fzero_flam, fzero_wm2um = get_stellar_magnitudes(
-                    starfile, spectral_type,
-                    self.database.red[key]['INSTRUME'][j],
-                    self.database.red[key]['DETECTOR'][j],
-                    self.database.red[key]['EXP_TYPE'][j],
-                    output_dir=output_dir, **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
+                if starfile is not None:
+                    # Get stellar magnitudes and filter zero points.
+                    mstar, fzero, fzero_flam, fzero_wm2um = get_stellar_magnitudes(
+                        starfile, spectral_type,
+                        self.database.red[key]['INSTRUME'][j],
+                        self.database.red[key]['DETECTOR'][j],
+                        self.database.red[key]['EXP_TYPE'][j],
+                        output_dir=output_dir, **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
 
                 tp_comsubst = ut.get_tp_comsubst(self.database.red[key]['INSTRUME'][j],
                                                  self.database.red[key]['SUBARRAY'][j],
@@ -211,8 +213,10 @@ class AnalysisTools():
                 filt = self.database.red[key]['FILTER'][j]
                 offsetpsf = get_offsetpsf(self.database.obs[key])
                 # TODO: fzero[filt] / 10.**(mstar[filt] / 2.5) [this could be the scaling factor that we evaluate during the extraction step. Check units!] is the flux in Jy, divide by 1e6 to convert to MJy, multiply by the peak of the offset PSF to get the peak flux in MJy
-                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
-
+                if starfile is not None:
+                    fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
+                else:
+                    fstar = flux / 1e6 * np.nanmax(offsetpsf)
                # Get PSF subtraction strategy used, for use in plot labels below.
                 psfsub_strategy = f"{head_pri['MODE']} with {head_pri['ANNULI']} annuli." if head_pri['ANNULI']>1 else head_pri['MODE']
 
@@ -467,6 +471,7 @@ class AnalysisTools():
                            thrput_fit_method='median',
                            plot_xlim=(0,10),
                            plot_style=None,
+                           flux = None,
                            **kwargs
                            ):
         """ 
@@ -597,22 +602,30 @@ class AnalysisTools():
                 if not np.isnan(self.database.obs[key]['BLURFWHM'][j]):
                     resolution *= self.database.obs[key]['BLURFWHM'][j]
                 resolution_fwhm = 1.025*resolution
+                filt = self.database.red[key]['FILTER'][j]
 
                 # Get stellar magnitudes and filter zero points, but use the same file as rawcon
                 ccinfo = os.path.join(rawcon_dir, 'contrast_curve_info.txt')
-                with open(ccinfo) as cci:
-                    starfile, spectral_type_info = cci.readline().strip('\n').split(' /// ')
-                    spectral_type = spectral_type_info.split(': ')[1]
-                    starfile = os.path.join(rawcon_dir, starfile.replace('#',''))
-                mstar, fzero, _, _ = get_stellar_magnitudes(starfile,
-                                                      spectral_type,
-                                                      self.database.red[key]['INSTRUME'][j],
-                                                      self.database.red[key]['DETECTOR'][j],
-                                                      self.database.red[key]['EXP_TYPE'][j],
-                                                      output_dir=output_dir,
-                                                      **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
-                filt = self.database.red[key]['FILTER'][j]
-                fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
+                if os.path.exists(ccinfo):
+                    with open(ccinfo) as cci:
+                        starfile, spectral_type_info = cci.readline().strip('\n').split(' /// ')
+                        spectral_type = spectral_type_info.split(': ')[1]
+                        starfile = os.path.join(rawcon_dir, starfile.replace('#',''))
+                    mstar, fzero, _, _ = get_stellar_magnitudes(starfile,
+                                                          spectral_type,
+                                                          self.database.red[key]['INSTRUME'][j],
+                                                          self.database.red[key]['DETECTOR'][j],
+                                                          self.database.red[key]['EXP_TYPE'][j],
+                                                          output_dir=output_dir,
+                                                          **kwargs)  # vegamag, Jy, erg/s/cm^2/A, W/m^2/um
+
+                    fstar = fzero[filt] / 10.**(mstar[filt] / 2.5) / 1e6 * np.nanmax(offsetpsf)  # MJy
+                else:
+                    pxar = self.database.red[key]['PIXAR_SR'][j]  # sr
+                    if np.isnan(pxar):
+                        log.warning("PIXAR_SR not found in database, falling back to use PIXSCALE")
+                        pxar = pxsc_rad ** 2  # sr
+                    fstar = flux / 1e6 * np.nanmax(offsetpsf)
                 fstar *= ((180./np.pi)*3600.)**2/pxsc_arcsec**2 # MJy/sr
                 # Get PSF subtraction strategy used, for use in plot labels below.
                 psfsub_strategy = f"{head_pri['MODE']} with {head_pri['ANNULI']} annuli." if head_pri['ANNULI']>1 else head_pri['MODE']
