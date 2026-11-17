@@ -53,6 +53,7 @@ from webbpsf_ext.coords import dist_image
 from webbpsf_ext.webbpsf_ext_core import _transmission_map
 from stpsf.constants import JWST_CIRCUMSCRIBED_DIAMETER
 import stpsf
+from spaceKLIP.utils import get_pce_info
 
 # spaceKLIP imports
 from spaceKLIP import utils as ut, widefield_utils
@@ -4900,6 +4901,11 @@ class ImageTools():
                 table['detector'] = self.database.obs[key]['DETECTOR'][j]
                 table['apername'] = self.database.obs[key]['APERNAME'][j]
                 table['filter'] = self.database.obs[key]['FILTER'][j]
+                table['instrume'] = self.database.obs[key]['INSTRUME'][j]
+                table['detector'] = self.database.obs[key]['DETECTOR'][j]
+                table['exp_type'] = self.database.obs[key]['EXP_TYPE'][j]
+                table['pixscale'] = self.database.obs[key]['PIXSCALE'][j]
+                table['pixar_sr'] = self.database.obs[key]['PIXAR_SR'][j]
                 table['fitsfile'] = fitsfile
                 table['nanmaskfile'] = self.database.obs[key]['NANMASKFILE'][j]
                 table['key'] = key
@@ -5146,23 +5152,6 @@ class ImageTools():
                             dilated_mask = binary_dilation(sattile.astype(bool), structure=struct_element)
                             bkg, rms = estimate_bkg_and_rms(tile, mask=dilated_mask)
                             skies = np.median(bkg)
-                            # if np.sum(sattile) ==0:
-                            #     rin  = 8.5
-                            #     rout = 13.5
-                            # else:
-                            #     rin  = 8.5*2.5
-                            #     rout = 13.5*3.5
-                            #
-                            # from one_pass_fitting.background_measurement import estimate_all_backgrounds
-                            # skies = estimate_all_backgrounds(
-                            #     [x_extract],
-                            #     [y_extract],
-                            #     rin,
-                            #     rout,
-                            #     data_filled[k],
-                            #     stat=f"aperture_mode",
-                            #     progress_bar=False,
-                            # )
                         else:
                             skies = 0
 
@@ -5191,15 +5180,27 @@ class ImageTools():
                         success = fit_psf.success
                         bintest = fit_psf.bintest
                         shifts1 = np.array([-fit_psf.dx1, -fit_psf.dy1])
-                        fitted_p1 = fit_psf.peak1
+                        # Compute the pixel area in steradian.
+                        pxsc_arcsec = source['pixscale']  # arcsec
+                        pxsc_rad = pxsc_arcsec / 3600. / 180. * np.pi  # rad
+                        pxar = source['pixar_sr']  # sr
+                        if np.isnan(pxar):
+                            log.warning("PIXAR_SR not found in database, falling back to use PIXSCALE")
+                            pxar = pxsc_rad ** 2  # sr
+
+                        fitted_p1 = fit_psf.peak1 * 1e6 * pxar # flux in MJy/sr converted to Jy
                         if bintest:
                             shifts2 = np.array([-fit_psf.dx2, -fit_psf.dy2])
-                            fitted_p2 = fit_psf.peak2
+                            fitted_p2 = fit_psf.peak2 * 1e6 * pxar
                         else:
                             shifts2 = np.array([None, None])
                             fitted_p2 = None
-                        mag_p1 = -2.5*np.log10(fitted_p1) if (fitted_p1 is not None and not np.isnan(fitted_p1)) else None
-                        mag_p2 = -2.5*np.log10(fitted_p2) if (fitted_p2 is not None and not np.isnan(fitted_p2)) else None
+
+                        pce_info = get_pce_info(source['instrume'], filt, source['detector'], source['exp_type'])
+                        fzero = float(pce_info['ZeroPointJy'])
+
+                        mag_p1 = -2.5*np.log10(fitted_p1/fzero)  if (fitted_p1 is not None and not np.isnan(fitted_p1)) else None #apmag in Vegamag
+                        mag_p2 = -2.5*np.log10(fitted_p2/fzero) if (fitted_p2 is not None and not np.isnan(fitted_p2)) else None #apmag in Vegamag
                         log.info(f"--> Estimated shifts: {shifts1}")
                         # Need to determine largest potential shift for padding purposes
                         max_shift = np.max(np.abs(shifts1))
@@ -5252,12 +5253,12 @@ class ImageTools():
                         head_sci['STARFRMY'] = round(starframey+1, 2)
                         head_sci['STARCENX'] = round(tile_center+1, 2)
                         head_sci['STARCENY'] = round(tile_center+1, 2)
-                        head_sci['STARFLUX'] = round(fitted_p1, 2) if (fitted_p1 is not None and not np.isnan(fitted_p1)) else None
+                        head_sci['STARFLUX'] = fitted_p1 if (fitted_p1 is not None and not np.isnan(fitted_p1)) else None
                         head_sci['STARMAG'] = round(mag_p1, 2) if (mag_p1 is not None and not np.isnan(mag_p1)) else None
                         head_sci['COMPID'] = int(comp_id) if (comp_id is not None and not isinstance(comp_id,np.ma.MaskedArray)) else None
                         head_sci['COMPCENX'] = round(fitted_x2_pos + 1, 2) if (fitted_x2_pos is not None and not isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
                         head_sci['COMPCENY'] = round(fitted_y2_pos + 1, 2) if (fitted_y2_pos is not None and not isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
-                        head_sci['COMPFLUX'] = round(fitted_p2, 2) if (fitted_p2 is not None and not np.isnan(fitted_p2)) else None
+                        head_sci['COMPFLUX'] = fitted_p2 if (fitted_p2 is not None and not np.isnan(fitted_p2)) else None
                         head_sci['COMPMAG'] = round(mag_p2, 2) if (mag_p2 is not None and not np.isnan(mag_p2)) else None
                         head_sci['METHOD'] = det_method
                         head_sci['ROUND'] = round(roundness, 2) if (roundness is not None and not isinstance(roundness,np.ma.MaskedArray)) else None
@@ -5328,7 +5329,7 @@ class ImageTools():
                 sci_hdr['STARCENX'] = round(np.nanmean(starcenx), 2)
                 sci_hdr['STARCENY'] = round(np.nanmean(starceny), 2)
                 if len(starpeak)>0:
-                    sci_hdr['STARFLUX'] = round(np.nanmean(starpeak), 2)
+                    sci_hdr['STARFLUX'] = np.nanmean(starpeak)
                 else:
                     sci_hdr['STARFLUX'] = None
                 if len(starmag)>0:
@@ -5361,7 +5362,7 @@ class ImageTools():
                 sci_hdr['SUCCESS'] = is_success
                 sci_hdr['COMPCENX'] = round(np.nanmean(comp_x_list), 2) if is_binary else None
                 sci_hdr['COMPCENY'] = round(np.nanmean(comp_y_list), 2) if is_binary else None
-                sci_hdr['COMPFLUX'] = round(np.nanmean(comp_f_list), 2) if is_binary else None
+                sci_hdr['COMPFLUX'] = np.nanmean(comp_f_list) if is_binary else None
                 sci_hdr['COMPMAG'] = round(np.nanmean([hdul['COMPMAG'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['COMPMAG'] is not None]), 2) if is_binary else None
                 sci_hdr['NSAT'] = round(np.nanmean([hdul['NSAT'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['NSAT'] is not None]), 2)
 
