@@ -203,7 +203,7 @@ def run_obs(database,
                     hdul[0].header.comments['PSFCENTY'] = 'Star center along the Y axis, 0-indexed'
                     hdul[0].header.comments['STARCENX'] = 'Star center along the X axis, 1-indexed'
                     hdul[0].header.comments['STARCENY'] = 'Star center along the Y axis, 1-indexed'
-                    
+
                     hdul[0].header['TELESCOP'] = (database.obs[key]['TELESCOP'][ww_sci[0]], head_primary.comments["TELESCOP"])
                     hdul[0].header['TARGPROP'] = (database.obs[key]['TARGPROP'][ww_sci[0]], head_primary.comments["TARGPROP"])
                     hdul[0].header['TARG_RA'] = (database.obs[key]['TARG_RA'][ww_sci[0]], head_primary.comments["TARG_RA"])
@@ -214,8 +214,9 @@ def run_obs(database,
                     hdul[0].header['CWAVEL'] = (database.obs[key]['CWAVEL'][ww_sci[0]], "[micron] Filter pivot wavelength")
                     hdul[0].header['DWAVEL'] = (database.obs[key]['DWAVEL'][ww_sci[0]], "[micron] Filter effective width")
                     hdul[0].header['PUPIL'] = (database.obs[key]['PUPIL'][ww_sci[0]], head_primary.comments['PUPIL'] if 'PUPIL' in head_primary else '')
-                    hdul[0].header['CORONMSK'] = (database.obs[key]['CORONMSK'][ww_sci[0]], head_primary.comments["CORONMSK"])
                     hdul[0].header['EXP_TYPE'] = (database.obs[key]['EXP_TYPE'][ww_sci[0]], head_primary.comments["EXP_TYPE"])
+                    if hdul[0].header['EXP_TYPE'] == 'NRC_CORON':
+                        hdul[0].header['CORONMSK'] = (database.obs[key]['CORONMSK'][ww_sci[0]], head_primary.comments["CORONMSK"])
                     hdul[0].header['EXPSTART'] = (np.min(database.obs[key]['EXPSTART'][ww_sci]), head_primary.comments["EXPSTART"])
                     hdul[0].header['NINTS'] = (np.sum(database.obs[key]['NINTS'][ww_sci]), head_primary.comments["NINTS"])
                     hdul[0].header['EFFINTTM'] = (database.obs[key]['EFFINTTM'][ww_sci[0]], head_primary.comments["EFFINTTM"])
