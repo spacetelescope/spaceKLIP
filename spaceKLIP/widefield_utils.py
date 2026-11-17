@@ -3956,7 +3956,7 @@ class FITPSF:
         eps_vector_1 = [1e-2, 1e-2]
         res1 = minimize(chisq_1, guess_1, bounds=bounds_1, method='Powell')
                          # options={'eps': eps_vector_1, 'maxiter': self.maxiter, 'ftol': self.ftol, 'gtol': self.gtol})
-        success = res1.success
+        self.success = res1.success
         dx1, dy1 = res1.x
 
         shifted_psf = ut.imshift(imaging_psf, [self.oversample * dx1, self.oversample * dy1], method='fourier', nan_reflected=False, pad_amount=0)
@@ -3967,11 +3967,15 @@ class FITPSF:
         self.residuals1 = (tile - Bin_scaled[0])
 
         log.debug(f"  Final res1.x: dx1={dx1:.4f}, dy1={dy1:.4f}. p1: {p1:.2f}")
-        log.debug(f"  Chisq at final res1.x: {chisq_1(res1.x):.4e}. Success: {success}")
+        log.debug(f"  Chisq at final res1.x: {chisq_1(res1.x):.4e}. Success: {self.success}")
         self.dx1 = dx1
         self.dy1 = dy1
         self.peak1 = p1
         self.res1 = res1
+        if self.peak1 is None or self.peak1 < 0:
+            log.debug(f"Negative/None peak1={self.peak1:.2f} detected. Fit failed. Success: {self.success}")
+            self.success = False
+        pass
 
     def _two_source_model(self, tile, imaging_psf, mask, weights, dx1_seed, dy1_seed, dx2_seed, dy2_seed):
         guess_2 = [dx1_seed, dy1_seed, dx2_seed, dy2_seed]
@@ -4002,7 +4006,7 @@ class FITPSF:
             return chi_sq
 
         res2 = minimize(chisq_2, guess_2, bounds=bounds_2, method='Powell')
-        success = res2.success
+        self.success = res2.success
         dx1, dy1, dx2, dy2 = res2.x
 
         shifted_psf1 = ut.imshift(imaging_psf, [self.oversample * dx1, self.oversample * dy1],  method='fourier', nan_reflected=False, pad_amount=0)
@@ -4022,7 +4026,7 @@ class FITPSF:
         log.debug(f"  Final res2.x: dx2={dx2:.4f}, dy2={dy2:.4f}, p2={Bcoeffs[1]:.2f}")
         sep_final = np.sqrt((dx1 - dx2) ** 2 + (dy1 - dy2) ** 2)
         log.debug(f"  Final separation: {sep_final:.4f} px")
-        log.debug(f"  Chisq at final res2.x: {chisq_2(res2.x):.4e}. Success: {success}")
+        log.debug(f"  Chisq at final res2.x: {chisq_2(res2.x):.4e}. Success: {self.success}")
         self.dx1 = dx1
         self.dy1 = dy1
         self.peak1 = Bcoeffs[0]
@@ -4030,6 +4034,14 @@ class FITPSF:
         self.dy2 = dy2
         self.peak2 = Bcoeffs[1]
         self.res2 = res2
+        if self.peak1 is None or self.peak1 < 0:
+            log.debug(f"Negative/None peak1={self.peak1:.2f} detected. Fit failed. Success: {self.success}")
+            self.success = False
+            self.bintest =False
+        if self.peak2 is None or self.peak2 < 0:
+            log.debug(f"Negative/None peak2={self.peak2:.2f} detected. Fit failed. Success: {self.success}")
+            self.success = False
+            self.bintest =False
 
     def _one_source_model_mcmc(self, data, psf, initial_guess, limits, nsteps=5000, nwalkers=30, oversample=4, verbose=False):
         """MCMC fit for single source model"""
@@ -4068,14 +4080,14 @@ class FITPSF:
             log.setLevel(logging.INFO)
 
         if dx2_guess is not None and dy2_guess is not None:
-            self._two_source_model(tile, imaging_psf, mask, np.ones(tile.shape), 0, 0, dx2_guess, dy2_guess)
             self.bintest =True
+            self._two_source_model(tile, imaging_psf, mask, np.ones(tile.shape), 0, 0, dx2_guess, dy2_guess)
             if self.debug:
                 self._plot_final_fit(tile)
         else:
             tile -= self.background
-            self._one_source_model(tile, imaging_psf, mask, np.ones(tile.shape), 0, 0)
             self.bintest = False
+            self._one_source_model(tile, imaging_psf, mask, np.ones(tile.shape), 0, 0)
             if self.debug:
                 self._plot_final_fit(tile)
             if self.do_mcmc:
