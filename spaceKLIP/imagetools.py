@@ -4557,6 +4557,7 @@ class ImageTools():
                         if byproduct_catalogs_path is None:
                             # These are methods to fetch online catalogs for the image FOV. They can be used in combination or separately.
                             if path2catalog is not None:
+                                # TODO: Missing sources close to border when fetching from user catalog. Need to check if this is due to the border parameter or something else.
                                 log.info(f"Selecting sources from provided catalog: {path2catalog}")
                                 user_cat_path_temp = region_path.replace(".reg", "_usercat.csv")
                                 user_cat_results = fetch_catalog_for_image_fov(user_cat_path_temp, data, head_sci,wcs,
@@ -4565,7 +4566,6 @@ class ImageTools():
                                                                                table_kwargs=table_kwargs,border=border)
                                 catalogs_to_combine.append(user_cat_results)
                             if use_gaia:
-                                # ToDO: Gaia method is not working properly, need to fix it. For now it's better to skip it.
                                 log.info("Downloading catalog from GAIA")
                                 gaia_path_temp = region_path.replace(".reg", "_gaia.csv")
                                 gaia_results = fetch_catalog_for_image_fov(gaia_path_temp, data, head_sci,wcs,
