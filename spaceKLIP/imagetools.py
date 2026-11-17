@@ -5169,9 +5169,9 @@ class ImageTools():
                         det_method = source['method']
                         roundness = source['roundness']
                         sharpness = source['sharpness']
-
+                        # TODO: Fix PSF fitting for sources close to the border of the data. Fix mcmc fitting
                         fit_psf = FITPSF(max_separation=bin_max_separation, min_separation=bin_min_separation,
-                                         x_limits=x_limits, y_limits=y_limits, background=skies, debug=debug)
+                                         x_limits=x_limits, y_limits=y_limits, background=skies, debug=debug,do_mcmc=False)
                         if group['closest_neighbor_group_id'][0] != -1:
                             comp_id = group['closest_neighbor_group_id'][0]
                             dx2_guess = catalog[(catalog['group_id'] == comp_id)&(catalog['fitsfile'] == fitsfile)]['x'].value[0] -x_extract
@@ -5185,14 +5185,15 @@ class ImageTools():
                         success = fit_psf.success
                         bintest = fit_psf.bintest
                         shifts1 = np.array([-fit_psf.dx1, -fit_psf.dy1])
+                        fitted_p1 = fit_psf.peak1
                         if bintest:
                             shifts2 = np.array([-fit_psf.dx2, -fit_psf.dy2])
                             fitted_p2 = fit_psf.peak2
                         else:
                             shifts2 = np.array([None, None])
                             fitted_p2 = None
-                        fitted_p1 = fit_psf.peak1
-
+                        mag_p1 = -2.5*np.log10(fitted_p1) if (fitted_p1 is not None and not np.isnan(fitted_p1)) else None
+                        mag_p2 = -2.5*np.log10(fitted_p2) if (fitted_p2 is not None and not np.isnan(fitted_p2)) else None
                         log.info(f"--> Estimated shifts: {shifts1}")
                         # Need to determine largest potential shift for padding purposes
                         max_shift = np.max(np.abs(shifts1))
@@ -5245,11 +5246,13 @@ class ImageTools():
                         head_sci['STARFRMY'] = round(starframey+1, 2)
                         head_sci['STARCENX'] = round(tile_center+1, 2)
                         head_sci['STARCENY'] = round(tile_center+1, 2)
-                        head_sci['STARFLUX'] = round(fitted_p1, 2) if not np.isnan(fitted_p1) else None
+                        head_sci['STARFLUX'] = round(fitted_p1, 2) if (fitted_p1 is not None and not np.isnan(fitted_p1)) else None
+                        head_sci['STARMAG'] = round(mag_p1, 2) if (mag_p1 is not None and not np.isnan(mag_p1)) else None
                         head_sci['COMPID'] = int(comp_id) if (comp_id is not None and not isinstance(comp_id,np.ma.MaskedArray)) else None
                         head_sci['COMPCENX'] = round(fitted_x2_pos + 1, 2) if (fitted_x2_pos is not None and not isinstance(fitted_x2_pos,np.ma.MaskedArray)) else None
                         head_sci['COMPCENY'] = round(fitted_y2_pos + 1, 2) if (fitted_y2_pos is not None and not isinstance(fitted_y2_pos,np.ma.MaskedArray)) else None
-                        head_sci['COMPFLUX'] = round(fitted_p2, 2)  if (fitted_p2 is not None and not isinstance(fitted_p2,np.ma.MaskedArray)) else None
+                        head_sci['COMPFLUX'] = round(fitted_p2, 2) if (fitted_p2 is not None and not np.isnan(fitted_p2)) else None
+                        head_sci['COMPMAG'] = round(mag_p2, 2) if (mag_p2 is not None and not np.isnan(mag_p2)) else None
                         head_sci['METHOD'] = det_method
                         head_sci['ROUND'] = round(roundness, 2) if (roundness is not None and not isinstance(roundness,np.ma.MaskedArray)) else None
                         head_sci['SHARP'] = round(sharpness, 2) if (sharpness is not None and not isinstance(sharpness,np.ma.MaskedArray)) else None
@@ -5309,17 +5312,23 @@ class ImageTools():
                 starcenx = [hdul['STARCENX'] for hdul in [sci_hdus_list[i] for i in success_list]]
                 starceny = [hdul['STARCENY'] for hdul in [sci_hdus_list[i] for i in success_list]]
                 starpeak = [hdul['STARFLUX'] for hdul in [sci_hdus_list[i] for i in success_list]]
+                starmag = [hdul['STARMAG'] for hdul in [sci_hdus_list[i] for i in success_list]]
                 good_idx = filter_companion_outliers_by_limits(starcenx, starceny, x_limits=x_limits, y_limits=y_limits)
                 starcenx = [starcenx[i] for i in good_idx]
                 starceny = [starceny[i] for i in good_idx]
                 starpeak = [starpeak[i] for i in good_idx]
+                starmag = [starmag[i] for i in good_idx]
 
                 sci_hdr['STARCENX'] = round(np.nanmean(starcenx), 2)
                 sci_hdr['STARCENY'] = round(np.nanmean(starceny), 2)
                 if len(starpeak)>0:
-                    sci_hdr['_STARFLUX'] = round(np.nanmean(starpeak), 2)
+                    sci_hdr['STARFLUX'] = round(np.nanmean(starpeak), 2)
                 else:
-                    sci_hdr['_STARFLUX'] = None
+                    sci_hdr['STARFLUX'] = None
+                if len(starmag)>0:
+                    sci_hdr['STARMAG'] = round(np.nanmean(starmag), 2)
+                else:
+                    sci_hdr['STARMAG'] = None
 
                 b_count = np.sum([hdul.get('BINTEST') for hdul in [sci_hdus_list[i] for i in success_list]])
                 f_count = len([sci_hdus_list[i] for i in success_list]) - b_count
@@ -5347,6 +5356,7 @@ class ImageTools():
                 sci_hdr['COMPCENX'] = round(np.nanmean(comp_x_list), 2) if is_binary else None
                 sci_hdr['COMPCENY'] = round(np.nanmean(comp_y_list), 2) if is_binary else None
                 sci_hdr['COMPFLUX'] = round(np.nanmean(comp_f_list), 2) if is_binary else None
+                sci_hdr['COMPMAG'] = round(np.nanmean([hdul['COMPMAG'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['COMPMAG'] is not None]), 2) if is_binary else None
                 sci_hdr['NSAT'] = round(np.nanmean([hdul['NSAT'] for hdul in [sci_hdus_list[i] for i in success_list] if hdul['NSAT'] is not None]), 2)
 
                 file_paths = [i.split('/')[-1] for i in catalog[catalog['group_id'] == group_i]['fitsfile']]
@@ -5358,10 +5368,12 @@ class ImageTools():
                     sci_hdr[f'STARCENX_{index}'] = hdul['STARCENX']
                     sci_hdr[f'STARCENY_{index}'] = hdul['STARCENY']
                     sci_hdr[f'STARFLUX_{index}'] = hdul['STARFLUX']
+                    sci_hdr[f'STARMAG_{index}'] = hdul['STARMAG']
                     sci_hdr[f'COMPID_{index}'] = hdul['COMPID']
                     sci_hdr[f'COMPCENX_{index}'] = hdul['COMPCENX']
                     sci_hdr[f'COMPCENY_{index}'] = hdul['COMPCENY']
                     sci_hdr[f'COMPFLUX_{index}'] = hdul['COMPFLUX']
+                    sci_hdr[f'COMPMAG_{index}'] = hdul['COMPMAG']
                     sci_hdr[f'METHOD_{index}'] = hdul['METHOD']
                     sci_hdr[f'NSAT_{index}'] = hdul['NSAT']
                     sci_hdr[f'CND_{index}'] = hdul['CND']
